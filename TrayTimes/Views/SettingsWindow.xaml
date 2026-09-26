@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ex:WindowEx
+    x:Class="TrayTimes.Views.SettingsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:TrayTimes.Controls"
+    xmlns:ex="using:WinUIEx"
+    xmlns:map="using:WinUIEx.Maps"
+    xmlns:models="using:TrayTimes.Models"
+    Title="Tray Times Settings"
+    IsMaximizable="False"
+    IsMinimizable="False">
+
+    <ex:WindowEx.SystemBackdrop>
+        <MicaBackdrop />
+    </ex:WindowEx.SystemBackdrop>
+
+    <ScrollViewer x:Name="Root">
+        <StackPanel Padding="28,24" Spacing="8">
+            <TextBlock
+                Margin="0,0,0,8"
+                Style="{StaticResource TitleTextBlockStyle}"
+                Text="Settings" />
+
+            <InfoBar
+                x:Name="KeyBar"
+                Title="No MCTS API key"
+                IsClosable="False"
+                IsOpen="False"
+                Message="Copy OAuth.resw.sample to OAuth.resw, paste your BusTime key into MctsApiKey, and rebuild."
+                Severity="Error" />
+
+            <!--  Commute  -->
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Commute" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="The flyout's Home and Work tabs show live arrivals at the stops closest to these places."
+                TextWrapping="Wrap" />
+            <controls:PlacePicker x:Name="HomePicker" Header="Home" PlaceChosen="HomePicker_PlaceChosen" />
+            <controls:PlacePicker x:Name="WorkPicker" Header="Work" PlaceChosen="WorkPicker_PlaceChosen" />
+
+            <!--  Saved stops  -->
+            <TextBlock
+                Margin="0,16,0,0"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="Your stops" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="Drag to reorder. The first three appear in the tray icon's tooltip."
+                TextWrapping="Wrap" />
+            <ListView
+                x:Name="SavedStopsList"
+                AllowDrop="True"
+                AutomationProperties.Name="Your stops"
+                CanDragItems="True"
+                CanReorderItems="True"
+                DragItemsCompleted="SavedStopsList_DragItemsCompleted"
+                SelectionMode="None">
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="models:SavedStop">
+                        <Grid Padding="0,6" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind StopName}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind Description}" />
+                            </StackPanel>
+                            <Button
+                                Grid.Column="1"
+                                AutomationProperties.Name="Remove stop"
+                                Click="RemoveStopButton_Click"
+                                Style="{StaticResource ToolbarButtonStyle}"
+                                ToolTipService.ToolTip="Remove">
+                                <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                            </Button>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+            <TextBlock
+                x:Name="NoStopsText"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="No stops yet. Add one below." />
+
+            <!--  Add a stop  -->
+            <TextBlock
+                Margin="0,16,0,0"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="Add a stop" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="Choose a route and direction, then pick a stop from the list or tap it on the map."
+                TextWrapping="Wrap" />
+            <ComboBox
+                x:Name="RouteBox"
+                MinWidth="320"
+                Header="Route"
+                IsEnabled="False"
+                PlaceholderText="Loading routes…"
+                SelectionChanged="RouteBox_SelectionChanged" />
+            <ComboBox
+                x:Name="DirectionBox"
+                MinWidth="320"
+                Header="Direction"
+                IsEnabled="False"
+                SelectionChanged="DirectionBox_SelectionChanged" />
+            <ComboBox
+                x:Name="StopBox"
+                MinWidth="320"
+                Header="Stop"
+                IsEnabled="False"
+                SelectionChanged="StopBox_SelectionChanged" />
+            <Grid
+                Height="280"
+                Margin="0,4,0,0"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+                <map:MapControl
+                    x:Name="PickerMap"
+                    AutomationProperties.Name="Map of the route's stops. Tap a stop to choose it."
+                    MapStyle="Road" />
+                <ProgressRing
+                    x:Name="PickerLoadingRing"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    AutomationProperties.Name="Loading stops"
+                    IsActive="False" />
+            </Grid>
+            <CheckBox x:Name="AllRoutesCheck" Content="Show every route that serves this stop" />
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <Button
+                    x:Name="AddStopButton"
+                    Click="AddStopButton_Click"
+                    Content="Add stop"
+                    IsEnabled="False"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <TextBlock
+                    x:Name="AddStatusText"
+                    VerticalAlignment="Center"
+                    AutomationProperties.LiveSetting="Polite"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+            <!--  General  -->
+            <TextBlock
+                Margin="0,16,0,0"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="General" />
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock
+                    x:Name="StopIndexText"
+                    VerticalAlignment="Center"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <Button
+                    x:Name="RebuildIndexButton"
+                    Click="RebuildIndexButton_Click"
+                    Content="Update now" />
+            </StackPanel>
+            <ToggleSwitch
+                x:Name="StartupToggle"
+                Header="Start with Windows"
+                Toggled="StartupToggle_Toggled" />
+            <TextBlock
+                x:Name="StartupStatusText"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                TextWrapping="Wrap"
+                Visibility="Collapsed" />
+
+            <!--  About  -->
+            <TextBlock
+                Margin="0,16,0,0"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="About" />
+            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap">
+                <Run Text="Arrival times and bus locations: Milwaukee County Transit System real-time BusTime API." />
+                <LineBreak />
+                <Run Text="Basemap: Azure Maps. Map control: WinUIEx.Maps by Morten Nielsen." />
+            </TextBlock>
+        </StackPanel>
+    </ScrollViewer>
+</ex:WindowEx>
