@@ -6,18 +6,17 @@ using TrayTimes.Transit;
 namespace TrayTimes.Services;
 
 /// <summary>
-/// Polls arrivals for the saved stops: often while the flyout is open, and slowly in the
-/// background so the tray tooltip stays current. Lives on the UI thread and raises
-/// <see cref="Updated"/> there.
+/// Polls arrivals for the saved stops while the flyout is open (browsing mode) and not at all
+/// otherwise. Lives on the UI thread and raises <see cref="Updated"/> there.
 /// </summary>
 internal sealed class ArrivalsMonitor
 {
-    private static readonly TimeSpan ForegroundInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan BackgroundInterval = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
 
     private readonly DispatcherQueueTimer _timer;
     private Task<IReadOnlyDictionary<string, TransitRoute>>? _routesTask;
     private bool _isForeground;
+    private bool _stopsChanged;
     private int _refreshGeneration;
 
     public ArrivalsMonitor(ITransitService service, DispatcherQueue dispatcher)
@@ -25,9 +24,9 @@ internal sealed class ArrivalsMonitor
         Service = service;
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = true;
-        _timer.Interval = BackgroundInterval;
+        _timer.Interval = RefreshInterval;
         _timer.Tick += (_, _) => _ = RefreshAsync();
-        SettingsService.StopsChanged += (_, _) => _ = RefreshAsync();
+        SettingsService.StopsChanged += OnStopsChanged;
     }
 
     public event EventHandler? Updated;
@@ -38,28 +37,35 @@ internal sealed class ArrivalsMonitor
 
     public bool IsLoading { get; private set; }
 
-    /// <summary>True while the flyout is open: poll faster, and refresh now if the data is stale.</summary>
+    /// <summary>True while the flyout is open: poll, and refresh now if the data is stale.</summary>
     public bool IsForeground
     {
         get => _isForeground;
         set
         {
             _isForeground = value;
-            _timer.Interval = value ? ForegroundInterval : BackgroundInterval;
-            if (value && (Latest.FetchedAt is not { } at || DateTimeOffset.Now - at > TimeSpan.FromSeconds(15)))
+            if (!value)
+            {
+                _timer.Stop();
+                return;
+            }
+
+            _timer.Start();
+            if (_stopsChanged || Latest.FetchedAt is not { } at || DateTimeOffset.Now - at > TimeSpan.FromSeconds(15))
             {
                 _ = RefreshAsync();
             }
         }
     }
 
-    public void Start()
+    /// <summary>Stops polling and drops the cached arrivals and route catalog (the flyout was closed).</summary>
+    public void Clear()
     {
-        _timer.Start();
-        _ = RefreshAsync();
+        IsForeground = false;
+        ++_refreshGeneration; // Drop any in-flight refresh.
+        _routesTask = null;
+        Publish(ArrivalsSnapshot.Empty);
     }
-
-    public void Stop() => _timer.Stop();
 
     /// <summary>Route metadata (display names and colors) keyed by route ID; fetched once per session.</summary>
     public async Task<IReadOnlyDictionary<string, TransitRoute>> GetRouteCatalogAsync()
@@ -81,6 +87,7 @@ internal sealed class ArrivalsMonitor
     {
         IReadOnlyList<SavedStop> stops = SettingsService.Stops;
         int generation = ++_refreshGeneration;
+        _stopsChanged = false;
 
         if (!Service.IsConfigured)
         {
@@ -99,7 +106,7 @@ internal sealed class ArrivalsMonitor
         ArrivalsSnapshot result;
         try
         {
-            string[] stopIds = stops.Select(s => s.StopId).Distinct().Take(Service.MaxStopsPerRequest).ToArray();
+            string[] stopIds = [.. stops.Select(s => s.StopId).Distinct().Take(Service.MaxStopsPerRequest)];
             IReadOnlyList<Arrival> arrivals = await Service.GetArrivalsAsync(stopIds);
             result = new ArrivalsSnapshot(DateTimeOffset.Now, arrivals, null);
         }
@@ -119,6 +126,18 @@ internal sealed class ArrivalsMonitor
         if (generation == _refreshGeneration)
         {
             Publish(result);
+        }
+    }
+
+    private void OnStopsChanged(object? sender, EventArgs e)
+    {
+        if (_isForeground)
+        {
+            _ = RefreshAsync();
+        }
+        else
+        {
+            _stopsChanged = true;
         }
     }
 

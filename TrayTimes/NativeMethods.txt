@@ -13,3 +13,8 @@ SHAppBarMessage
 Shell_NotifyIconGetRect
 AllowSetForegroundWindow
 RegNotifyChangeKeyValue
+CreateIconFromResourceEx
+DestroyIcon
+GetDpiForSystem
+GetSystemMetricsForDpi
+SetThreadExecutionState

@@ -16,7 +16,7 @@ namespace TrayTimes.Views;
 /// <summary>Map and route-color helpers shared by the flyout and the settings window.</summary>
 internal static class MapHelpers
 {
-    public const string BusGlyph = ""; // BusSolid
+    public const string BusEmoji = "🚍"; // Oncoming bus, in color so it stands out on the basemap
     public const string StopGlyph = ""; // CircleFill
 
     private static readonly Color FallbackRouteColor = Color.FromArgb(255, 0, 90, 158);
@@ -60,6 +60,14 @@ internal static class MapHelpers
         Glyph = glyph,
         FontSize = size,
         Foreground = new SolidColorBrush(color),
+    };
+
+    /// <summary>A full-color emoji map icon (FontIcon's default icon font has no emoji).</summary>
+    public static FontIcon CreateEmoji(string emoji, double size) => new()
+    {
+        Glyph = emoji,
+        FontSize = size,
+        FontFamily = new FontFamily("Segoe UI Emoji"),
     };
 
     /// <summary>

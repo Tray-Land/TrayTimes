@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using TrayTimes.Controls;
 using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
@@ -17,13 +19,14 @@ using MapPolyline = WinUIEx.Maps.MapPolyline;
 
 namespace TrayTimes.Views;
 
-/// <summary>Manages saved stops (route → direction → stop picker with a map) and app settings.</summary>
+/// <summary>Manages favorite places, favorite stops (route → direction → stop picker with a map), and app settings.</summary>
 public sealed partial class SettingsWindow : WindowEx
 {
     private readonly ArrivalsMonitor _monitor;
     private readonly StopIndexService _stopIndex;
     private readonly ITransitService _service;
     private readonly ObservableCollection<SavedStop> _savedStops = [];
+    private readonly Dictionary<PlacePicker, PlaceKind> _fixedPickers;
     private readonly MapElementsLayer _routeLayer = new();
     private readonly MapElementsLayer _stopLayer = new();
     private readonly Dictionary<MapIcon, TransitStop> _stopPins = [];
@@ -49,8 +52,8 @@ public sealed partial class SettingsWindow : WindowEx
         SettingsService.StopsChanged += OnStopsChanged;
         Closed += (_, _) => SettingsService.StopsChanged -= OnStopsChanged;
 
-        HomePicker.Place = SettingsService.Home;
-        WorkPicker.Place = SettingsService.Work;
+        _fixedPickers = new() { [HomePicker] = PlaceKind.Home, [WorkPicker] = PlaceKind.Work, [SchoolPicker] = PlaceKind.School };
+        LoadPlaces();
         _stopIndex.Changed += OnStopIndexChanged;
         Closed += (_, _) => _stopIndex.Changed -= OnStopIndexChanged;
         UpdateStopIndexText();
@@ -68,15 +71,147 @@ public sealed partial class SettingsWindow : WindowEx
         MapHelpers.ApplyBasemap(PickerMap, Root, null);
         FrameInitialView();
 
+        HeadOutBox.Minimum = SettingsService.MinHeadOutMinutes;
+        HeadOutBox.Maximum = SettingsService.MaxHeadOutMinutes;
+        HeadOutBox.Value = SettingsService.HeadOutMinutes;
+        KeepAwakeToggle.IsOn = SettingsService.KeepAwakeWhileTracking;
+
         KeyBar.IsOpen = !_service.IsConfigured;
         _ = LoadRoutesAsync();
         _ = LoadStartupStateAsync();
         _loading = false;
     }
 
-    private void HomePicker_PlaceChosen(object? sender, EventArgs e) => SettingsService.Home = HomePicker.Place;
+    private void LoadPlaces()
+    {
+        IReadOnlyList<FavoritePlace> places = SettingsService.Places;
+        foreach ((PlacePicker picker, PlaceKind kind) in _fixedPickers)
+        {
+            picker.Place = places.FirstOrDefault(p => p.Kind == kind)?.Place;
+        }
 
-    private void WorkPicker_PlaceChosen(object? sender, EventArgs e) => SettingsService.Work = WorkPicker.Place;
+        foreach (FavoritePlace place in places.Where(p => p.Kind == PlaceKind.Custom))
+        {
+            AddCustomPlaceRow(place);
+        }
+    }
+
+    private void FixedPlacePicker_PlaceChosen(object? sender, EventArgs e)
+    {
+        if (sender is not PlacePicker picker || !_fixedPickers.TryGetValue(picker, out PlaceKind kind))
+        {
+            return;
+        }
+
+        if (picker.Place is { } place)
+        {
+            SettingsService.SavePlace(FavoritePlace.ForKind(kind, place));
+        }
+        else
+        {
+            SettingsService.RemovePlace(kind.ToString());
+        }
+    }
+
+    private void AddPlaceButton_Click(object sender, RoutedEventArgs e) => AddCustomPlaceRow(null).Focus(FocusState.Programmatic);
+
+    /// <summary>
+    /// Adds a name box and address picker for a custom place. The place is saved once it has an
+    /// address, and kept up to date as its name or address changes. Returns the name box.
+    /// </summary>
+    private TextBox AddCustomPlaceRow(FavoritePlace? existing)
+    {
+        string id = existing?.Id ?? Guid.NewGuid().ToString("N");
+        TextBox nameBox = new()
+        {
+            Header = "Place name",
+            PlaceholderText = "Gym, the library, Grandma's…",
+            Text = existing?.Name ?? string.Empty,
+        };
+        Button removeButton = new()
+        {
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Content = new FontIcon { FontSize = 14, Glyph = "" }, // Delete
+            Style = (Style)Application.Current.Resources["ToolbarButtonStyle"],
+        };
+        PlacePicker picker = new() { Place = existing?.Place };
+
+        Grid nameRow = new() { ColumnSpacing = 8 };
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition());
+        nameRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(removeButton, 1);
+        nameRow.Children.Add(nameBox);
+        nameRow.Children.Add(removeButton);
+        StackPanel row = new() { Spacing = 4, Children = { nameRow, picker } };
+
+        string PlaceName() => string.IsNullOrWhiteSpace(nameBox.Text) ? "Custom place" : nameBox.Text.Trim();
+
+        void Label()
+        {
+            AutomationProperties.SetName(removeButton, $"Remove {PlaceName()}");
+            ToolTipService.SetToolTip(removeButton, $"Remove {PlaceName()}");
+            picker.AddressAutomationName = $"{PlaceName()} address";
+        }
+
+        void Save()
+        {
+            if (picker.Place is { } place)
+            {
+                SettingsService.SavePlace(new FavoritePlace(id, PlaceKind.Custom, PlaceName(), place));
+            }
+            else
+            {
+                SettingsService.RemovePlace(id);
+            }
+        }
+
+        nameBox.TextChanged += (_, _) =>
+        {
+            Label();
+            if (picker.Place is not null)
+            {
+                Save();
+            }
+        };
+        picker.PlaceChosen += (_, _) => Save();
+        removeButton.Click += (_, _) =>
+        {
+            SettingsService.RemovePlace(id);
+            CustomPlacesPanel.Children.Remove(row);
+            AddPlaceButton.Focus(FocusState.Programmatic);
+        };
+
+        Label();
+        CustomPlacesPanel.Children.Add(row);
+        return nameBox;
+    }
+
+    private void HeadOutBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        if (double.IsNaN(args.NewValue))
+        {
+            sender.Value = SettingsService.HeadOutMinutes; // Cleared or invalid entry: put the saved value back.
+            return;
+        }
+
+        SettingsService.HeadOutMinutes = (int)Math.Round(args.NewValue);
+    }
+
+    private void KeepAwakeToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        SettingsService.KeepAwakeWhileTracking = KeepAwakeToggle.IsOn;
+        App.Current.Tracker.ApplyKeepAwakeSetting();
+    }
 
     private void OnStopIndexChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(UpdateStopIndexText);
 
@@ -104,7 +239,7 @@ public sealed partial class SettingsWindow : WindowEx
 
     private void FrameInitialView()
     {
-        List<GeoPoint> saved = SettingsService.Stops.Select(s => new GeoPoint(s.Lat, s.Lon)).ToList();
+        List<GeoPoint> saved = [.. SettingsService.Stops.Select(s => new GeoPoint(s.Lat, s.Lon))];
         // Downtown Milwaukee until the user has stops of their own.
         _ = MapHelpers.FrameAsync(PickerMap, saved.Count > 0 ? saved : [new GeoPoint(43.0389, -87.9065)], MapAnimationKind.None, singlePointZoom: 12);
     }
@@ -137,7 +272,7 @@ public sealed partial class SettingsWindow : WindowEx
 
     private void RemoveStopButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is SavedStop stop)
+        if (sender is FrameworkElement { DataContext: SavedStop stop })
         {
             SettingsService.RemoveStop(stop);
         }
@@ -353,7 +488,7 @@ public sealed partial class SettingsWindow : WindowEx
         }
 
         _stopLayer.MapElements.AddRange(_stopPins.Keys);
-        _ = MapHelpers.FrameAsync(PickerMap, stops.Select(s => s.Location).ToList(), MapAnimationKind.Default);
+        _ = MapHelpers.FrameAsync(PickerMap, [.. stops.Select(s => s.Location)], MapAnimationKind.Default);
     }
 
     private async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId)

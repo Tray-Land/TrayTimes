@@ -6,7 +6,9 @@
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
-  IgnorableNamespaces="uap rescap uap5">
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+  IgnorableNamespaces="uap rescap uap5 com desktop">
 
   <Identity
     Name="62EBF802-930C-4BB6-91AC-D248033329A8"
@@ -47,6 +49,17 @@
         <uap5:Extension Category="windows.startupTask">
           <uap5:StartupTask TaskId="TrayTimesStartup" Enabled="false" DisplayName="Tray Times" />
         </uap5:Extension>
+        <!-- Routes clicks on bus-tracking notifications back to the app. -->
+        <desktop:Extension Category="windows.toastNotificationActivation">
+          <desktop:ToastNotificationActivation ToastActivatorCLSID="EFD7EFEE-87AE-44B4-8207-3456E222701D" />
+        </desktop:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:ExeServer Executable="TrayTimes.exe" Arguments="----AppNotificationActivated:" DisplayName="Tray Times notifications">
+              <com:Class Id="EFD7EFEE-87AE-44B4-8207-3456E222701D" />
+            </com:ExeServer>
+          </com:ComServer>
+        </com:Extension>
       </Extensions>
     </Application>
   </Applications>

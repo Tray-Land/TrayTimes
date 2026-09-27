@@ -1,9 +1,9 @@
 # Tray Times
 
-Click the tray icon for live Milwaukee County Transit System (MCTS) bus arrivals. Click away and the flyout closes. Hovering over the icon shows the next arrivals at your first three saved stops.
+Click the tray icon for live Milwaukee County Transit System (MCTS) bus arrivals. Click away and the flyout closes. Hovering over the icon shows the next arrivals at your first three favorite stops.
 
-- **Saved:** your stops, with arrivals, route lines, and the approaching buses on the map. Pick stops in Settings (Route → Direction → Stop, or tap a stop on the map), or star one from the other tabs.
-- **Home / Work:** the stops closest to your home and work addresses, with walking distance, the lines that serve each stop, and live arrivals. Set the addresses in Settings.
+- **Favorites:** your favorite stops, with arrivals, route lines, and the approaching buses on the map. Pick stops in Settings (Route → Direction → Stop, or tap a stop on the map), or star one from the other tabs.
+- **Commute:** the buses for your likely next trip. Away from home, it shows the buses that take you home; at home, the buses to work (or school, or your first custom place). It lists only routes that get there in one ride, heading the right way, within about a 10-minute walk at each end. If Windows location is off, it guesses from the time of day (mornings start at home). "Going to" picks a different place for now. Set your favorite places (Home, Work, School, and any custom ones) in Settings.
 - **Nearby:** the same view around your current location, from Windows location services. It dims buses that will leave before you can walk to the stop.
 - **Arrivals and bus locations:** the MCTS BusTime Developer API v3 (`realtime.ridemcts.com`). The API guide is `../DeveloperAPIGuide3_0.pdf`.
 - **Stop directory:** BusTime can't search stops by location. The app crawls every route's stops about once a week (around 100 requests) and caches them in LocalState. Settings has an "Update now" button.
@@ -14,7 +14,7 @@ The transit code sits behind `ITransitService` (`TrayTimes.Core/Transit/`), so a
 ## Project layout
 
 - `TrayTimes/`: the WinUI 3 app. `Views/` and `Controls/` hold the UI; `Services/` holds code that needs Windows (settings storage, location, the stop directory cache, tray placement).
-- `TrayTimes.Core/`: plain .NET code with no WinUI or Windows dependencies. `Transit/` has the provider-neutral models and the BusTime client; `Models/` has the saved stops, places, and arrival snapshots.
+- `TrayTimes.Core/`: plain .NET code with no WinUI or Windows dependencies. `Transit/` has the provider-neutral models and the BusTime client; `Models/` has the favorite stops and places and the arrival snapshots; `Commute/` works out the likely next trip and its direct routes.
 - `TrayTimes.Tests/`: MSTest unit tests for `TrayTimes.Core`, laid out to mirror it. Run them with `dotnet test TrayTimes.Tests`. They need no API key or package identity.
 
 ## Setup
@@ -25,4 +25,4 @@ The transit code sits behind `ITransitService` (`TrayTimes.Core/Transit/`), so a
 
 ## API budget
 
-The default key allows 10,000 requests a day. While the flyout is closed, arrivals refresh every 60 s (about 1,440 a day). While it's open, arrivals refresh every 30 s and bus positions every 15 s.
+The default key allows 10,000 requests a day. While the flyout is open, arrivals refresh every 30 s and bus positions every 15 s. A minute after it's dismissed the flyout closes and nothing refreshes, unless you're tracking a bus (the bell next to an arrival): then only that stop refreshes, every 60 s, then every 30 s under 10 minutes out and every 10 s under 5, until 5 minutes after the bus is due.

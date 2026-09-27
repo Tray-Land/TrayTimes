@@ -37,8 +37,15 @@ public sealed partial class PlacePicker : UserControl
         set
         {
             AddressBox.Header = value;
-            AutomationProperties.SetName(AddressBox, $"{value} address");
+            AddressAutomationName = $"{value} address";
         }
+    }
+
+    /// <summary>What screen readers call the address box; setting <see cref="Header"/> sets it to "{Header} address".</summary>
+    public string AddressAutomationName
+    {
+        get => AutomationProperties.GetName(AddressBox);
+        set => AutomationProperties.SetName(AddressBox, value);
     }
 
     public Place? Place

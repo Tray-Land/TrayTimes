@@ -32,7 +32,7 @@ public sealed class StopGroupItem(
 
     public Visibility EmptyVisibility => Arrivals.Count == 0 && EmptyText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>The directory stop behind a nearby result, which the star button saves.</summary>
+    /// <summary>The directory stop behind a Commute or Nearby result, which the star button adds to favorites.</summary>
     public IndexedStop? Saveable { get; } = saveable;
 
     public bool IsSaved { get; } = isSaved;
@@ -41,19 +41,27 @@ public sealed class StopGroupItem(
 
     public string SaveGlyph => IsSaved ? "" : ""; // FavoriteStarFill / FavoriteStar
 
-    public string SaveLabel => IsSaved ? $"Remove {Title} from your stops" : $"Save {Title} to your stops";
+    public string SaveLabel => IsSaved ? $"Remove {Title} from favorites" : $"Add {Title} to favorites";
 
     public string AutomationName => $"{Title}, {Subtitle}. Show on map";
+}
+
+/// <summary>Whether an arrival row offers the bell that starts tracking mode.</summary>
+public enum ArrivalTracking
+{
+    Unavailable,
+    Available,
+    Tracked,
 }
 
 /// <summary>One predicted arrival row.</summary>
 public sealed class ArrivalItem
 {
-    public ArrivalItem(Arrival arrival, GeoPoint stopLocation, Color routeColor, DateTimeOffset now, bool tooSoonToWalk = false)
+    public ArrivalItem(Arrival arrival, GeoPoint stopLocation, Color routeColor, DateTimeOffset now, bool tooSoonToWalk = false, ArrivalTracking tracking = ArrivalTracking.Unavailable)
     {
         Arrival = arrival;
+        Tracking = tracking;
         StopLocation = stopLocation;
-        RouteColor = routeColor;
         RouteBackground = new SolidColorBrush(routeColor);
         RouteForeground = new SolidColorBrush(MapHelpers.ContrastingText(routeColor));
 
@@ -82,8 +90,6 @@ public sealed class ArrivalItem
 
     public GeoPoint StopLocation { get; }
 
-    public Color RouteColor { get; }
-
     public string RouteLabel => Arrival.RouteDisplayId;
 
     public string Destination => string.IsNullOrEmpty(Arrival.Destination) ? $"Route {Arrival.RouteDisplayId}" : Arrival.Destination;
@@ -101,4 +107,16 @@ public sealed class ArrivalItem
     public double RowOpacity { get; }
 
     public string AutomationName { get; }
+
+    public ArrivalTracking Tracking { get; }
+
+    public bool IsTracked => Tracking == ArrivalTracking.Tracked;
+
+    public Visibility TrackVisibility => Tracking == ArrivalTracking.Unavailable ? Visibility.Collapsed : Visibility.Visible;
+
+    public string TrackGlyph => IsTracked ? "" : ""; // RingerSolid / Ringer
+
+    public string TrackLabel => IsTracked
+        ? $"Stop tracking route {RouteLabel}"
+        : $"Track route {RouteLabel} and notify me when it's time to leave";
 }

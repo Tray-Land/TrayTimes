@@ -55,6 +55,15 @@ internal sealed class StopIndexService(ITransitService service)
         }
     }
 
+    /// <summary>Drops the in-memory directory (it reloads from disk on next use), unless a build is running.</summary>
+    public void Unload()
+    {
+        if (!IsBuilding)
+        {
+            _loadTask = null;
+        }
+    }
+
     public Task<IReadOnlyList<IndexedStop>> RebuildAsync()
     {
         _loadTask = LoadOrBuildAsync(forceRebuild: true);

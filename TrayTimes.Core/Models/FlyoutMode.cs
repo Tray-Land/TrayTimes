@@ -1,10 +1,9 @@
 namespace TrayTimes.Models;
 
-/// <summary>What the flyout lists: saved stops, or stops near a place.</summary>
+/// <summary>What the flyout lists: favorite stops, the next commute leg, or stops near the device.</summary>
 public enum FlyoutMode
 {
-    Saved,
-    Home,
-    Work,
+    Favorites,
+    Commute,
     Nearby,
 }

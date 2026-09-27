@@ -30,21 +30,32 @@
                 Message="Copy OAuth.resw.sample to OAuth.resw, paste your BusTime key into MctsApiKey, and rebuild."
                 Severity="Error" />
 
-            <!--  Commute  -->
-            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Commute" />
+            <!--  Favorite places  -->
+            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Favorite places" />
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Style="{StaticResource CaptionTextBlockStyle}"
-                Text="The flyout's Home and Work tabs show live arrivals at the stops closest to these places."
+                Text="The flyout's Commute tab uses these to guess where you're headed next: home when you're out, and work (or school) when you're home."
                 TextWrapping="Wrap" />
-            <controls:PlacePicker x:Name="HomePicker" Header="Home" PlaceChosen="HomePicker_PlaceChosen" />
-            <controls:PlacePicker x:Name="WorkPicker" Header="Work" PlaceChosen="WorkPicker_PlaceChosen" />
+            <controls:PlacePicker x:Name="HomePicker" Header="Home" PlaceChosen="FixedPlacePicker_PlaceChosen" />
+            <controls:PlacePicker x:Name="WorkPicker" Header="Work" PlaceChosen="FixedPlacePicker_PlaceChosen" />
+            <controls:PlacePicker x:Name="SchoolPicker" Header="School" PlaceChosen="FixedPlacePicker_PlaceChosen" />
+            <StackPanel x:Name="CustomPlacesPanel" Spacing="8" />
+            <Button
+                x:Name="AddPlaceButton"
+                AutomationProperties.Name="Add a custom place"
+                Click="AddPlaceButton_Click">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon FontSize="14" Glyph="&#xE710;" />
+                    <TextBlock Text="Add a place" />
+                </StackPanel>
+            </Button>
 
             <!--  Saved stops  -->
             <TextBlock
                 Margin="0,16,0,0"
                 Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="Your stops" />
+                Text="Favorite stops" />
             <TextBlock
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Style="{StaticResource CaptionTextBlockStyle}"
@@ -53,7 +64,7 @@
             <ListView
                 x:Name="SavedStopsList"
                 AllowDrop="True"
-                AutomationProperties.Name="Your stops"
+                AutomationProperties.Name="Favorite stops"
                 CanDragItems="True"
                 CanReorderItems="True"
                 DragItemsCompleted="SavedStopsList_DragItemsCompleted"
@@ -150,6 +161,29 @@
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextWrapping="Wrap" />
             </StackPanel>
+
+            <!--  Tracking  -->
+            <TextBlock
+                Margin="0,16,0,0"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="Bus alerts" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="Ring the bell next to a bus to track it. Tray Times keeps its minutes away in the tray icon and notifies you when it's time to leave."
+                TextWrapping="Wrap" />
+            <NumberBox
+                x:Name="HeadOutBox"
+                MinWidth="200"
+                HorizontalAlignment="Left"
+                Header="Notify me this many minutes before the bus arrives"
+                SmallChange="1"
+                SpinButtonPlacementMode="Inline"
+                ValueChanged="HeadOutBox_ValueChanged" />
+            <ToggleSwitch
+                x:Name="KeepAwakeToggle"
+                Header="Keep the PC awake while tracking a bus"
+                Toggled="KeepAwakeToggle_Toggled" />
 
             <!--  General  -->
             <TextBlock

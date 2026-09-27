@@ -35,64 +35,81 @@
             </Storyboard>
 
             <DataTemplate x:Key="ArrivalTemplate" x:DataType="views:ArrivalItem">
-                <Button
-                    AutomationProperties.Name="{x:Bind AutomationName}"
-                    Click="ArrivalButton_Click"
-                    Opacity="{x:Bind RowOpacity}"
-                    Style="{StaticResource RowButtonStyle}"
-                    ToolTipService.ToolTip="Show this bus on the map">
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
+                <Grid ColumnSpacing="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Button
+                        AutomationProperties.Name="{x:Bind AutomationName}"
+                        Click="ArrivalButton_Click"
+                        Opacity="{x:Bind RowOpacity}"
+                        Style="{StaticResource RowButtonStyle}"
+                        ToolTipService.ToolTip="Show this bus on the map">
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
 
-                        <Border
-                            MinWidth="44"
-                            Height="28"
-                            Padding="6,0"
-                            VerticalAlignment="Center"
-                            Background="{x:Bind RouteBackground}"
-                            CornerRadius="4">
-                            <TextBlock
-                                HorizontalAlignment="Center"
+                            <Border
+                                MinWidth="44"
+                                Height="28"
+                                Padding="6,0"
                                 VerticalAlignment="Center"
-                                Foreground="{x:Bind RouteForeground}"
-                                Style="{StaticResource BodyStrongTextBlockStyle}"
-                                Text="{x:Bind RouteLabel}" />
-                        </Border>
+                                Background="{x:Bind RouteBackground}"
+                                CornerRadius="4">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Foreground="{x:Bind RouteForeground}"
+                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                    Text="{x:Bind RouteLabel}" />
+                            </Border>
 
-                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                            <TextBlock
-                                Text="{x:Bind Destination}"
-                                TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap" />
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="{x:Bind DetailText}"
-                                TextTrimming="CharacterEllipsis" />
-                        </StackPanel>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock
+                                    Text="{x:Bind Destination}"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="NoWrap" />
+                                <TextBlock
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind DetailText}"
+                                    TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
 
-                        <StackPanel
-                            Grid.Column="2"
-                            VerticalAlignment="Center"
-                            Orientation="Horizontal"
-                            Spacing="3">
-                            <TextBlock
-                                VerticalAlignment="Bottom"
-                                Style="{StaticResource SubtitleTextBlockStyle}"
-                                Text="{x:Bind MinutesText}" />
-                            <TextBlock
-                                Margin="0,0,0,3"
-                                VerticalAlignment="Bottom"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Style="{StaticResource CaptionTextBlockStyle}"
-                                Text="{x:Bind UnitText}" />
-                        </StackPanel>
-                    </Grid>
-                </Button>
+                            <StackPanel
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                Orientation="Horizontal"
+                                Spacing="3">
+                                <TextBlock
+                                    VerticalAlignment="Bottom"
+                                    Style="{StaticResource SubtitleTextBlockStyle}"
+                                    Text="{x:Bind MinutesText}" />
+                                <TextBlock
+                                    Margin="0,0,0,3"
+                                    VerticalAlignment="Bottom"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind UnitText}" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <!--  Tracking mode: follow this bus and alert when it's time to head out  -->
+                    <Button
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="{x:Bind TrackLabel}"
+                        Click="TrackButton_Click"
+                        Style="{StaticResource ToolbarButtonStyle}"
+                        ToolTipService.ToolTip="{x:Bind TrackLabel}"
+                        Visibility="{x:Bind TrackVisibility}">
+                        <FontIcon FontSize="16" Glyph="{x:Bind TrackGlyph}" />
+                    </Button>
+                </Grid>
             </DataTemplate>
 
             <DataTemplate x:Key="StopGroupTemplate" x:DataType="views:StopGroupItem">
@@ -204,25 +221,20 @@
             </Button>
         </Grid>
 
-        <!--  What to list: saved stops, or stops near home, work, or the device  -->
+        <!--  What to list: favorite stops, buses to the likely next place, or stops near the device  -->
         <SelectorBar
             x:Name="ModeBar"
             Grid.Row="1"
             Margin="6,0"
             SelectionChanged="ModeBar_SelectionChanged">
-            <SelectorBarItem Text="Saved">
+            <SelectorBarItem Text="Favorites">
                 <SelectorBarItem.Icon>
                     <FontIcon Glyph="&#xE734;" />
                 </SelectorBarItem.Icon>
             </SelectorBarItem>
-            <SelectorBarItem Text="Home">
+            <SelectorBarItem Text="Commute">
                 <SelectorBarItem.Icon>
-                    <FontIcon Glyph="&#xE80F;" />
-                </SelectorBarItem.Icon>
-            </SelectorBarItem>
-            <SelectorBarItem Text="Work">
-                <SelectorBarItem.Icon>
-                    <FontIcon Glyph="&#xE821;" />
+                    <FontIcon Glyph="&#xE806;" />
                 </SelectorBarItem.Icon>
             </SelectorBarItem>
             <SelectorBarItem Text="Nearby">
@@ -268,23 +280,69 @@
         <Grid Grid.Row="3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
+            <!--  Commute: where the rider is likely headed, with a way to pick somewhere else  -->
+            <Grid
+                x:Name="CommuteHeader"
+                Padding="14,8,8,0"
+                ColumnSpacing="10"
+                Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon
+                    x:Name="CommuteGlyph"
+                    VerticalAlignment="Center"
+                    AutomationProperties.AccessibilityView="Raw"
+                    FontSize="20"
+                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="CommuteTitle"
+                        AutomationProperties.LiveSetting="Polite"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        x:Name="CommuteSubtitle"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+                <DropDownButton
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    AutomationProperties.Name="Choose where you're going"
+                    Content="Going to"
+                    ToolTipService.ToolTip="Going somewhere else?">
+                    <DropDownButton.Flyout>
+                        <MenuFlyout
+                            x:Name="DestinationMenu"
+                            Opening="DestinationMenu_Opening"
+                            Placement="BottomEdgeAlignedRight" />
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+            </Grid>
+
             <InfoBar
                 x:Name="StatusBar"
+                Grid.Row="1"
                 Margin="8,8,8,0"
                 IsClosable="False"
                 IsOpen="False"
                 Severity="Warning" />
 
-            <ScrollViewer Grid.Row="1" Padding="6,8,6,4">
+            <ScrollViewer Grid.Row="2" Padding="6,8,6,4">
                 <ItemsControl x:Name="StopsList" ItemTemplate="{StaticResource StopGroupTemplate}" />
             </ScrollViewer>
 
             <StackPanel
                 x:Name="EmptyState"
-                Grid.Row="1"
+                Grid.Row="2"
                 Padding="24"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
