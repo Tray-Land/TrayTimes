@@ -120,6 +120,47 @@ public sealed class EtaIconTests
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => EtaIcon.Create(1, size, Background, Foreground));
     }
 
+    [TestMethod]
+    public void Create_FullCoverageCenter_IsForeground()
+    {
+        // Arrange
+        const int size = 32;
+        byte[] coverage = new byte[size * size];
+        coverage[((size / 2) * size) + (size / 2)] = 255;
+
+        // Act
+        byte[] ico = EtaIcon.Create(coverage, size, Background, Foreground);
+
+        // Assert
+        Assert.AreEqual(Foreground, Pixel(ico, size, size / 2, size / 2));
+        Assert.AreEqual(Background, Pixel(ico, size, (size / 2) + 1, size / 2));
+    }
+
+    [TestMethod]
+    public void Create_HalfCoverage_MixesColors()
+    {
+        // Arrange
+        const int size = 16;
+        byte[] coverage = new byte[size * size];
+        Array.Fill(coverage, (byte)128);
+
+        // Act
+        byte[] ico = EtaIcon.Create(coverage, size, 0xFF000000, 0xFFFFFFFF);
+
+        // Assert
+        Assert.AreEqual(0xFF808080, Pixel(ico, size, size / 2, size / 2));
+    }
+
+    [TestMethod]
+    public void Create_CoverageWrongLength_Throws()
+    {
+        // Arrange
+        byte[] coverage = new byte[10];
+
+        // Act & Assert
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => EtaIcon.Create(coverage, 16, Background, Foreground));
+    }
+
     /// <summary>Reads pixel (x, y), top-down, back out of the bottom-up BGRA bitmap as 0xAARRGGBB.</summary>
     private static uint Pixel(byte[] ico, int size, int x, int y)
     {

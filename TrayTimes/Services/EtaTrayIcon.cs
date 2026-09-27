@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.UI;
 using TrayTimes.Tracking;
 using Windows.Win32;
@@ -23,7 +24,11 @@ internal sealed class EtaTrayIcon
     public void Show(TrayIcon trayIcon, int minutes, bool urgent)
     {
         int size = PInvoke.GetSystemMetricsForDpi(SYSTEM_METRICS_INDEX.SM_CXSMICON, PInvoke.GetDpiForSystem());
-        byte[] ico = EtaIcon.Create(minutes, size, urgent ? Red : Blue, White);
+        uint background = urgent ? Red : Blue;
+        string text = Math.Clamp(minutes, 0, 99).ToString(CultureInfo.InvariantCulture);
+        byte[] ico = EtaFont.Render(text, size) is { } coverage
+            ? EtaIcon.Create(coverage, size, background, White)
+            : EtaIcon.Create(minutes, size, background, White);
 
         HICON icon;
         nint handle;

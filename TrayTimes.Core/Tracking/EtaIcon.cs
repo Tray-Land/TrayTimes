@@ -45,6 +45,27 @@ public static class EtaIcon
         return Encode(pixels, size);
     }
 
+    /// <summary>Draws the badge with text rendered elsewhere (e.g. in a real font) instead of the pixel font.</summary>
+    /// <param name="textCoverage">Text coverage per pixel, 0-255, row-major top-down; <paramref name="size"/> squared long.</param>
+    /// <param name="size">Icon width and height in pixels (1-255).</param>
+    /// <param name="background">Badge color as 0xAARRGGBB.</param>
+    /// <param name="foreground">Text color as 0xAARRGGBB.</param>
+    public static byte[] Create(ReadOnlySpan<byte> textCoverage, int size, uint background, uint foreground)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(size, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(size, 255);
+        ArgumentOutOfRangeException.ThrowIfNotEqual(textCoverage.Length, size * size, nameof(textCoverage));
+
+        uint[] pixels = new uint[size * size];
+        FillRoundedSquare(pixels, size, background);
+        for (int i = 0; i < pixels.Length; i++)
+        {
+            pixels[i] = Blend(pixels[i], foreground, textCoverage[i]);
+        }
+
+        return Encode(pixels, size);
+    }
+
     private static byte[][] GlyphsFor(int minutes)
     {
         int clamped = Math.Clamp(minutes, 0, 99);
@@ -100,6 +121,20 @@ public static class EtaIcon
                 pixels[(y * size) + x] = color;
             }
         }
+    }
+
+    /// <summary>Mixes <paramref name="top"/> over <paramref name="bottom"/> by <paramref name="coverage"/>/255, per channel.</summary>
+    private static uint Blend(uint bottom, uint top, byte coverage)
+    {
+        uint result = 0;
+        for (int shift = 0; shift < 32; shift += 8)
+        {
+            int from = (int)((bottom >> shift) & 0xFF);
+            int to = (int)((top >> shift) & 0xFF);
+            result |= (uint)(from + (int)Math.Round((to - from) * coverage / 255.0)) << shift;
+        }
+
+        return result;
     }
 
     private static uint WithAlpha(uint color, double coverage) =>
