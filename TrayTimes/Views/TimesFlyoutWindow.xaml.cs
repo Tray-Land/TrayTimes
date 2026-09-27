@@ -39,6 +39,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const int ArrivalsPerNearbyStop = 3;
     private const int MaxNearbyStops = 8;
     private const double WalkingMetersPerMinute = 80; // about 3 mph
+    private const double MovedMeters = 25; // Closer than this, a new fix doesn't change which stops are near.
     private static readonly TimeSpan LocationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RecentDismissWindow = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan VehicleRefreshInterval = TimeSpan.FromSeconds(15);
@@ -418,43 +419,31 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         try
         {
-            PlaceStops found = !_monitor.Service.IsConfigured
-                ? PlaceStops.Unavailable(new Notice("API key needed", $"Add your {_monitor.Service.AgencyName} key to OAuth.resw and rebuild."))
-                : mode == FlyoutMode.Commute ? await FindCommuteStopsAsync() : await FindNearbyStopsAsync();
-            string[] stopIds = [.. found.Stops.Select(n => n.Stop.Id)];
-            IReadOnlyList<Arrival> arrivals = stopIds.Length == 0 ? [] : _monitor.Schedule.AddScheduled(await _monitor.Service.GetArrivalsAsync(stopIds), stopIds);
-            if (found.Stops.Count > 0 && _routes.Count == 0)
+            if (!_monitor.Service.IsConfigured)
             {
-                _routes = await _monitor.GetRouteCatalogAsync();
-            }
-
-            if (Stale())
-            {
+                await ShowPlaceAsync(PlaceStops.Unavailable(new Notice("API key needed", $"Add your {_monitor.Service.AgencyName} key to OAuth.resw and rebuild.")), reframe, Stale);
                 return;
             }
 
-            bool moved = _placeOrigin is not { } previous || found.Origin is not { } origin
-                || GeoMath.DistanceMeters(previous, origin) > 25
-                || _commuteLeg?.To.Id != found.Leg?.To.Id;
-            _placeOrigin = found.Origin;
-            _placeStops = found.Stops;
-            _placeArrivals = arrivals;
-            _commuteLeg = found.Leg;
-            _directRoutes = found.DirectRoutes ?? new HashSet<RouteDirection>();
-            _placeFetchedAt = found.Origin is null ? null : DateTimeOffset.Now;
-            _placeError = null;
-            _placeNotice = found.Stops.Count == 0 ? found.EmptyNotice : null;
-
-            if (moved)
+            // Warm the stop directory and route list while the location comes in.
+            _ = _stopIndex.GetAsync();
+            if (_routes.Count == 0)
             {
-                RebuildStopPins();
-                ShowPlaceMarkers(found);
-                DrawCommuteRoutes();
+                _ = _monitor.GetRouteCatalogAsync();
             }
 
-            if (reframe)
+            // On opening, a rough fix gets the list up quickly; the precise one then corrects it if it
+            // lands elsewhere. Refreshes already have a precise origin, so they wait for another.
+            string? locationError = null;
+            (GeoPoint? here, Task<GeoPoint?>? refined) = _placeOrigin is null
+                ? await LocationService.TryGetQuickLocationAsync(LocationTimeout, message => locationError = message)
+                : (await LocationService.TryGetDeviceLocationAsync(LocationTimeout, message => locationError = message), null);
+            await ShowPlaceAsync(await FindPlaceStopsAsync(mode, here, locationError), reframe, Stale);
+
+            if (refined is not null && await refined is { } precise && here is { } rough
+                && GeoMath.DistanceMeters(rough, precise) > MovedMeters && !Stale())
             {
-                _ = FrameListedStopsAsync(MapAnimationKind.None);
+                await ShowPlaceAsync(await FindPlaceStopsAsync(mode, precise, null), reframe, Stale);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
@@ -477,13 +466,57 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
-    private async Task<PlaceStops> FindNearbyStopsAsync()
+    /// <summary>Fetches the found stops' arrivals and shows them, unless the load has gone stale meanwhile.</summary>
+    private async Task ShowPlaceAsync(PlaceStops found, bool reframe, Func<bool> stale)
     {
-        string? error = null;
-        GeoPoint? here = await LocationService.TryGetDeviceLocationAsync(LocationTimeout, message => error = message);
+        string[] stopIds = [.. found.Stops.Select(n => n.Stop.Id)];
+        IReadOnlyList<Arrival> arrivals = stopIds.Length == 0 ? [] : _monitor.Schedule.AddScheduled(await _monitor.Service.GetArrivalsAsync(stopIds), stopIds);
+        if (found.Stops.Count > 0 && _routes.Count == 0)
+        {
+            _routes = await _monitor.GetRouteCatalogAsync();
+        }
+
+        if (stale())
+        {
+            return;
+        }
+
+        bool moved = _placeOrigin is not { } previous || found.Origin is not { } origin
+            || GeoMath.DistanceMeters(previous, origin) > MovedMeters
+            || _commuteLeg?.To.Id != found.Leg?.To.Id;
+        _placeOrigin = found.Origin;
+        _placeStops = found.Stops;
+        _placeArrivals = arrivals;
+        _commuteLeg = found.Leg;
+        _directRoutes = found.DirectRoutes ?? new HashSet<RouteDirection>();
+        _placeFetchedAt = found.Origin is null ? null : DateTimeOffset.Now;
+        _placeError = null;
+        _placeNotice = found.Stops.Count == 0 ? found.EmptyNotice : null;
+
+        if (moved)
+        {
+            RebuildStopPins();
+            ShowPlaceMarkers(found);
+            DrawCommuteRoutes();
+        }
+
+        if (reframe)
+        {
+            _ = FrameListedStopsAsync(MapAnimationKind.None);
+        }
+
+        Render();
+        _ = RefreshVehiclesAsync();
+    }
+
+    private Task<PlaceStops> FindPlaceStopsAsync(FlyoutMode mode, GeoPoint? here, string? locationError) =>
+        mode == FlyoutMode.Commute ? FindCommuteStopsAsync(here) : FindNearbyStopsAsync(here, locationError);
+
+    private async Task<PlaceStops> FindNearbyStopsAsync(GeoPoint? here, string? locationError)
+    {
         if (here is not { } point)
         {
-            return PlaceStops.Unavailable(new Notice("Can't find your location", error ?? "Try again in a moment.", "Try again", () => EnterMode(reframe: true)));
+            return PlaceStops.Unavailable(new Notice("Can't find your location", locationError ?? "Try again in a moment.", "Try again", () => EnterMode(reframe: true)));
         }
 
         IReadOnlyList<NearbyStop> stops = NearbyStop.Find(await _stopIndex.GetAsync(), point, MaxNearbyStops);
@@ -494,7 +527,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// Works out where the rider is likely headed next, then finds the stops near them with a bus
     /// that gets there in one ride.
     /// </summary>
-    private async Task<PlaceStops> FindCommuteStopsAsync()
+    /// <param name="here">The device's location, or null (it's off, or the PC can't tell), in which case the planner guesses from the time of day.</param>
+    private async Task<PlaceStops> FindCommuteStopsAsync(GeoPoint? here)
     {
         IReadOnlyList<FavoritePlace> places = SettingsService.Places;
         Notice setUp = new(
@@ -507,8 +541,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return PlaceStops.Unavailable(setUp);
         }
 
-        // No location (it's off, or the PC can't tell) is fine: the planner guesses from the time of day.
-        GeoPoint? here = await LocationService.TryGetDeviceLocationAsync(LocationTimeout);
         CommuteLeg? leg = CommutePlanner.Plan(places, here, DateTimeOffset.Now, places.FirstOrDefault(p => p.Id == _destinationId));
         if (leg is null)
         {
