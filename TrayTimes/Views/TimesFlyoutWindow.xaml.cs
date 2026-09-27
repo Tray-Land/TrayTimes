@@ -740,6 +740,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             : $" · {string.Join(", ", lines.Take(5))} +{lines.Length - 5}";
         string subtitle = $"{FormatDistance(nearby.Meters)} · {walkMinutes} min walk{lineText}";
 
+        // Stops on opposite sides of a street share a name, so say which way the buses go.
+        string[] directions = [.. stop.Routes
+            .Where(r => Listed(r.RouteId, r.DirectionId))
+            .Select(r => FormatDirection(r.DirectionName))
+            .Where(d => d.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)];
+        string title = directions.Length == 0 ? stop.Name : $"{stop.Name} · {string.Join("/", directions)}";
+
         // Only a list from the rider's real location can flag buses they can't walk to in time.
         bool checkWalk = _mode == FlyoutMode.Nearby || (commute && _commuteLeg is { IsGuess: false });
         List<ArrivalItem> arrivals = [.. _placeArrivals
@@ -753,8 +761,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                 tooSoonToWalk: checkWalk && a.Status != ArrivalStatus.Canceled && a.MinutesAway(now) < walkMinutes,
                 tracking: TrackingFor(a, tracked)))];
 
-        return new StopGroupItem(stop.Id, stop.Name, subtitle, stop.Location, arrivals, emptyText, stop, isSaved);
+        return new StopGroupItem(stop.Id, title, subtitle, stop.Location, arrivals, emptyText, stop, isSaved);
     }
+
+    /// <summary>BusTime's "NORTH" as "North".</summary>
+    private static string FormatDirection(string direction) =>
+        CultureInfo.CurrentCulture.TextInfo.ToTitleCase(direction.Trim().ToLower(CultureInfo.CurrentCulture));
 
     private static ArrivalTracking TrackingFor(Arrival arrival, Arrival? tracked) =>
         arrival == tracked ? ArrivalTracking.Tracked
