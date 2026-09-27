@@ -7,6 +7,7 @@ Click the tray icon for live Milwaukee County Transit System (MCTS) bus arrivals
 - **Nearby:** the same view around your current location, from Windows location services. It dims buses that will leave before you can walk to the stop.
 - **Arrivals and bus locations:** the MCTS BusTime Developer API v3 (`realtime.ridemcts.com`). The API guide is `../DeveloperAPIGuide3_0.pdf`.
 - **Stop directory:** BusTime can't search stops by location. The app crawls every route's stops about once a week (around 100 requests) and caches them in LocalState. Settings has an "Update now" button.
+- **Scheduled times:** MCTS's GTFS timetable (`kamino.mcts.org/gtfs/google_transit.zip`, about 9 MB). It's downloaded to LocalState, checked for updates weekly, and read into memory while the flyout is open. Where BusTime has no prediction (it only looks about 30 to 60 minutes ahead), rows show the scheduled time instead, labeled "Scheduled" and without the tracking bell. The GTFS route and direction IDs are matched to BusTime's using the stop directory.
 - **Basemap and address search:** Azure Maps, with the map rendered by [WinUIEx.Maps](https://github.com/dotMorten/WinUIEx.Maps).
 
 The transit code sits behind `ITransitService` (`TrayTimes.Core/Transit/`), so another provider such as Transit.app can be added later without changing the UI.
@@ -14,7 +15,7 @@ The transit code sits behind `ITransitService` (`TrayTimes.Core/Transit/`), so a
 ## Project layout
 
 - `TrayTimes/`: the WinUI 3 app. `Views/` and `Controls/` hold the UI; `Services/` holds code that needs Windows (settings storage, location, the stop directory cache, tray placement).
-- `TrayTimes.Core/`: plain .NET code with no WinUI or Windows dependencies. `Transit/` has the provider-neutral models and the BusTime client; `Models/` has the favorite stops and places and the arrival snapshots; `Commute/` works out the likely next trip and its direct routes.
+- `TrayTimes.Core/`: plain .NET code with no WinUI or Windows dependencies. `Transit/` has the provider-neutral models, the BusTime client, and the GTFS timetable reader; `Models/` has the favorite stops and places and the arrival snapshots; `Commute/` works out the likely next trip and its direct routes.
 - `TrayTimes.Tests/`: MSTest unit tests for `TrayTimes.Core`, laid out to mirror it. Run them with `dotnet test TrayTimes.Tests`. They need no API key or package identity.
 
 ## Setup

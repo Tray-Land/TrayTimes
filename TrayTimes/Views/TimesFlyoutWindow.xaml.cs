@@ -140,6 +140,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _monitor.Updated += OnArrivalsUpdated;
         _tracker.Changed += OnTrackingChanged;
         _stopIndex.Changed += OnStopIndexChanged;
+        _monitor.Schedule.Loaded += OnScheduleLoaded;
         SettingsService.StopsChanged += OnStopsChanged;
         SettingsService.PlacesChanged += OnPlacesChanged;
 
@@ -219,6 +220,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _monitor.Updated -= OnArrivalsUpdated;
         _tracker.Changed -= OnTrackingChanged;
         _stopIndex.Changed -= OnStopIndexChanged;
+        _monitor.Schedule.Loaded -= OnScheduleLoaded;
         SettingsService.StopsChanged -= OnStopsChanged;
         SettingsService.PlacesChanged -= OnPlacesChanged;
         Close();
@@ -419,7 +421,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             PlaceStops found = !_monitor.Service.IsConfigured
                 ? PlaceStops.Unavailable(new Notice("API key needed", $"Add your {_monitor.Service.AgencyName} key to OAuth.resw and rebuild."))
                 : mode == FlyoutMode.Commute ? await FindCommuteStopsAsync() : await FindNearbyStopsAsync();
-            IReadOnlyList<Arrival> arrivals = found.Stops.Count == 0 ? [] : await _monitor.Service.GetArrivalsAsync([.. found.Stops.Select(n => n.Stop.Id)]);
+            string[] stopIds = [.. found.Stops.Select(n => n.Stop.Id)];
+            IReadOnlyList<Arrival> arrivals = stopIds.Length == 0 ? [] : _monitor.Schedule.AddScheduled(await _monitor.Service.GetArrivalsAsync(stopIds), stopIds);
             if (found.Stops.Count > 0 && _routes.Count == 0)
             {
                 _routes = await _monitor.GetRouteCatalogAsync();
@@ -755,7 +758,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private static ArrivalTracking TrackingFor(Arrival arrival, Arrival? tracked) =>
         arrival == tracked ? ArrivalTracking.Tracked
-        : arrival.Status == ArrivalStatus.Canceled ? ArrivalTracking.Unavailable
+        : arrival.Status == ArrivalStatus.Canceled || !arrival.IsRealTime ? ArrivalTracking.Unavailable
         : ArrivalTracking.Available;
 
     private static string FormatDistance(double meters)
@@ -813,6 +816,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (_isPopupVisible && _mode != FlyoutMode.Favorites)
         {
             Render();
+        }
+    });
+
+    /// <summary>Scheduled times are now available: refetch the Commute/Nearby list to include them (Favorites refreshes itself).</summary>
+    private void OnScheduleLoaded(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (_isPopupVisible && _mode != FlyoutMode.Favorites && !_allowClose)
+        {
+            _ = LoadPlaceAsync(reframe: false);
         }
     });
 

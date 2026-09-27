@@ -7,7 +7,8 @@ namespace TrayTimes.Services;
 
 /// <summary>
 /// Polls arrivals for the saved stops while the flyout is open (browsing mode) and not at all
-/// otherwise. Lives on the UI thread and raises <see cref="Updated"/> there.
+/// otherwise, filling in scheduled times beyond the predictions. Lives on the UI thread and raises
+/// <see cref="Updated"/> there.
 /// </summary>
 internal sealed class ArrivalsMonitor
 {
@@ -15,23 +16,34 @@ internal sealed class ArrivalsMonitor
 
     private readonly DispatcherQueueTimer _timer;
     private Task<IReadOnlyDictionary<string, TransitRoute>>? _routesTask;
+    private IReadOnlyList<Arrival> _live = [];
     private bool _isForeground;
     private bool _stopsChanged;
     private int _refreshGeneration;
 
-    public ArrivalsMonitor(ITransitService service, DispatcherQueue dispatcher)
+    public ArrivalsMonitor(ITransitService service, ScheduleService schedule, DispatcherQueue dispatcher)
     {
         Service = service;
+        Schedule = schedule;
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = true;
         _timer.Interval = RefreshInterval;
         _timer.Tick += (_, _) => _ = RefreshAsync();
         SettingsService.StopsChanged += OnStopsChanged;
+        schedule.Loaded += (_, _) => dispatcher.TryEnqueue(() =>
+        {
+            if (_isForeground)
+            {
+                _ = RefreshAsync();
+            }
+        });
     }
 
     public event EventHandler? Updated;
 
     public ITransitService Service { get; }
+
+    public ScheduleService Schedule { get; }
 
     public ArrivalsSnapshot Latest { get; private set; } = ArrivalsSnapshot.Empty;
 
@@ -64,6 +76,7 @@ internal sealed class ArrivalsMonitor
         IsForeground = false;
         ++_refreshGeneration; // Drop any in-flight refresh.
         _routesTask = null;
+        _live = [];
         Publish(ArrivalsSnapshot.Empty);
     }
 
@@ -104,11 +117,16 @@ internal sealed class ArrivalsMonitor
         IsLoading = true;
         Updated?.Invoke(this, EventArgs.Empty);
         ArrivalsSnapshot result;
+        string[] stopIds = [.. stops.Select(s => s.StopId).Distinct().Take(Service.MaxStopsPerRequest)];
         try
         {
-            string[] stopIds = [.. stops.Select(s => s.StopId).Distinct().Take(Service.MaxStopsPerRequest)];
-            IReadOnlyList<Arrival> arrivals = await Service.GetArrivalsAsync(stopIds);
-            result = new ArrivalsSnapshot(DateTimeOffset.Now, arrivals, null);
+            IReadOnlyList<Arrival> live = await Service.GetArrivalsAsync(stopIds);
+            if (generation == _refreshGeneration)
+            {
+                _live = live;
+            }
+
+            result = new ArrivalsSnapshot(DateTimeOffset.Now, Schedule.AddScheduled(live, stopIds), null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
@@ -119,8 +137,8 @@ internal sealed class ArrivalsMonitor
                 _ => $"Can't reach {Service.AgencyName} right now. Retrying shortly.",
             };
 
-            // Keep showing the last good arrivals alongside the error.
-            result = Latest with { Error = message };
+            // Keep showing the last good predictions, and the schedule, alongside the error.
+            result = new ArrivalsSnapshot(Latest.FetchedAt, Schedule.AddScheduled(_live, stopIds), message);
         }
 
         if (generation == _refreshGeneration)

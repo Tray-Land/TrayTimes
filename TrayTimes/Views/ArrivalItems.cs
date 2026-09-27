@@ -54,7 +54,7 @@ public enum ArrivalTracking
     Tracked,
 }
 
-/// <summary>One predicted arrival row.</summary>
+/// <summary>One arrival row: a prediction, or a scheduled time with no prediction yet.</summary>
 public sealed class ArrivalItem
 {
     public ArrivalItem(Arrival arrival, GeoPoint stopLocation, Color routeColor, DateTimeOffset now, bool tooSoonToWalk = false, ArrivalTracking tracking = ArrivalTracking.Unavailable)
@@ -78,7 +78,13 @@ public sealed class ArrivalItem
             _ when tooSoonToWalk => "Too soon to walk there",
             _ => null,
         };
-        string kind = arrival.IsDeparture ? "Departs" : "Arrives";
+        string kind = (arrival.IsRealTime, arrival.IsDeparture) switch
+        {
+            (false, true) => "Scheduled to depart",
+            (false, false) => "Scheduled",
+            (true, true) => "Departs",
+            (true, false) => "Arrives",
+        };
         DetailText = status is null ? $"{kind} {clock}" : $"{kind} {clock} · {status}";
         RowOpacity = arrival.Status == ArrivalStatus.Canceled || tooSoonToWalk ? 0.5 : 1;
 
@@ -105,6 +111,9 @@ public sealed class ArrivalItem
     public string DetailText { get; }
 
     public double RowOpacity { get; }
+
+    /// <summary>Scheduled-only times are dimmed a little to set them apart from predictions.</summary>
+    public double EtaOpacity => Arrival.IsRealTime ? 1 : 0.85;
 
     public string AutomationName { get; }
 

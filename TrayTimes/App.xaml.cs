@@ -28,6 +28,9 @@ public partial class App : Application
     private static readonly TimeSpan FlyoutLifetimeAfterDismiss = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan IdleCollectDelay = TimeSpan.FromSeconds(5);
 
+    // MCTS's published GTFS timetable, for scheduled times where BusTime has no prediction.
+    private static readonly Uri MctsScheduleUri = new("https://kamino.mcts.org/gtfs/google_transit.zip");
+
     private readonly EtaTrayIcon _etaIcon = new();
     private Mutex? _singleInstanceMutex;
     private EventWaitHandle? _showEvent;
@@ -98,11 +101,11 @@ public partial class App : Application
             (_, _) => _dispatcher.TryEnqueue(ShowFlyout), null, Timeout.Infinite, executeOnlyOnce: false);
 
         BusTimeTransitService mcts = BusTimeTransitService.CreateMcts(Secrets.MctsApiKey);
-        _monitor = new ArrivalsMonitor(mcts, _dispatcher);
+        _stopIndex = new StopIndexService(mcts);
+        _monitor = new ArrivalsMonitor(mcts, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
         _monitor.Updated += (_, _) => UpdateTooltip();
         _tracker = new BusTrackingService(mcts, _dispatcher);
         _tracker.Changed += (_, _) => OnTrackingChanged();
-        _stopIndex = new StopIndexService(mcts);
 
         _flyoutCloseTimer = _dispatcher.CreateTimer();
         _flyoutCloseTimer.Interval = FlyoutLifetimeAfterDismiss;
@@ -242,6 +245,7 @@ public partial class App : Application
     private void ReleaseIdleResources()
     {
         StopIndex.Unload();
+        Monitor.Schedule.Unload();
 
         // An idle tray app allocates almost nothing, so the GC wouldn't run on its own to hand the
         // closed windows' memory back to Windows. Wait for WinUI to finish tearing the window down
