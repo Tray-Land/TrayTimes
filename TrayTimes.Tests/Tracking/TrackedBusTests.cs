@@ -280,6 +280,19 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
+    public void FindIn_NoVehicleAndOnlyScheduledTime_ReturnsNull()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), vehicleId: null), "Stop", Lead, Now);
+
+        // Act
+        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10), vehicleId: null) with { IsRealTime = false }]);
+
+        // Assert
+        Assert.IsNull(match);
+    }
+
+    [TestMethod]
     public void Advance_NoVehicleThenOneAssigned_AdoptsVehicle()
     {
         // Arrange

@@ -29,7 +29,10 @@ public enum ArrivalStatus
     DropOffOnly,
 }
 
-/// <summary>A predicted arrival (or departure, at the start of a trip) of one vehicle at one stop.</summary>
+/// <summary>
+/// A predicted arrival (or departure, at the start of a trip) of one vehicle at one stop. When
+/// <see cref="IsRealTime"/> is false it comes from the published timetable, with no bus behind it yet.
+/// </summary>
 public sealed record Arrival(
     string StopId,
     string RouteId,
@@ -41,7 +44,8 @@ public sealed record Arrival(
     bool IsDue,
     bool IsDelayed,
     bool IsDeparture,
-    ArrivalStatus Status)
+    ArrivalStatus Status,
+    bool IsRealTime = true)
 {
     /// <summary>Whole minutes until arrival, never negative.</summary>
     public int MinutesAway(DateTimeOffset now) => IsDue ? 0 : Math.Max(0, (int)Math.Floor((PredictedTime - now).TotalMinutes));

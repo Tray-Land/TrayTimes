@@ -80,11 +80,15 @@ public sealed record TrackedBus(
             : TimeSpan.FromSeconds(10);
     }
 
-    /// <summary>This bus among a stop's arrivals: by vehicle when known, else the nearest prediction for the same route and direction.</summary>
+    /// <summary>
+    /// This bus among a stop's arrivals: by vehicle when known, else the nearest prediction for the
+    /// same route and direction. Scheduled-only arrivals never match; there's no bus to follow.
+    /// </summary>
     public Arrival? FindIn(IEnumerable<Arrival> arrivals)
     {
         IEnumerable<Arrival> candidates = arrivals.Where(a =>
-            a.StopId == StopId
+            a.IsRealTime
+            && a.StopId == StopId
             && string.Equals(a.RouteId, RouteId, StringComparison.OrdinalIgnoreCase)
             && string.Equals(a.DirectionId, DirectionId, StringComparison.OrdinalIgnoreCase));
 
