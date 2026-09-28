@@ -11,15 +11,15 @@
   IgnorableNamespaces="uap rescap uap5 com desktop">
 
   <Identity
-    Name="62EBF802-930C-4BB6-91AC-D248033329A8"
-    Publisher="CN=AppPublisher"
+    Name="Tray-Times"
+    Publisher="CN=Joseph Finney, O=Joseph Finney, L=Milwaukee, S=Wisconsin, C=US, PostalCode=53212"
     Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="62EBF802-930C-4BB6-91AC-D248033329A8" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
     <DisplayName>Tray Times</DisplayName>
-    <PublisherDisplayName>AppPublisher</PublisherDisplayName>
+    <PublisherDisplayName>JoeFinApps</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 
