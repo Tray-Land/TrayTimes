@@ -695,7 +695,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             fetchedAt = snapshot.FetchedAt;
             loading = _monitor.IsLoading;
             string emptyText = fetchedAt is null ? string.Empty : "No upcoming arrivals.";
-            Arrival? tracked = _tracker.Current?.FindIn(snapshot.Arrivals);
+            Arrival? tracked = _tracker.Current?.FindListed(snapshot.Arrivals);
             _groups = [.. saved
                 .Select(stop => new StopGroupItem(
                     stop.StopId,
@@ -722,7 +722,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             loading = _placeLoading;
             HashSet<string> savedIds = [.. saved.Select(s => s.StopId)];
             string emptyText = fetchedAt is null ? string.Empty : "No upcoming arrivals.";
-            Arrival? tracked = _tracker.Current?.FindIn(_placeArrivals);
+            Arrival? tracked = _tracker.Current?.FindListed(_placeArrivals);
             _groups = [.. _placeStops.Select(n => BuildNearbyGroup(n, savedIds.Contains(n.Stop.Id), emptyText, tracked, now))];
 
             if (_placeNotice is { } notice)
@@ -821,7 +821,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private static ArrivalTracking TrackingFor(Arrival arrival, Arrival? tracked) =>
         arrival == tracked ? ArrivalTracking.Tracked
-        : arrival.Status == ArrivalStatus.Canceled || !arrival.IsRealTime ? ArrivalTracking.Unavailable
+        : arrival.Status == ArrivalStatus.Canceled ? ArrivalTracking.Unavailable
         : ArrivalTracking.Available;
 
     private static string FormatDistance(double meters)

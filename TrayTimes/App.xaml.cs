@@ -277,7 +277,7 @@ public partial class App : Application
 
         if (_tracker?.Current is { } bus)
         {
-            _etaIcon.Show(_trayIcon, bus.MinutesAway(DateTimeOffset.Now), _tracker.IsTimeToGo);
+            _etaIcon.Show(_trayIcon, bus.MinutesAway(DateTimeOffset.Now), _tracker.IsTimeToGo, bus.HasPassed);
             return;
         }
 

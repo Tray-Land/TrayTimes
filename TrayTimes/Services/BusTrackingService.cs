@@ -10,7 +10,7 @@ namespace TrayTimes.Services;
 
 /// <summary>
 /// Tracking mode: follows the one bus the rider rang the bell on, independent of the flyout.
-/// Polls just that stop (faster as the bus gets close), sends head-out and time-change alerts,
+/// Polls just that stop (faster as the bus gets close; a scheduled-only bus is looked for in real-time data every minute once it's within 15 minutes of its time), sends head-out and time-change alerts,
 /// optionally keeps the PC awake, and stops on its own once the bus has passed. Lives on the UI
 /// thread and raises <see cref="Changed"/> there.
 /// </summary>
@@ -76,7 +76,10 @@ internal sealed class BusTrackingService
         IReadOnlyList<Arrival>? arrivals;
         try
         {
-            arrivals = await _service.GetArrivalsAsync([bus.StopId]);
+            // A scheduled bus has no real-time data until shortly before it's due, so don't ask yet.
+            arrivals = bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, DateTimeOffset.Now)
+                ? null
+                : await _service.GetArrivalsAsync([bus.StopId]);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {

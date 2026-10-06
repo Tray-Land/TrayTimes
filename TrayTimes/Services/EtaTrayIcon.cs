@@ -21,11 +21,12 @@ internal sealed class EtaTrayIcon
     private HICON _icon;
 
     /// <param name="urgent">True once it's time to head out.</param>
-    public void Show(TrayIcon trayIcon, int minutes, bool urgent)
+    /// <param name="passed">True once the bus has gone by; the badge shows a slash instead of minutes.</param>
+    public void Show(TrayIcon trayIcon, int minutes, bool urgent, bool passed)
     {
         int size = PInvoke.GetSystemMetricsForDpi(SYSTEM_METRICS_INDEX.SM_CXSMICON, PInvoke.GetDpiForSystem());
         uint background = urgent ? Red : Blue;
-        string text = Math.Clamp(minutes, 0, 99).ToString(CultureInfo.InvariantCulture);
+        string text = passed ? "/" : Math.Clamp(minutes, 0, 99).ToString(CultureInfo.InvariantCulture);
         byte[] ico = EtaFont.Render(text, size) is { } coverage
             ? EtaIcon.Create(coverage, size, background, White)
             : EtaIcon.Create(minutes, size, background, White);

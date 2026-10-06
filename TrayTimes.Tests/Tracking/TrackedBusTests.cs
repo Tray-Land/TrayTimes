@@ -181,6 +181,33 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
+    public void Advance_DueBusLeavesArrivals_MarksPassed()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance([], Lead, Now.AddMinutes(1));
+
+        // Assert
+        Assert.IsTrue(step.Bus.HasPassed);
+        Assert.IsFalse(step.Ended);
+    }
+
+    [TestMethod]
+    public void Advance_FailedPollAfterDue_DoesNotMarkPassed()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance(null, Lead, Now.AddMinutes(1));
+
+        // Assert
+        Assert.IsFalse(step.Bus.HasPassed);
+    }
+
+    [TestMethod]
     public void Advance_JustUnderFiveMinutesAfterDue_KeepsTracking()
     {
         // Arrange
@@ -335,6 +362,160 @@ public sealed class TrackedBusTests
         // Assert
         Assert.AreEqual(0, minutes);
     }
+
+    [TestMethod]
+    public void Start_ScheduledArrival_IsScheduledAndNeverDue()
+    {
+        // Act
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now), "Stop", Lead, Now);
+
+        // Assert
+        Assert.IsTrue(bus.IsScheduled);
+        Assert.IsNull(bus.DueSince);
+    }
+
+    [TestMethod]
+    public void Start_RealTimeArrival_IsNotScheduled()
+    {
+        // Act
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(12)), "Stop", Lead, Now);
+
+        // Assert
+        Assert.IsFalse(bus.IsScheduled);
+    }
+
+    [TestMethod]
+    [DataRow(60, 5, true)]
+    [DataRow(16, 5, true)]
+    [DataRow(15, 5, false)]
+    [DataRow(5, 5, false)]
+    [DataRow(20, 30, false)]
+    [DataRow(31, 30, true)]
+    public void IsAwaitingRealTime_ScheduledBus_WaitsUntilLookaheadOrLeadTime(int minutesAway, int lead, bool expected)
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(minutesAway)), "Stop", lead, Now);
+
+        // Act
+        bool awaiting = bus.IsAwaitingRealTime(lead, Now);
+
+        // Assert
+        Assert.AreEqual(expected, awaiting);
+    }
+
+    [TestMethod]
+    public void IsAwaitingRealTime_RealTimeBus_IsFalse()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(60)), "Stop", Lead, Now);
+
+        // Act
+        bool awaiting = bus.IsAwaitingRealTime(Lead, Now);
+
+        // Assert
+        Assert.IsFalse(awaiting);
+    }
+
+    [TestMethod]
+    public void RefreshInterval_ScheduledBus_IsEveryMinute()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(8)), "Stop", Lead, Now);
+
+        // Act
+        TimeSpan interval = bus.RefreshInterval(Now);
+
+        // Assert
+        Assert.AreEqual(TimeSpan.FromMinutes(1), interval);
+    }
+
+    [TestMethod]
+    public void Advance_ScheduledBusGetsRealTimeMatch_AdoptsPredictionAndVehicle()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20)), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(23), vehicleId: "5301")], Lead, Now.AddMinutes(5));
+
+        // Assert
+        Assert.IsFalse(step.Bus.IsScheduled);
+        Assert.AreEqual("5301", step.Bus.VehicleId);
+        Assert.AreEqual(Now.AddMinutes(23), step.Bus.PredictedTime);
+    }
+
+    [TestMethod]
+    public void Advance_ScheduledBusWithNoRealTimeYet_StaysScheduledAndKeepsTime()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20)), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance([], Lead, Now.AddMinutes(10));
+
+        // Assert
+        Assert.IsTrue(step.Bus.IsScheduled);
+        Assert.IsFalse(step.Bus.HasPassed);
+        Assert.IsFalse(step.Ended);
+        Assert.AreEqual(Now.AddMinutes(20), step.Bus.PredictedTime);
+    }
+
+    [TestMethod]
+    public void Advance_ScheduledBusReachesLeadTimeWithoutRealTime_RaisesHeadOut()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20)), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance(null, Lead, Now.AddMinutes(16));
+
+        // Assert
+        Assert.AreEqual(TrackingAlert.HeadOut, step.Alert);
+    }
+
+    [TestMethod]
+    public void FindListed_ScheduledBus_FindsItsTimetableRow()
+    {
+        // Arrange
+        Arrival scheduled = CreateScheduled(Now.AddMinutes(20));
+        TrackedBus bus = TrackedBus.Start(scheduled, "Stop", Lead, Now);
+
+        // Act
+        Arrival? listed = bus.FindListed([CreateScheduled(Now.AddMinutes(50)), scheduled]);
+
+        // Assert
+        Assert.AreEqual(scheduled, listed);
+    }
+
+    [TestMethod]
+    public void FindListed_ScheduledBusWithRealTimeMatch_PrefersRealTimeRow()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20)), "Stop", Lead, Now);
+        Arrival live = CreateArrival(Now.AddMinutes(22));
+
+        // Act
+        Arrival? listed = bus.FindListed([CreateScheduled(Now.AddMinutes(20)), live]);
+
+        // Assert
+        Assert.AreEqual(live, listed);
+    }
+
+    [TestMethod]
+    public void FindListed_RealTimeBusAndOnlyScheduledRows_ReturnsNull()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10)), "Stop", Lead, Now);
+
+        // Act
+        Arrival? listed = bus.FindListed([CreateScheduled(Now.AddMinutes(10))]);
+
+        // Assert
+        Assert.IsNull(listed);
+    }
+
+    private static Arrival CreateScheduled(DateTimeOffset time) =>
+        CreateArrival(time, vehicleId: null) with { IsRealTime = false };
 
     private static Arrival CreateArrival(
         DateTimeOffset predicted,

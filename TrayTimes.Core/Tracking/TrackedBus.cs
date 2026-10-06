@@ -49,6 +49,15 @@ public sealed record TrackedBus(
     /// <summary>How far apart predictions can be and still be the same trip, when there's no vehicle ID.</summary>
     public static readonly TimeSpan MatchTolerance = TimeSpan.FromMinutes(10);
 
+    /// <summary>How long before a scheduled time the rider's bus is first looked for in real-time data.</summary>
+    public static readonly TimeSpan RealTimeLookahead = TimeSpan.FromMinutes(15);
+
+    /// <summary>True while only the timetable knows this bus: no real-time prediction has matched it yet.</summary>
+    public bool IsScheduled { get; init; }
+
+    /// <summary>True once the bus was due and has since dropped out of the stop's arrivals: it has gone by.</summary>
+    public bool HasPassed { get; init; }
+
     public static TrackedBus Start(Arrival arrival, string stopName, int leadMinutes, DateTimeOffset now)
     {
         int minutes = arrival.MinutesAway(now);
@@ -61,19 +70,35 @@ public sealed record TrackedBus(
             arrival.Destination,
             arrival.VehicleId,
             arrival.PredictedTime,
-            DueSince: minutes == 0 ? now : null,
+            // A scheduled time can't say the bus is due; only a real-time prediction can.
+            DueSince: minutes == 0 && arrival.IsRealTime ? now : null,
             // Already inside the lead window: the rider just picked it, so skip the head-out alert
             // but still alert if the time moves.
-            AlertedTime: minutes <= leadMinutes ? arrival.PredictedTime : null);
+            AlertedTime: minutes <= leadMinutes ? arrival.PredictedTime : null)
+        {
+            IsScheduled = !arrival.IsRealTime,
+        };
     }
 
     /// <summary>Whole minutes until the bus arrives, pinned to zero once it has been due.</summary>
     public int MinutesAway(DateTimeOffset now) =>
         DueSince is not null ? 0 : Math.Max(0, (int)Math.Floor((PredictedTime - now).TotalMinutes));
 
-    /// <summary>Polls less often while the bus is far away.</summary>
+    /// <summary>
+    /// True while a scheduled bus is too far off to look for in real-time data: it's searched for from
+    /// <see cref="RealTimeLookahead"/> (or the rider's lead time, if longer) before its scheduled time.
+    /// </summary>
+    public bool IsAwaitingRealTime(int leadMinutes, DateTimeOffset now) =>
+        IsScheduled && now < PredictedTime - TimeSpan.FromMinutes(Math.Max(RealTimeLookahead.TotalMinutes, leadMinutes));
+
+    /// <summary>Polls less often while the bus is far away; a scheduled bus is checked every minute.</summary>
     public TimeSpan RefreshInterval(DateTimeOffset now)
     {
+        if (IsScheduled)
+        {
+            return TimeSpan.FromMinutes(1);
+        }
+
         double minutes = (PredictedTime - now).TotalMinutes;
         return minutes > 10 ? TimeSpan.FromMinutes(1)
             : minutes > 5 ? TimeSpan.FromSeconds(30)
@@ -98,11 +123,29 @@ public sealed record TrackedBus(
         return candidates.MinBy(Gap);
     }
 
+    /// <summary>
+    /// The row to light up in a list that may include timetable rows: this bus's real-time match, else,
+    /// while it's still scheduled-only, the timetable row it was picked from.
+    /// </summary>
+    public Arrival? FindListed(IEnumerable<Arrival> arrivals) =>
+        FindIn(arrivals) ?? (IsScheduled
+            ? arrivals.FirstOrDefault(a =>
+                !a.IsRealTime
+                && a.StopId == StopId
+                && a.PredictedTime == PredictedTime
+                && string.Equals(a.RouteId, RouteId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(a.DirectionId, DirectionId, StringComparison.OrdinalIgnoreCase))
+            : null);
+
     /// <param name="arrivals">The stop's latest arrivals, or null if the poll failed.</param>
     public TrackingStep Advance(IReadOnlyList<Arrival>? arrivals, int leadMinutes, DateTimeOffset now)
     {
         TrackedBus bus = this;
-        if (arrivals is not null && FindIn(arrivals) is { } match)
+        if (arrivals is not null && DueSince is not null && FindIn(arrivals) is null)
+        {
+            bus = this with { HasPassed = true };
+        }
+        else if (arrivals is not null && FindIn(arrivals) is { } match)
         {
             if (match.Status == ArrivalStatus.Canceled)
             {
@@ -111,6 +154,7 @@ public sealed record TrackedBus(
 
             bus = this with
             {
+                IsScheduled = false,
                 VehicleId = match.VehicleId ?? VehicleId,
                 Destination = match.Destination,
                 PredictedTime = match.PredictedTime,
