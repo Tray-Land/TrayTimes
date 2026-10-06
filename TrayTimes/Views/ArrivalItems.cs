@@ -44,6 +44,17 @@ public sealed class StopGroupItem(
     public string SaveLabel => IsSaved ? $"Remove {Title} from favorites" : $"Add {Title} to favorites";
 
     public string AutomationName => $"{Title}, {Subtitle}. Show on map";
+
+    /// <summary>Identifies the stop header across list rebuilds, so only new ones animate in.</summary>
+    public string GroupKey => $"stop|{StopId}";
+
+    /// <summary>Identifies the star across list rebuilds, so one just clicked can pop.</summary>
+    public string StarKey => $"star|{StopId}";
+
+    public IEnumerable<string> Keys => Arrivals.Select(a => a.Key).Prepend(GroupKey);
+
+    /// <summary>Everything the list shows for this stop; equal signatures mean the list needn't be rebuilt.</summary>
+    public string Signature => $"{GroupKey}|{Title}|{Subtitle}|{IsSaved}|{EmptyText}|{string.Join(';', Arrivals.Select(a => a.Signature))}";
 }
 
 /// <summary>Whether an arrival row offers the bell that starts tracking mode.</summary>
@@ -116,6 +127,12 @@ public sealed class ArrivalItem
     public double EtaOpacity => Arrival.IsRealTime ? 1 : 0.85;
 
     public string AutomationName { get; }
+
+    /// <summary>Identifies this bus at this stop across list rebuilds (a trip keeps its vehicle; a scheduled time has none yet).</summary>
+    public string Key => $"{Arrival.StopId}|{Arrival.RouteId}|{Arrival.DirectionId}|{Arrival.VehicleId ?? $"t{Arrival.PredictedTime.ToUnixTimeSeconds() / 60}"}";
+
+    /// <summary>Everything the row shows; equal signatures mean the row needn't be rebuilt.</summary>
+    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{Tracking}|{RowOpacity}";
 
     public ArrivalTracking Tracking { get; }
 

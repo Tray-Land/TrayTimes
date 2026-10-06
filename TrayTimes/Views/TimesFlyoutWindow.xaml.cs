@@ -40,6 +40,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const int MaxNearbyStops = 8;
     private const double WalkingMetersPerMinute = 80; // about 3 mph
     private const double MovedMeters = 25; // Closer than this, a new fix doesn't change which stops are near.
+    private static readonly TimeSpan PendingPopWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LocationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RecentDismissWindow = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan VehicleRefreshInterval = TimeSpan.FromSeconds(15);
@@ -96,6 +97,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private IReadOnlySet<RouteDirection> _directRoutes = new HashSet<RouteDirection>();
     private string? _destinationId; // The place picked from Going to, or null to guess.
 
+    // Motion state: which rows have already animated in, so a refresh only animates what's new or changed.
+    private readonly HashSet<string> _shownRows = [];
+    private readonly Dictionary<string, string> _lastMinutes = [];
+    private string? _listSignature;
+    private int _entranceStep;
+    private (string Key, DateTime Until)? _pendingPop; // A bell or star just clicked, to animate once its row is rebuilt.
+    private DateTimeOffset? _lastFetchedAt;
+    private bool _captionShown;
+    private int _captionVersion;
+
     internal TimesFlyoutWindow(ArrivalsMonitor monitor, BusTrackingService tracker, StopIndexService stopIndex)
     {
         InitializeComponent();
@@ -112,7 +123,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _hideTimer = CreateTimer(TimeSpan.FromMilliseconds(150), repeating: false, HideIfFocusLeftWindow);
         _vehicleTimer = CreateTimer(VehicleRefreshInterval, repeating: true, () => _ = RefreshVehiclesAsync());
         _placeTimer = CreateTimer(PlaceRefreshInterval, repeating: true, () => _ = LoadPlaceAsync(reframe: false));
-        _captionTimer = CreateTimer(TimeSpan.FromSeconds(5), repeating: false, () => MapCaption.Visibility = Visibility.Collapsed);
+        _captionTimer = CreateTimer(TimeSpan.FromSeconds(5), repeating: false, () => HideMapCaption(animate: true));
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
         // Shared so every bus reuses one raster each.
@@ -184,6 +195,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         Activate();
         PInvoke.SetForegroundWindow(_hwnd);
         RevealMapOnFirstShow();
+        Motion.Enter(Toolbar, step: 0, rise: 10);
+        Motion.Enter(ModeBar, step: 1, rise: 10);
 
         _monitor.IsForeground = true;
         _destinationId = null; // Each open guesses the next trip afresh.
@@ -205,7 +218,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _vehicleTimer.Stop();
         _placeTimer.Stop();
         _captionTimer.Stop();
-        MapCaption.Visibility = Visibility.Collapsed;
+        HideMapCaption(animate: false);
         _monitor.IsForeground = false;
         SaveMapView();
         AppWindow.Hide();
@@ -363,6 +376,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// <summary>Shows the current mode's stops, route lines, and arrivals, loading as needed.</summary>
     private void EnterMode(bool reframe)
     {
+        // A fresh list: every row rises in again rather than silently swapping.
+        _listSignature = null;
+        _shownRows.Clear();
+        _lastMinutes.Clear();
         ClearVehicles();
         _routeLayer.IsVisible = _mode == FlyoutMode.Favorites;
         _commuteRouteLayer.MapElements.Clear();
@@ -687,6 +704,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         string? error;
         DateTimeOffset? fetchedAt;
         bool loading;
+        IReadOnlyList<StopGroupItem> groups;
 
         if (_mode == FlyoutMode.Favorites)
         {
@@ -696,7 +714,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             loading = _monitor.IsLoading;
             string emptyText = fetchedAt is null ? string.Empty : "No upcoming arrivals.";
             Arrival? tracked = _tracker.Current?.FindListed(snapshot.Arrivals);
-            _groups = [.. saved
+            groups = [.. saved
                 .Select(stop => new StopGroupItem(
                     stop.StopId,
                     stop.StopName,
@@ -723,7 +741,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             HashSet<string> savedIds = [.. saved.Select(s => s.StopId)];
             string emptyText = fetchedAt is null ? string.Empty : "No upcoming arrivals.";
             Arrival? tracked = _tracker.Current?.FindListed(_placeArrivals);
-            _groups = [.. _placeStops.Select(n => BuildNearbyGroup(n, savedIds.Contains(n.Stop.Id), emptyText, tracked, now))];
+            groups = [.. _placeStops.Select(n => BuildNearbyGroup(n, savedIds.Contains(n.Stop.Id), emptyText, tracked, now))];
 
             if (_placeNotice is { } notice)
             {
@@ -741,12 +759,24 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         LoadingRing.IsActive = loading;
         LiveDot.Opacity = error is null ? 1 : 0.35;
         UpdatedText.Text = fetchedAt is { } at ? $"Updated {at.ToLocalTime():t}" : loading ? "Loading…" : string.Empty;
+        if (fetchedAt != _lastFetchedAt)
+        {
+            _lastFetchedAt = fetchedAt;
+            if (fetchedAt is not null && _isPopupVisible)
+            {
+                // A heartbeat: fresh times just arrived.
+                Motion.Pop(LiveDot, 2.4f);
+                Motion.Enter(UpdatedText, rise: 4);
+            }
+        }
+
         StatusBar.IsOpen = error is not null;
         StatusBar.Message = error ?? string.Empty;
         StatusBar.Title = fetchedAt is null ? "Can't load arrivals" : "Showing earlier times";
         RenderCommuteHeader();
+        ShowList(groups);
 
-        StopsList.ItemsSource = _groups;
+        bool emptyEntering = empty is { } next && (EmptyState.Visibility == Visibility.Collapsed || EmptyTitle.Text != next.Title);
         EmptyState.Visibility = empty is null ? Visibility.Collapsed : Visibility.Visible;
         _emptyAction = empty?.Action;
         if (empty is { } e)
@@ -758,7 +788,38 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             EmptyRing.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             EmptyButton.Content = e.Button;
             EmptyButton.Visibility = e.Button is null ? Visibility.Collapsed : Visibility.Visible;
+            if (emptyEntering)
+            {
+                Motion.Enter(EmptyState, rise: 10);
+            }
         }
+    }
+
+    /// <summary>
+    /// Swaps in the new rows, but only when something visible changed: rebuilding the list restarts
+    /// every row, which would cut short the animations of rows that just arrived.
+    /// </summary>
+    private void ShowList(IReadOnlyList<StopGroupItem> groups)
+    {
+        string signature = string.Join('\n', groups.Select(g => g.Signature));
+        if (signature == _listSignature)
+        {
+            return;
+        }
+
+        _listSignature = signature;
+        _groups = groups;
+
+        // A row keeps its animation history only while it stays listed; one that leaves and returns is new again.
+        HashSet<string> listed = [.. groups.SelectMany(g => g.Keys)];
+        _shownRows.IntersectWith(listed);
+        foreach (string gone in _lastMinutes.Keys.Where(k => !listed.Contains(k)).ToList())
+        {
+            _lastMinutes.Remove(gone);
+        }
+
+        _entranceStep = 0;
+        StopsList.ItemsSource = groups;
     }
 
     /// <summary>Says where the Commute tab thinks the rider is going, and from where.</summary>
@@ -770,9 +831,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
+        string title = $"To {leg.To.Name}";
+        bool entering = CommuteHeader.Visibility == Visibility.Collapsed || CommuteTitle.Text != title;
         CommuteHeader.Visibility = Visibility.Visible;
         CommuteGlyph.Glyph = PlaceGlyph(leg.To);
-        CommuteTitle.Text = $"To {leg.To.Name}";
+        CommuteTitle.Text = title;
+        if (entering)
+        {
+            Motion.Enter(CommuteHeader, rise: 8);
+        }
+
         CommuteSubtitle.Text = leg.IsGuess
             ? $"From {leg.From?.Name} · location unavailable, so guessed from the time of day"
             : $"From {leg.From?.Name ?? "where you are"}";
@@ -1088,10 +1156,113 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void ShowMapCaption(string text)
     {
+        ++_captionVersion; // Cancels a fade-out still in flight.
         MapCaptionText.Text = text;
         MapCaption.Visibility = Visibility.Visible;
+        if (_captionShown)
+        {
+            Motion.Pop(MapCaption, 1.05f);
+        }
+        else
+        {
+            _captionShown = true;
+            Motion.Enter(MapCaption, rise: 10);
+        }
+
         _captionTimer.Stop();
         _captionTimer.Start();
+    }
+
+    private void HideMapCaption(bool animate)
+    {
+        _captionShown = false;
+        int version = ++_captionVersion;
+        if (!animate)
+        {
+            MapCaption.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        Motion.Exit(MapCaption, () =>
+        {
+            if (version == _captionVersion)
+            {
+                MapCaption.Visibility = Visibility.Collapsed;
+            }
+        });
+    }
+
+    // ---- Row motion ----
+
+    private void StopHeader_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: StopGroupItem group } header && _shownRows.Add(group.GroupKey))
+        {
+            Motion.Enter(header, _entranceStep++);
+        }
+    }
+
+    private void ArrivalRow_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: ArrivalItem item } row && _shownRows.Add(item.Key))
+        {
+            Motion.Enter(row, _entranceStep++);
+        }
+    }
+
+    /// <summary>A minutes figure that changed since the last refresh pops, and pops harder when the bus is due.</summary>
+    private void Eta_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ArrivalItem item } eta)
+        {
+            return;
+        }
+
+        if (_lastMinutes.TryGetValue(item.Key, out string? previous) && previous != item.MinutesText)
+        {
+            Motion.Pop(eta, item.Arrival.MinutesAway(DateTimeOffset.Now) == 0 ? 1.45f : 1.2f);
+        }
+
+        _lastMinutes[item.Key] = item.MinutesText;
+    }
+
+    private void Bell_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ArrivalItem item } bell || !ConsumePendingPop(item.Key))
+        {
+            return;
+        }
+
+        if (item.IsTracked)
+        {
+            Motion.Ring(bell);
+        }
+        else
+        {
+            Motion.Pop(bell, 0.6f);
+        }
+    }
+
+    private void Star_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: StopGroupItem group } star && ConsumePendingPop(group.StarKey))
+        {
+            Motion.Pop(star, group.IsSaved ? 1.7f : 0.6f);
+        }
+    }
+
+    /// <summary>Clicking a bell or star rebuilds its row, so the animation waits for the new one to load.</summary>
+    private void RequestPop(string key) => _pendingPop = (key, DateTime.UtcNow + PendingPopWindow);
+
+    private bool ConsumePendingPop(string key)
+    {
+        if (_pendingPop is not { } pending || pending.Key != key || DateTime.UtcNow > pending.Until)
+        {
+            return false;
+        }
+
+        _pendingPop = null;
+        return true;
     }
 
     // ---- List interactions ----
@@ -1122,6 +1293,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         if (item.IsTracked)
         {
+            RequestPop(item.Key);
             _tracker.Stop();
             ShowMapCaption($"Stopped tracking route {item.RouteLabel}.");
             return;
@@ -1133,6 +1305,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void StartTracking(ArrivalItem item)
     {
         string stopName = _groups.FirstOrDefault(g => g.Arrivals.Contains(item))?.Title ?? string.Empty;
+        RequestPop(item.Key);
         _tracker.Start(item.Arrival, stopName);
         int lead = SettingsService.HeadOutMinutes;
         ShowMapCaption(item.Arrival.MinutesAway(DateTimeOffset.Now) <= lead
@@ -1198,6 +1371,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IReadOnlyList<SavedStop> saved = SettingsService.Stops;
         if (group.IsSaved)
         {
+            RequestPop(group.StarKey);
             SettingsService.SetStops(saved.Where(s => s.StopId != stop.Id));
             ShowMapCaption($"Removed {stop.Name} from favorites.");
             return;
@@ -1210,6 +1384,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         StopRouteInfo? route = stop.Routes.FirstOrDefault();
+        RequestPop(group.StarKey);
         SettingsService.AddStop(new SavedStop(
             stop.Id,
             stop.Name,
@@ -1230,6 +1405,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void Refresh()
     {
+        Motion.Spin(RefreshIcon);
         if (_mode == FlyoutMode.Favorites)
         {
             _ = _monitor.RefreshAsync();
@@ -1240,9 +1416,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
-    private void FitButton_Click(object sender, RoutedEventArgs e) => _ = FrameListedStopsAsync(MapAnimationKind.Default);
+    private void FitButton_Click(object sender, RoutedEventArgs e)
+    {
+        Motion.Pop(FitIcon, 1.4f);
+        _ = FrameListedStopsAsync(MapAnimationKind.Default);
+    }
 
-    private void SettingsButton_Click(object sender, RoutedEventArgs e) => App.Current.ShowSettings();
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        Motion.Spin(SettingsIcon);
+        App.Current.ShowSettings();
+    }
 
     private void Refresh_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {

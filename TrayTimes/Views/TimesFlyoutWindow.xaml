@@ -35,7 +35,7 @@
             </Storyboard>
 
             <DataTemplate x:Key="ArrivalTemplate" x:DataType="views:ArrivalItem">
-                <Grid ColumnSpacing="2">
+                <Grid ColumnSpacing="2" Loaded="ArrivalRow_Loaded">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
@@ -83,6 +83,7 @@
                             <StackPanel
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
+                                Loaded="Eta_Loaded"
                                 Opacity="{x:Bind EtaOpacity}"
                                 Orientation="Horizontal"
                                 Spacing="3">
@@ -109,7 +110,7 @@
                         Style="{StaticResource ToolbarButtonStyle}"
                         ToolTipService.ToolTip="{x:Bind TrackLabel}"
                         Visibility="{x:Bind TrackVisibility}">
-                        <Grid>
+                        <Grid Loaded="Bell_Loaded">
                             <FontIcon
                                 FontSize="16"
                                 Glyph="{x:Bind TrackGlyph}"
@@ -127,7 +128,7 @@
 
             <DataTemplate x:Key="StopGroupTemplate" x:DataType="views:StopGroupItem">
                 <StackPanel Margin="0,0,0,8" Spacing="2">
-                    <Grid ColumnSpacing="2">
+                    <Grid ColumnSpacing="2" Loaded="StopHeader_Loaded">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -158,7 +159,10 @@
                             Style="{StaticResource ToolbarButtonStyle}"
                             ToolTipService.ToolTip="{x:Bind SaveLabel}"
                             Visibility="{x:Bind SaveVisibility}">
-                            <FontIcon FontSize="16" Glyph="{x:Bind SaveGlyph}" />
+                            <FontIcon
+                                FontSize="16"
+                                Glyph="{x:Bind SaveGlyph}"
+                                Loaded="Star_Loaded" />
                         </Button>
                     </Grid>
                     <ItemsControl ItemTemplate="{StaticResource ArrivalTemplate}" ItemsSource="{x:Bind Arrivals}" />
@@ -173,7 +177,10 @@
         </Grid.Resources>
 
         <!--  Toolbar  -->
-        <Grid Padding="14,6,6,6" ColumnSpacing="2">
+        <Grid
+            x:Name="Toolbar"
+            Padding="14,6,6,6"
+            ColumnSpacing="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -214,7 +221,10 @@
                 Click="RefreshButton_Click"
                 Style="{StaticResource ToolbarButtonStyle}"
                 ToolTipService.ToolTip="Refresh (F5)">
-                <FontIcon FontSize="16" Glyph="&#xE72C;" />
+                <FontIcon
+                    x:Name="RefreshIcon"
+                    FontSize="16"
+                    Glyph="&#xE72C;" />
             </Button>
             <Button
                 Grid.Column="2"
@@ -222,7 +232,10 @@
                 Click="FitButton_Click"
                 Style="{StaticResource ToolbarButtonStyle}"
                 ToolTipService.ToolTip="Show all listed stops">
-                <FontIcon FontSize="16" Glyph="&#xE80F;" />
+                <FontIcon
+                    x:Name="FitIcon"
+                    FontSize="16"
+                    Glyph="&#xE80F;" />
             </Button>
             <Button
                 Grid.Column="3"
@@ -230,7 +243,10 @@
                 Click="SettingsButton_Click"
                 Style="{StaticResource ToolbarButtonStyle}"
                 ToolTipService.ToolTip="Stops and settings">
-                <FontIcon FontSize="16" Glyph="&#xE713;" />
+                <FontIcon
+                    x:Name="SettingsIcon"
+                    FontSize="16"
+                    Glyph="&#xE713;" />
             </Button>
         </Grid>
 
