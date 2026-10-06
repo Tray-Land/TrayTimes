@@ -831,8 +831,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (empty is { } e)
         {
             EmptyTitle.Text = e.Title;
-            EmptyText.Text = e.Text;
-            EmptyText.Visibility = e.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            EmptyStateText.Text = e.Text;
+            EmptyStateText.Visibility = e.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             EmptyRing.IsActive = busy;
             EmptyRing.Visibility = busy ? Visibility.Visible : Visibility.Collapsed;
             EmptyButton.Content = e.Button;

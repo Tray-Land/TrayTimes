@@ -394,7 +394,7 @@
                     TextAlignment="Center"
                     TextWrapping="Wrap" />
                 <TextBlock
-                    x:Name="EmptyText"
+                    x:Name="EmptyStateText"
                     HorizontalAlignment="Center"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextAlignment="Center"
