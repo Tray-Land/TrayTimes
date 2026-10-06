@@ -70,7 +70,7 @@
                 DragItemsCompleted="SavedStopsList_DragItemsCompleted"
                 SelectionMode="None">
                 <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="models:SavedStop">
+                    <DataTemplate x:DataType="models:SavedStop" x:DefaultBindMode="OneTime">
                         <Grid Padding="0,6" ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />

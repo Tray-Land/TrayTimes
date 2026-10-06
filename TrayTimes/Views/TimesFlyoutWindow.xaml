@@ -34,7 +34,10 @@
                     Duration="0:0:0.3" />
             </Storyboard>
 
-            <DataTemplate x:Key="ArrivalTemplate" x:DataType="views:ArrivalItem">
+            <DataTemplate
+                x:Key="ArrivalTemplate"
+                x:DataType="views:ArrivalItem"
+                x:DefaultBindMode="OneTime">
                 <Grid ColumnSpacing="2" Loaded="ArrivalRow_Loaded">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
@@ -132,7 +135,10 @@
                 </Grid>
             </DataTemplate>
 
-            <DataTemplate x:Key="StopGroupTemplate" x:DataType="views:StopGroupItem">
+            <DataTemplate
+                x:Key="StopGroupTemplate"
+                x:DataType="views:StopGroupItem"
+                x:DefaultBindMode="OneTime">
                 <StackPanel Margin="0,0,0,8" Spacing="2">
                     <Grid ColumnSpacing="2" Loaded="StopHeader_Loaded">
                         <Grid.ColumnDefinitions>
