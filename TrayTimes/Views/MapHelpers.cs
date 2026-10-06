@@ -7,9 +7,11 @@ using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
 using Windows.Devices.Geolocation;
+using Windows.Foundation;
 using Windows.UI;
 using WinUIEx.Maps;
 using MapControl = WinUIEx.Maps.MapControl;
+using MapIcon = WinUIEx.Maps.MapIcon;
 
 namespace TrayTimes.Views;
 
@@ -69,6 +71,24 @@ internal static class MapHelpers
         FontSize = size,
         FontFamily = new FontFamily("Segoe UI Emoji"),
     };
+
+    public static void UpdateVehicleArrow(MapIcon arrow, int heading, double mapHeading, bool selected, bool darkMap)
+    {
+        arrow.IsVisible = heading is >= 0 and < 360;
+        if (!arrow.IsVisible)
+        {
+            return;
+        }
+
+        double angle = heading - mapHeading;
+        double radians = double.DegreesToRadians(angle);
+        double distance = selected ? 29 : 24;
+        arrow.IconElement.RenderTransform = new RotateTransform { Angle = angle };
+        arrow.IconElement.Foreground = new SolidColorBrush(darkMap ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black);
+        arrow.NormalizedAnchorPoint = new Point(
+            0.5 - (Math.Sin(radians) * distance / 32),
+            0.5 + (Math.Cos(radians) * distance / 32));
+    }
 
     /// <summary>
     /// Recolors a stop glyph to the accent shade WinUI uses for filled accent surfaces in the

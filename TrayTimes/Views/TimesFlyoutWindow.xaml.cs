@@ -58,20 +58,24 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly DispatcherQueueTimer _captionTimer;
 
     // Draw order: route lines, then stops, then the place markers, then buses on top
-    // (each bus is a white disc with the bus emoji over it).
+    // (each bus is a white disc with the bus emoji over it, or a larger yellow disc when selected).
     private readonly MapElementsLayer _routeLayer = new();
     private readonly MapElementsLayer _commuteRouteLayer = new();
     private readonly MapElementsLayer _stopLayer = new();
     private readonly MapElementsLayer _placeLayer = new();
     private readonly MapElementsLayer _vehicleBackdropLayer = new();
     private readonly MapElementsLayer _vehicleLayer = new();
-    private readonly Dictionary<string, (MapIcon Bus, MapIcon Backdrop)> _vehicleIcons = [];
+    private readonly Dictionary<string, (MapIcon Bus, MapIcon Backdrop, MapIcon Arrow)> _vehicleIcons = [];
+    private readonly Dictionary<string, (int Heading, double MapHeading, bool Selected, bool DarkMap)> _vehicleArrowStates = [];
     private readonly Dictionary<MapIcon, string> _stopPins = [];
     private readonly Dictionary<string, Vehicle> _vehicles = [];
     private readonly Dictionary<string, (DateTime FetchedUtc, IReadOnlyList<RoutePattern> Patterns)> _patternCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly FontIcon _stopGlyph;
     private readonly FontIcon _busGlyph;
     private readonly FontIcon _busBackdropGlyph;
+    private readonly FontIcon _selectedBusBackdropGlyph;
+    private readonly long _mapHeadingCallbackToken;
+    private string? _selectedVehicleId;
 
     private IReadOnlyDictionary<string, TransitRoute> _routes = new Dictionary<string, TransitRoute>();
     private IReadOnlyList<StopGroupItem> _groups = [];
@@ -128,9 +132,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _captionTimer = CreateTimer(TimeSpan.FromSeconds(5), repeating: false, () => HideMapCaption(animate: true));
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
-        // Shared so every bus reuses one raster each.
+        // Shared so every bus reuses one emoji raster.
         _busGlyph = MapHelpers.CreateEmoji(MapHelpers.BusEmoji, 19.5);
         _busBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.White, 28);
+        _selectedBusBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.Yellow, 38);
+        _mapHeadingCallbackToken = Map.RegisterPropertyChangedCallback(WinUIEx.Maps.MapControl.HeadingProperty, (_, _) => UpdateVehicleArrows());
         MapHelpers.ApplyStopColor(_stopGlyph, Root);
         Map.Layers.Add(_routeLayer);
         Map.Layers.Add(_commuteRouteLayer);
@@ -147,6 +153,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             MapHelpers.ApplyBasemap(Map, Root, MapCover);
             MapHelpers.ApplyStopColor(_stopGlyph, Root);
+            UpdateVehicleArrows();
         };
         MapHelpers.ApplyBasemap(Map, Root, MapCover);
         RestoreMapView();
@@ -239,6 +246,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _monitor.Schedule.Loaded -= OnScheduleLoaded;
         SettingsService.StopsChanged -= OnStopsChanged;
         SettingsService.PlacesChanged -= OnPlacesChanged;
+        Map.UnregisterPropertyChangedCallback(WinUIEx.Maps.MapControl.HeadingProperty, _mapHeadingCallbackToken);
         Close();
     }
 
@@ -1157,20 +1165,27 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             seen.Add(vehicle.Id);
             _vehicles[vehicle.Id] = vehicle;
             Geopoint location = MapHelpers.ToGeopoint(vehicle.Location);
-            if (_vehicleIcons.TryGetValue(vehicle.Id, out (MapIcon Bus, MapIcon Backdrop) icons))
+            if (_vehicleIcons.TryGetValue(vehicle.Id, out (MapIcon Bus, MapIcon Backdrop, MapIcon Arrow) icons))
             {
                 icons.Bus.Location = location;
                 icons.Backdrop.Location = location;
+                icons.Arrow.Location = location;
             }
             else
             {
+                FontIcon arrowGlyph = MapHelpers.CreateGlyph("\uEDDB", Microsoft.UI.Colors.White, 17); // CaretUpSolid8
+                arrowGlyph.Width = 32;
+                arrowGlyph.Height = 32;
+                arrowGlyph.RenderTransformOrigin = new Point(0.5, 0.5);
                 icons = (
                     // The emoji draws right of center in its box; anchor right of center to recenter it on the disc.
                     new MapIcon(_busGlyph, location) { NormalizedAnchorPoint = new Point(0.53, 0.53) },
-                    new MapIcon(_busBackdropGlyph, location) { NormalizedAnchorPoint = new Point(0.5, 0.5) });
+                    new MapIcon(_busBackdropGlyph, location) { NormalizedAnchorPoint = new Point(0.5, 0.5) },
+                    new MapIcon(arrowGlyph, location) { IsVisible = false });
                 _vehicleIcons[vehicle.Id] = icons;
                 _vehicleLayer.MapElements.Add(icons.Bus);
                 _vehicleBackdropLayer.MapElements.Add(icons.Backdrop);
+                _vehicleBackdropLayer.MapElements.Add(icons.Arrow);
             }
         }
 
@@ -1178,8 +1193,51 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             _vehicleLayer.MapElements.Remove(_vehicleIcons[gone].Bus);
             _vehicleBackdropLayer.MapElements.Remove(_vehicleIcons[gone].Backdrop);
+            _vehicleBackdropLayer.MapElements.Remove(_vehicleIcons[gone].Arrow);
             _vehicleIcons.Remove(gone);
+            _vehicleArrowStates.Remove(gone);
             _vehicles.Remove(gone);
+            if (_selectedVehicleId == gone)
+            {
+                _selectedVehicleId = null;
+            }
+        }
+
+        SelectVehicle(_selectedVehicleId);
+    }
+
+    private void SelectVehicle(string? vehicleId)
+    {
+        _selectedVehicleId = vehicleId;
+        foreach ((string id, (MapIcon bus, MapIcon backdrop, MapIcon arrow)) in _vehicleIcons)
+        {
+            bool selected = id == vehicleId;
+            backdrop.IconElement = selected ? _selectedBusBackdropGlyph : _busBackdropGlyph;
+            backdrop.ZIndex = selected ? 1 : 0;
+            bus.ZIndex = selected ? 1 : 0;
+            arrow.ZIndex = selected ? 1 : 0;
+        }
+
+        UpdateVehicleArrows();
+    }
+
+    private void UpdateVehicleArrows()
+    {
+        foreach ((string id, var icons) in _vehicleIcons)
+        {
+            int heading = _vehicles[id].Heading;
+            (int Heading, double MapHeading, bool Selected, bool DarkMap) appearance = (
+                heading,
+                heading is >= 0 and < 360 ? Map.Heading : 0,
+                id == _selectedVehicleId,
+                Map.MapStyle == MapStyle.Night);
+            if (_vehicleArrowStates.TryGetValue(id, out var previous) && previous == appearance)
+            {
+                continue;
+            }
+
+            MapHelpers.UpdateVehicleArrow(icons.Arrow, appearance.Heading, appearance.MapHeading, appearance.Selected, appearance.DarkMap);
+            _vehicleArrowStates[id] = appearance;
         }
     }
 
@@ -1188,14 +1246,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _vehicleLayer.MapElements.Clear();
         _vehicleBackdropLayer.MapElements.Clear();
         _vehicleIcons.Clear();
+        _vehicleArrowStates.Clear();
         _vehicles.Clear();
+        _selectedVehicleId = null;
     }
 
     private void VehicleLayer_Tapped(object? sender, MapElementTappedEventArgs args)
     {
-        if (args.MapElement is MapIcon icon && _vehicleIcons.FirstOrDefault(p => p.Value.Bus == icon || p.Value.Backdrop == icon).Key is { } id && _vehicles.TryGetValue(id, out Vehicle? vehicle))
+        if (args.MapElement is MapIcon icon && _vehicleIcons.FirstOrDefault(p => p.Value.Bus == icon || p.Value.Backdrop == icon || p.Value.Arrow == icon).Key is { } id && _vehicles.TryGetValue(id, out Vehicle? vehicle))
         {
             args.Handled = true;
+            SelectVehicle(id);
             ShowMapCaption($"Bus {vehicle.Id} · Route {vehicle.RouteId} to {vehicle.Destination}{(vehicle.IsDelayed ? " · Delayed" : string.Empty)}");
         }
     }
@@ -1205,6 +1266,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (args.MapElement is MapIcon icon && _stopPins.TryGetValue(icon, out string? name))
         {
             args.Handled = true;
+            SelectVehicle(null);
             ShowMapCaption(name);
         }
     }
@@ -1329,6 +1391,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
+        SelectVehicle(item.Arrival.VehicleId);
         List<GeoPoint> points = [item.StopLocation];
         if (item.Arrival.VehicleId is { } vid && _vehicles.TryGetValue(vid, out Vehicle? vehicle))
         {
@@ -1411,6 +1474,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (sender is FrameworkElement { DataContext: StopGroupItem group })
         {
+            SelectVehicle(null);
             _ = MapHelpers.FrameAsync(Map, [group.Location], MapAnimationKind.Default, singlePointZoom: 16);
         }
     }
@@ -1473,6 +1537,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void FitButton_Click(object sender, RoutedEventArgs e)
     {
+        SelectVehicle(null);
         Motion.Pop(FitIcon, 1.4f);
         _ = FrameListedStopsAsync(MapAnimationKind.Default);
     }
