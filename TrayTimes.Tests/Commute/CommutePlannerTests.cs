@@ -206,6 +206,44 @@ public sealed class CommutePlannerTests
         Assert.IsFalse(runs);
     }
 
+    [TestMethod]
+    public void ArrivalAtDestination_SeveralStops_PicksEarliestIncludingTheWalk()
+    {
+        // Arrange: getting off at "near" is 2 minutes sooner on the bus but a 10 minute walk; "far" is a 1 minute walk.
+        TripStop[] downstream = [new("near", Morning.AddMinutes(20)), new("far", Morning.AddMinutes(22))];
+        Dictionary<string, double> walks = new() { ["near"] = 600, ["far"] = 60 };
+
+        // Act
+        DateTimeOffset? eta = CommutePlanner.ArrivalAtDestination(downstream, walks);
+
+        // Assert
+        Assert.AreEqual(Morning.AddMinutes(23), eta);
+    }
+
+    [TestMethod]
+    public void ArrivalAtDestination_StopWithoutKnownWalk_IsIgnored()
+    {
+        // Arrange
+        TripStop[] downstream = [new("unknown", Morning.AddMinutes(10)), new("known", Morning.AddMinutes(30))];
+        Dictionary<string, double> walks = new() { ["known"] = 120 };
+
+        // Act
+        DateTimeOffset? eta = CommutePlanner.ArrivalAtDestination(downstream, walks);
+
+        // Assert
+        Assert.AreEqual(Morning.AddMinutes(32), eta);
+    }
+
+    [TestMethod]
+    public void ArrivalAtDestination_BusNeverReachesANearStop_ReturnsNull()
+    {
+        // Act
+        DateTimeOffset? eta = CommutePlanner.ArrivalAtDestination([], new Dictionary<string, double> { ["near"] = 60 });
+
+        // Assert
+        Assert.IsNull(eta);
+    }
+
     private static FavoritePlace Fixed(PlaceKind kind, double lat) => FavoritePlace.ForKind(kind, new Place(kind.ToString(), lat, Lon));
 
     private static IndexedStop Stop(string id, double lat, params (string Route, string Direction)[] routes) =>

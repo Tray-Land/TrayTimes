@@ -117,7 +117,8 @@ public sealed class BusTimeTransitService : ITransitService
                     1 or 18 => ArrivalStatus.Canceled,
                     4 => ArrivalStatus.DropOffOnly,
                     _ => ArrivalStatus.Scheduled,
-                }));
+                },
+                TripId: NonEmpty(p.TripId)));
         }
 
         arrivals.Sort((a, b) => a.PredictedTime.CompareTo(b.PredictedTime));

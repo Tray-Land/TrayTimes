@@ -235,6 +235,114 @@ public sealed class GtfsTimetableTests
     }
 
     [TestMethod]
+    public void GetDownstreamArrivals_BusOnTime_ReturnsScheduledTimeAtLaterStop()
+    {
+        // Arrange
+        GtfsTimetable timetable = Load(Feed, Directory);
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(Boarding("A", "NORTH", Chicago(2026, 9, 25, 8, 0)), ["B", "C"]);
+
+        // Assert
+        Assert.HasCount(2, downstream);
+        Assert.AreEqual(Chicago(2026, 9, 25, 8, 10), downstream.Single(s => s.StopId == "B").ArrivesAt);
+        Assert.AreEqual(Chicago(2026, 9, 25, 8, 20), downstream.Single(s => s.StopId == "C").ArrivesAt);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_BusRunningLate_CarriesTheDelayForward()
+    {
+        // Arrange: predicted 5 minutes after the 8:00 departure.
+        GtfsTimetable timetable = Load(Feed, Directory);
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(Boarding("A", "NORTH", Chicago(2026, 9, 25, 8, 5)), ["C"]);
+
+        // Assert
+        Assert.AreEqual(Chicago(2026, 9, 25, 8, 25), downstream.Single().ArrivesAt);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_StopBeforeBoardingStop_IsNotIncluded()
+    {
+        // Arrange
+        GtfsTimetable timetable = Load(Feed, Directory);
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(Boarding("B", "NORTH", Chicago(2026, 9, 25, 8, 10)), ["A", "C"]);
+
+        // Assert
+        Assert.AreEqual("C", downstream.Single().StopId);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_TripIdMatches_FindsTripEvenFarFromItsScheduledTime()
+    {
+        // Arrange: 40 minutes off, past what route-and-time matching accepts.
+        GtfsTimetable timetable = Load(Feed, Directory);
+        Arrival boarding = Boarding("A", "NORTH", Chicago(2026, 9, 25, 8, 40)) with { TripId = "T1" };
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(boarding, ["C"]);
+
+        // Assert
+        Assert.AreEqual(Chicago(2026, 9, 25, 9, 0), downstream.Single().ArrivesAt);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_UnknownTripId_FallsBackToRouteAndTime()
+    {
+        // Arrange
+        GtfsTimetable timetable = Load(Feed, Directory);
+        Arrival boarding = Boarding("A", "NORTH", Chicago(2026, 9, 25, 8, 2)) with { TripId = "not-in-gtfs" };
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(boarding, ["C"]);
+
+        // Assert
+        Assert.AreEqual(Chicago(2026, 9, 25, 8, 22), downstream.Single().ArrivesAt);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_NoTripNearThePredictedTime_ReturnsNothing()
+    {
+        // Arrange: an hour from the only trips through A.
+        GtfsTimetable timetable = Load(Feed, Directory);
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(Boarding("A", "NORTH", Chicago(2026, 9, 25, 13, 0)), ["C"]);
+
+        // Assert
+        Assert.IsEmpty(downstream);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_OtherDirection_ReturnsNothing()
+    {
+        // Arrange
+        GtfsTimetable timetable = Load(Feed, Directory);
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(Boarding("B", "SOUTH", Chicago(2026, 9, 25, 8, 10)), ["C"]);
+
+        // Assert
+        Assert.IsEmpty(downstream);
+    }
+
+    [TestMethod]
+    public void GetDownstreamArrivals_TripPastMidnight_UsesThePreviousServiceDay()
+    {
+        // Arrange: T4 leaves A at 24:30 on Friday's service, which is 12:30 AM Saturday.
+        GtfsTimetable timetable = Load(Feed, Directory);
+
+        // Act
+        IReadOnlyList<TripStop> downstream = timetable.GetDownstreamArrivals(Boarding("A", "NORTH", Chicago(2026, 9, 26, 0, 30)), ["B"]);
+
+        // Assert
+        Assert.AreEqual(Chicago(2026, 9, 26, 0, 40), downstream.Single().ArrivesAt);
+    }
+
+    [TestMethod]
     public void Load_MissingStopTimes_ThrowsInvalidData()
     {
         // Arrange
@@ -260,6 +368,9 @@ public sealed class GtfsTimetableTests
         stream.Position = 0;
         return GtfsTimetable.Load(stream, directory);
     }
+
+    private static Arrival Boarding(string stopId, string directionId, DateTimeOffset predicted) => new(
+        stopId, "14", "14", directionId, "DOWNTOWN", "5301", predicted, IsDue: false, IsDelayed: false, IsDeparture: false, ArrivalStatus.Scheduled);
 
     private static DateTimeOffset Chicago(int year, int month, int day, int hour, int minute)
     {

@@ -78,6 +78,12 @@
                                     Style="{StaticResource CaptionTextBlockStyle}"
                                     Text="{x:Bind DetailText}"
                                     TextTrimming="CharacterEllipsis" />
+                                <TextBlock
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Text="{x:Bind TripEtaText}"
+                                    TextTrimming="CharacterEllipsis"
+                                    Visibility="{x:Bind TripEtaVisibility}" />
                             </StackPanel>
 
                             <StackPanel

@@ -78,6 +78,31 @@ public static class CommutePlanner
         return destination is null || from is null ? null : new CommuteLeg(from, from.Location, destination, IsGuess: true);
     }
 
+    /// <summary>
+    /// When the rider reaches the destination: the earliest, over the stops the bus calls at near
+    /// it, of the bus's arrival there plus the walk the rest of the way. Null if none of those stops
+    /// has a known walk.
+    /// </summary>
+    /// <param name="downstream">Where the bus is expected after the boarding stop.</param>
+    /// <param name="walkSecondsFromStop">Walking time from each stop near the destination, by stop ID.</param>
+    public static DateTimeOffset? ArrivalAtDestination(IEnumerable<TripStop> downstream, IReadOnlyDictionary<string, double> walkSecondsFromStop)
+    {
+        DateTimeOffset? earliest = null;
+        foreach (TripStop stop in downstream)
+        {
+            if (walkSecondsFromStop.TryGetValue(stop.StopId, out double walk))
+            {
+                DateTimeOffset arrival = stop.ArrivesAt.AddSeconds(walk);
+                if (earliest is null || arrival < earliest)
+                {
+                    earliest = arrival;
+                }
+            }
+        }
+
+        return earliest;
+    }
+
     /// <summary>Route directions that serve both a stop in <paramref name="originStops"/> and one in <paramref name="destinationStops"/>.</summary>
     public static IReadOnlySet<RouteDirection> SharedRoutes(IEnumerable<IndexedStop> originStops, IEnumerable<IndexedStop> destinationStops)
     {

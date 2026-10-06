@@ -89,6 +89,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private GeoPoint? _placeOrigin;
     private IReadOnlyList<NearbyStop> _placeStops = [];
     private IReadOnlyList<Arrival> _placeArrivals = [];
+    private IReadOnlyDictionary<Arrival, DateTimeOffset> _destinationEtas = new Dictionary<Arrival, DateTimeOffset>();
     private DateTimeOffset? _placeFetchedAt;
     private string? _placeError;
     private Notice? _placeNotice;
@@ -410,6 +411,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _placeOrigin = null;
         _placeStops = [];
         _placeArrivals = [];
+        _destinationEtas = new Dictionary<Arrival, DateTimeOffset>();
         _placeFetchedAt = null;
         _placeError = null;
         _placeNotice = null;
@@ -505,6 +507,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _placeOrigin = found.Origin;
         _placeStops = found.Stops;
         _placeArrivals = arrivals;
+        _destinationEtas = EstimateDestinationArrivals(found, arrivals);
         _commuteLeg = found.Leg;
         _directRoutes = found.DirectRoutes ?? new HashSet<RouteDirection>();
         _placeFetchedAt = found.Origin is null ? null : DateTimeOffset.Now;
@@ -575,7 +578,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IReadOnlyList<IndexedStop> directory = await _stopIndex.GetAsync();
         List<NearbyStop> origin = [.. NearbyStop.Find(directory, leg.Origin, int.MaxValue, CommutePlanner.WalkRadiusMeters)];
         List<IndexedStop> originStops = [.. origin.Select(n => n.Stop)];
-        List<IndexedStop> destinationStops = [.. NearbyStop.Find(directory, leg.To.Location, int.MaxValue, CommutePlanner.WalkRadiusMeters).Select(n => n.Stop)];
+        List<NearbyStop> destination = [.. NearbyStop.Find(directory, leg.To.Location, int.MaxValue, CommutePlanner.WalkRadiusMeters)];
+        List<IndexedStop> destinationStops = [.. destination.Select(n => n.Stop)];
 
         // Shapes tell a route's two directions apart, so only buses heading toward the destination are listed.
         IEnumerable<string> routeIds = CommutePlanner.SharedRoutes(originStops, destinationStops).Select(r => r.RouteId).Distinct(StringComparer.OrdinalIgnoreCase);
@@ -616,7 +620,46 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             $"None of the buses within a 10-minute walk go within a 10-minute walk of {leg.To.Name}. Tray Times doesn't plan transfers yet.",
             "Show nearby stops",
             () => SelectMode(FlyoutMode.Nearby));
-        return new PlaceStops(leg.Origin, stops, noDirectBus, leg, direct);
+        return new PlaceStops(leg.Origin, stops, noDirectBus, leg, direct, stops.Count == 0 ? null : await WalkFromStopsAsync(leg.To.Location, destination));
+    }
+
+    /// <summary>Seconds to walk between each stop near <paramref name="place"/> and it, by stop ID. Routed for the closest few; the rest are estimated.</summary>
+    private static async Task<IReadOnlyDictionary<string, double>> WalkFromStopsAsync(GeoPoint place, IReadOnlyList<NearbyStop> nearby)
+    {
+        IReadOnlyList<NearbyStop> routed = await WalkingRouteService.RankByWalkAsync(place, [.. nearby.Take(MaxRoutedStops)]);
+        return routed.Concat(nearby.Skip(MaxRoutedStops)).ToDictionary(
+            n => n.Stop.Id,
+            n => n.WalkSeconds ?? n.Meters / WalkingMetersPerMinute * 60);
+    }
+
+    /// <summary>
+    /// When the rider would reach their destination on each listed bus: the bus's departure, its
+    /// scheduled ride (shifted by how late it's running), then the walk from where it lets them off.
+    /// </summary>
+    private IReadOnlyDictionary<Arrival, DateTimeOffset> EstimateDestinationArrivals(PlaceStops found, IReadOnlyList<Arrival> arrivals)
+    {
+        Dictionary<Arrival, DateTimeOffset> etas = [];
+        if (found.DestinationWalks is not { Count: > 0 } walks
+            || found.DirectRoutes is not { } direct
+            || _monitor.Schedule.Timetable is not { } timetable)
+        {
+            return etas;
+        }
+
+        string[] alightAt = [.. walks.Keys];
+        IEnumerable<Arrival> shown = arrivals
+            .Where(a => a.Status == ArrivalStatus.Scheduled && direct.Contains(new RouteDirection(a.RouteId, a.DirectionId)))
+            .GroupBy(a => a.StopId)
+            .SelectMany(g => g.Take(ArrivalsPerNearbyStop));
+        foreach (Arrival arrival in shown)
+        {
+            if (CommutePlanner.ArrivalAtDestination(timetable.GetDownstreamArrivals(arrival, alightAt), walks) is { } eta)
+            {
+                etas[arrival] = eta;
+            }
+        }
+
+        return etas;
     }
 
     private void DestinationMenu_Opening(object sender, object e)
@@ -878,13 +921,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         List<ArrivalItem> arrivals = [.. _placeArrivals
             .Where(a => a.StopId == stop.Id && Listed(a.RouteId, a.DirectionId))
             .Take(ArrivalsPerNearbyStop)
-            .Select(a => new ArrivalItem(
-                a,
-                stop.Location,
-                RouteColor(a.RouteId, null, stop.Routes.FirstOrDefault(r => string.Equals(r.RouteId, a.RouteId, StringComparison.OrdinalIgnoreCase))?.RouteColor),
-                now,
-                tooSoonToWalk: checkWalk && a.Status != ArrivalStatus.Canceled && a.MinutesAway(now) < walkMinutes,
-                tracking: TrackingFor(a, tracked)))];
+            .Select(a =>
+            {
+                bool tooSoon = checkWalk && a.Status != ArrivalStatus.Canceled && a.MinutesAway(now) < walkMinutes;
+                return new ArrivalItem(
+                    a,
+                    stop.Location,
+                    RouteColor(a.RouteId, null, stop.Routes.FirstOrDefault(r => string.Equals(r.RouteId, a.RouteId, StringComparison.OrdinalIgnoreCase))?.RouteColor),
+                    now,
+                    tooSoonToWalk: tooSoon,
+                    tracking: TrackingFor(a, tracked),
+                    destinationName: commute ? _commuteLeg?.To.Name : null,
+                    destinationEta: !tooSoon && _destinationEtas.TryGetValue(a, out DateTimeOffset eta) ? eta : null);
+            })];
 
         return new StopGroupItem(stop.Id, title, subtitle, stop.Location, arrivals, emptyText, stop, isSaved);
     }
@@ -1455,7 +1504,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IReadOnlyList<NearbyStop> Stops,
         Notice EmptyNotice,
         CommuteLeg? Leg = null,
-        IReadOnlySet<RouteDirection>? DirectRoutes = null)
+        IReadOnlySet<RouteDirection>? DirectRoutes = null,
+        IReadOnlyDictionary<string, double>? DestinationWalks = null)
     {
         public static PlaceStops Unavailable(Notice notice, CommuteLeg? leg = null) => new(null, [], notice, leg);
     }

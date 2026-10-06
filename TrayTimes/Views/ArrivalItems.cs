@@ -68,7 +68,16 @@ public enum ArrivalTracking
 /// <summary>One arrival row: a prediction, or a scheduled time with no prediction yet.</summary>
 public sealed class ArrivalItem
 {
-    public ArrivalItem(Arrival arrival, GeoPoint stopLocation, Color routeColor, DateTimeOffset now, bool tooSoonToWalk = false, ArrivalTracking tracking = ArrivalTracking.Unavailable)
+    /// <param name="destinationName">Where the rider is headed, with <paramref name="destinationEta"/> when they'd get there on this bus.</param>
+    public ArrivalItem(
+        Arrival arrival,
+        GeoPoint stopLocation,
+        Color routeColor,
+        DateTimeOffset now,
+        bool tooSoonToWalk = false,
+        ArrivalTracking tracking = ArrivalTracking.Unavailable,
+        string? destinationName = null,
+        DateTimeOffset? destinationEta = null)
     {
         Arrival = arrival;
         Tracking = tracking;
@@ -99,9 +108,20 @@ public sealed class ArrivalItem
         DetailText = status is null ? $"{kind} {clock}" : $"{kind} {clock} · {status}";
         RowOpacity = arrival.Status == ArrivalStatus.Canceled || tooSoonToWalk ? 0.5 : 1;
 
+        if (destinationEta is { } eta && destinationName is { Length: > 0 })
+        {
+            TripEtaText = $"{destinationName} by {eta.ToLocalTime().ToString("t", CultureInfo.CurrentCulture)}";
+        }
+
         string when = minutes == 0 ? "due now" : $"in {minutes} minutes";
-        AutomationName = $"Route {RouteLabel} to {Destination}, {when}. {DetailText}";
+        string trip = TripEtaText.Length > 0 ? $" {TripEtaText}." : string.Empty;
+        AutomationName = $"Route {RouteLabel} to {Destination}, {when}. {DetailText}.{trip}";
     }
+
+    /// <summary>When the rider would reach where they're headed on this bus, e.g. "Home by 5:42 PM"; empty if unknown.</summary>
+    public string TripEtaText { get; } = string.Empty;
+
+    public Visibility TripEtaVisibility => TripEtaText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     public Arrival Arrival { get; }
 
@@ -132,7 +152,7 @@ public sealed class ArrivalItem
     public string Key => $"{Arrival.StopId}|{Arrival.RouteId}|{Arrival.DirectionId}|{Arrival.VehicleId ?? $"t{Arrival.PredictedTime.ToUnixTimeSeconds() / 60}"}";
 
     /// <summary>Everything the row shows; equal signatures mean the row needn't be rebuilt.</summary>
-    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{Tracking}|{RowOpacity}";
+    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{TripEtaText}|{Tracking}|{RowOpacity}";
 
     public ArrivalTracking Tracking { get; }
 

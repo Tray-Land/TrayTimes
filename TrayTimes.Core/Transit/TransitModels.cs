@@ -45,11 +45,15 @@ public sealed record Arrival(
     bool IsDelayed,
     bool IsDeparture,
     ArrivalStatus Status,
-    bool IsRealTime = true)
+    bool IsRealTime = true,
+    string? TripId = null)
 {
     /// <summary>Whole minutes until arrival, never negative.</summary>
     public int MinutesAway(DateTimeOffset now) => IsDue ? 0 : Math.Max(0, (int)Math.Floor((PredictedTime - now).TotalMinutes));
 }
+
+/// <summary>When the bus an <see cref="Arrival"/> belongs to is expected at a later stop on its trip.</summary>
+public sealed record TripStop(string StopId, DateTimeOffset ArrivesAt);
 
 public sealed record Vehicle(string Id, string RouteId, string Destination, GeoPoint Location, int Heading, bool IsDelayed);
 

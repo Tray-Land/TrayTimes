@@ -83,6 +83,9 @@ internal sealed class ScheduleService(Uri feedUri, StopIndexService stopIndex)
             : live;
     }
 
+    /// <summary>The timetable if it has finished loading, else null (<see cref="Loaded"/> says when it's ready).</summary>
+    public GtfsTimetable? Timetable => _loadTask is { IsCompletedSuccessfully: true, Result: { } timetable } ? timetable : null;
+
     /// <summary>Drops the in-memory timetable (it reloads from disk on next use), unless it's loading.</summary>
     public void Unload()
     {

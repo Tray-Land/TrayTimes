@@ -93,6 +93,9 @@ internal sealed class BusTimePrediction
     [JsonPropertyName("vid")]
     public string? VehicleId { get; set; }
 
+    [JsonPropertyName("tatripid")]
+    public string? TripId { get; set; }
+
     [JsonPropertyName("rt")]
     public string? Route { get; set; }
 

@@ -11,19 +11,24 @@ namespace TrayTimes.Transit.Gtfs;
 /// </summary>
 public sealed class GtfsTimetable
 {
+    /// <summary>How far from its scheduled time a bus can run and still be matched to that trip when trip IDs don't line up.</summary>
+    public static readonly TimeSpan MaxTripMatch = TimeSpan.FromMinutes(30);
+
     private readonly TimeZoneInfo _timeZone;
     private readonly GtfsCalendar _calendar;
     private readonly string[] _serviceIds;
     private readonly Trip[] _trips;
     private readonly Dictionary<string, StopTime[]> _stopTimes;
+    private readonly Dictionary<string, int> _tripIndexes;
 
-    private GtfsTimetable(TimeZoneInfo timeZone, GtfsCalendar calendar, string[] serviceIds, Trip[] trips, Dictionary<string, StopTime[]> stopTimes)
+    private GtfsTimetable(TimeZoneInfo timeZone, GtfsCalendar calendar, string[] serviceIds, Trip[] trips, Dictionary<string, StopTime[]> stopTimes, Dictionary<string, int> tripIndexes)
     {
         _timeZone = timeZone;
         _calendar = calendar;
         _serviceIds = serviceIds;
         _trips = trips;
         _stopTimes = stopTimes;
+        _tripIndexes = tripIndexes;
     }
 
     /// <summary>Reads a GTFS zip.</summary>
@@ -49,7 +54,107 @@ public sealed class GtfsTimetable
         Dictionary<string, RouteNames> routes = ReadRoutes(zip, directoryRoutes.Values);
         TripTable trips = ReadTrips(zip, routes);
         Dictionary<string, StopTime[]> stopTimes = ReadStopTimes(zip, trips, directoryRoutes);
-        return new GtfsTimetable(timeZone, calendar, [.. trips.ServiceIds], [.. trips.Trips], stopTimes);
+        return new GtfsTimetable(timeZone, calendar, [.. trips.ServiceIds], [.. trips.Trips], stopTimes, trips.Indexes);
+    }
+
+    /// <summary>
+    /// Where the bus behind <paramref name="boarding"/> goes next: its scheduled arrival at each of
+    /// <paramref name="stopIds"/> that it reaches after the boarding stop, shifted by however late (or
+    /// early) the bus is running at the boarding stop. Empty when the trip can't be found in the timetable.
+    /// </summary>
+    /// <remarks>
+    /// The trip is found by <see cref="Arrival.TripId"/> when the real-time feed's IDs match the
+    /// timetable's, otherwise it's the trip on the same route and direction scheduled closest to
+    /// the predicted time (within <see cref="MaxTripMatch"/>).
+    /// </remarks>
+    public IReadOnlyList<TripStop> GetDownstreamArrivals(Arrival boarding, IReadOnlyCollection<string> stopIds)
+    {
+        if (!_stopTimes.TryGetValue(boarding.StopId, out StopTime[]? boardTimes))
+        {
+            return [];
+        }
+
+        DateOnly latest = LocalDate(boarding.PredictedTime);
+        (int Trip, int Sequence, DateTimeOffset Origin, TimeSpan Delay)? match = null;
+        if (boarding.TripId is { } tripId && _tripIndexes.TryGetValue(tripId, out int tripIndex))
+        {
+            match = FindBoarding(boardTimes, boarding.PredictedTime, latest, t => t == tripIndex, TimeSpan.MaxValue);
+        }
+
+        match ??= FindBoarding(
+            boardTimes,
+            boarding.PredictedTime,
+            latest,
+            t => string.Equals(_trips[t].RouteId, boarding.RouteId, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(_trips[t].DirectionId, boarding.DirectionId, StringComparison.OrdinalIgnoreCase),
+            MaxTripMatch);
+        if (match is not { } found)
+        {
+            return [];
+        }
+
+        List<TripStop> downstream = [];
+        foreach (string stopId in stopIds.Distinct())
+        {
+            if (!_stopTimes.TryGetValue(stopId, out StopTime[]? times))
+            {
+                continue;
+            }
+
+            // A looping trip can pass a stop twice; the first visit after boarding is the one that counts.
+            int? seconds = null;
+            int sequence = int.MaxValue;
+            foreach (StopTime time in times)
+            {
+                if (time.Trip == found.Trip && time.Sequence > found.Sequence && time.Sequence < sequence)
+                {
+                    seconds = time.Seconds;
+                    sequence = time.Sequence;
+                }
+            }
+
+            if (seconds is { } s)
+            {
+                downstream.Add(new TripStop(stopId, found.Origin.AddSeconds(s) + found.Delay));
+            }
+        }
+
+        return downstream;
+    }
+
+    /// <summary>The scheduled visit at the boarding stop nearest <paramref name="predicted"/>, among trips <paramref name="isCandidate"/> accepts.</summary>
+    private (int Trip, int Sequence, DateTimeOffset Origin, TimeSpan Delay)? FindBoarding(
+        StopTime[] boardTimes,
+        DateTimeOffset predicted,
+        DateOnly latest,
+        Func<int, bool> isCandidate,
+        TimeSpan maxDifference)
+    {
+        (int Trip, int Sequence, DateTimeOffset Origin, TimeSpan Delay)? best = null;
+        TimeSpan bestDifference = maxDifference;
+
+        // Times past midnight (e.g. 25:10) belong to the previous day's service.
+        foreach (DateOnly date in new[] { latest.AddDays(-1), latest })
+        {
+            DateTimeOffset origin = ServiceDayOrigin(date);
+            foreach (StopTime time in boardTimes)
+            {
+                if (!isCandidate(time.Trip) || !_calendar.IsActive(_serviceIds[_trips[time.Trip].Service], date))
+                {
+                    continue;
+                }
+
+                TimeSpan delay = predicted - origin.AddSeconds(time.Seconds);
+                TimeSpan difference = delay.Duration();
+                if (difference <= bestDifference)
+                {
+                    best = (time.Trip, time.Sequence, origin, delay);
+                    bestDifference = difference;
+                }
+            }
+        }
+
+        return best;
     }
 
     /// <summary>Scheduled arrivals at the given stops between two times, soonest first.</summary>
@@ -107,7 +212,8 @@ public sealed class GtfsTimetable
         IsDeparture: time.Sequence == trip.FirstSequence,
         // A bus ending its trip here can't be boarded.
         time.Sequence == trip.LastSequence ? ArrivalStatus.DropOffOnly : ArrivalStatus.Scheduled,
-        IsRealTime: false);
+        IsRealTime: false,
+        TripId: trip.GtfsTripId);
 
     private DateOnly LocalDate(DateTimeOffset time) => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(time, _timeZone).DateTime);
 
@@ -190,7 +296,7 @@ public sealed class GtfsTimetable
                     table.ServiceIds.Add(service);
                 }
 
-                table.Add(csv[tripId], new Trip(route.RouteId, route.DisplayId, csv[direction], CleanHeadsign(csv[headsign]), serviceIndex));
+                table.Add(csv[tripId], new Trip(csv[tripId], route.RouteId, route.DisplayId, csv[direction], CleanHeadsign(csv[headsign]), serviceIndex));
             }
         });
         return table;
@@ -317,8 +423,10 @@ public sealed class GtfsTimetable
 
     private readonly record struct StopTime(int Trip, int Seconds, int Sequence);
 
-    private sealed class Trip(string routeId, string routeDisplayId, string gtfsDirectionId, string destination, int service)
+    private sealed class Trip(string gtfsTripId, string routeId, string routeDisplayId, string gtfsDirectionId, string destination, int service)
     {
+        public string GtfsTripId { get; } = gtfsTripId;
+
         public string RouteId { get; } = routeId;
 
         public string RouteDisplayId { get; } = routeDisplayId;
@@ -342,6 +450,9 @@ public sealed class GtfsTimetable
         private readonly Dictionary<string, int> _indexes = [];
 
         public List<Trip> Trips { get; } = [];
+
+        /// <summary>Each trip's position in <see cref="Trips"/>, by its GTFS trip ID.</summary>
+        public Dictionary<string, int> Indexes => _indexes;
 
         public List<string> ServiceIds { get; } = [];
 
