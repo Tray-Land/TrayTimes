@@ -133,7 +133,7 @@ internal sealed class BusTimeVehicle
     public double Lon { get; set; }
 
     [JsonPropertyName("hdg")]
-    public int Heading { get; set; }
+    public int Heading { get; set; } = -1;
 
     [JsonPropertyName("rt")]
     public string? Route { get; set; }

@@ -204,6 +204,42 @@ public sealed class BusTimeTransitServiceTests
     }
 
     [TestMethod]
+    [DataRow(0)]
+    [DataRow(45)]
+    [DataRow(90)]
+    [DataRow(180)]
+    [DataRow(270)]
+    [DataRow(359)]
+    [DataRow(-1)]
+    public async Task GetVehiclesAsync_WithHeading_PreservesCompassHeading(int heading)
+    {
+        // Arrange
+        string jsonHeading = heading.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        StubHandler handler = new($$$"""{"bustime-response":{"vehicle":[{"vid":"5501","lat":"43","lon":"-88","hdg":"{{{jsonHeading}}}","rt":"14"}]}}""");
+        BusTimeTransitService service = CreateService(handler);
+
+        // Act
+        IReadOnlyList<Vehicle> vehicles = await service.GetVehiclesAsync(["5501"]);
+
+        // Assert
+        Assert.AreEqual(heading, vehicles.Single().Heading);
+    }
+
+    [TestMethod]
+    public async Task GetVehiclesAsync_WithoutHeading_ReturnsUnknownInsteadOfNorth()
+    {
+        // Arrange
+        StubHandler handler = new("""{"bustime-response":{"vehicle":[{"vid":"5501","lat":"43","lon":"-88","rt":"14"}]}}""");
+        BusTimeTransitService service = CreateService(handler);
+
+        // Act
+        IReadOnlyList<Vehicle> vehicles = await service.GetVehiclesAsync(["5501"]);
+
+        // Assert
+        Assert.AreEqual(-1, vehicles.Single().Heading);
+    }
+
+    [TestMethod]
     public async Task GetVehiclesAsync_ServerError_ThrowsHttpRequestException()
     {
         // Arrange
