@@ -105,10 +105,22 @@
                         VerticalAlignment="Center"
                         AutomationProperties.Name="{x:Bind TrackLabel}"
                         Click="TrackButton_Click"
+                        ContextRequested="TrackButton_ContextRequested"
                         Style="{StaticResource ToolbarButtonStyle}"
                         ToolTipService.ToolTip="{x:Bind TrackLabel}"
                         Visibility="{x:Bind TrackVisibility}">
-                        <FontIcon FontSize="16" Glyph="{x:Bind TrackGlyph}" />
+                        <Grid>
+                            <FontIcon
+                                FontSize="16"
+                                Glyph="{x:Bind TrackGlyph}"
+                                Visibility="{x:Bind TrackOutlineVisibility}" />
+                            <!--  Tracked: solid gold bell emoji  -->
+                            <FontIcon
+                                FontFamily="Segoe UI Emoji"
+                                FontSize="16"
+                                Glyph="&#x1F514;"
+                                Visibility="{x:Bind TrackedBellVisibility}" />
+                        </Grid>
                     </Button>
                 </Grid>
             </DataTemplate>

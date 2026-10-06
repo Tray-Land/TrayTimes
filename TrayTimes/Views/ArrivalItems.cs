@@ -123,7 +123,11 @@ public sealed class ArrivalItem
 
     public Visibility TrackVisibility => Tracking == ArrivalTracking.Unavailable ? Visibility.Collapsed : Visibility.Visible;
 
-    public string TrackGlyph => IsTracked ? "" : ""; // RingerSolid / Ringer
+    public string TrackGlyph => ""; // Ringer (outline bell), shown while not tracked
+
+    public Visibility TrackOutlineVisibility => IsTracked ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility TrackedBellVisibility => IsTracked ? Visibility.Visible : Visibility.Collapsed;
 
     public string TrackLabel => IsTracked
         ? $"Stop tracking route {RouteLabel}"

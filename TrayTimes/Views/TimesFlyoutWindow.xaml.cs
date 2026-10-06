@@ -1127,12 +1127,56 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
+        StartTracking(item);
+    }
+
+    private void StartTracking(ArrivalItem item)
+    {
         string stopName = _groups.FirstOrDefault(g => g.Arrivals.Contains(item))?.Title ?? string.Empty;
         _tracker.Start(item.Arrival, stopName);
         int lead = SettingsService.HeadOutMinutes;
         ShowMapCaption(item.Arrival.MinutesAway(DateTimeOffset.Now) <= lead
             ? $"Tracking route {item.RouteLabel}. It's under {lead} min away, so head out now."
-            : $"Tracking route {item.RouteLabel}. You'll be notified {lead} min before it arrives.");
+            : item.Arrival.IsRealTime
+                ? $"Tracking route {item.RouteLabel}. You'll be notified {lead} min before it arrives."
+                : $"Tracking route {item.RouteLabel}. It's scheduled, so we'll look for live data as it gets close and notify you {lead} min before it arrives.");
+    }
+
+    private static readonly int[] LeadChoices = [1, 2, 3, 5, 10, 15, 20, 30];
+
+    /// <summary>Right-click on the bell: lists how far ahead to notify, with the current choice checked.</summary>
+    private void TrackButton_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        args.Handled = true;
+        MenuFlyout menu = new();
+        int current = SettingsService.HeadOutMinutes;
+        ArrivalItem? arrival = (sender as FrameworkElement)?.DataContext as ArrivalItem;
+        foreach (int minutes in LeadChoices)
+        {
+            RadioMenuFlyoutItem item = new()
+            {
+                Text = minutes == 1 ? "Notify 1 minute before" : $"Notify {minutes} minutes before",
+                GroupName = "HeadOutLead",
+                IsChecked = minutes == current,
+            };
+            item.Click += (_, _) =>
+            {
+                SettingsService.HeadOutMinutes = minutes;
+                if (arrival is { IsTracked: false })
+                {
+                    StartTracking(arrival);
+                    return;
+                }
+
+                ShowMapCaption($"You'll be notified {minutes} min before the bus arrives.");
+            };
+            menu.Items.Add(item);
+        }
+
+        if (sender is FrameworkElement anchor)
+        {
+            menu.ShowAt(anchor);
+        }
     }
 
     private void StopHeaderButton_Click(object sender, RoutedEventArgs e)
