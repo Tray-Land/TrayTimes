@@ -566,9 +566,28 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(originStops, destinationStops, patterns);
-        List<NearbyStop> stops = [.. origin
-            .Where(n => n.Stop.Routes.Any(r => direct.Contains(new RouteDirection(r.RouteId, r.DirectionId))))
-            .Take(MaxNearbyStops)];
+        // Origin is closest first, so a stop is kept only if it's the nearest one for some direct line.
+        HashSet<RouteDirection> claimed = [];
+        List<NearbyStop> stops = [];
+        foreach (NearbyStop n in origin)
+        {
+            bool nearest = false;
+            foreach (StopRouteInfo r in n.Stop.Routes)
+            {
+                RouteDirection line = new(r.RouteId, r.DirectionId);
+                if (direct.Contains(line) && claimed.Add(line))
+                {
+                    nearest = true;
+                }
+            }
+
+            if (nearest)
+            {
+                stops.Add(n);
+            }
+        }
+
+        stops = [.. stops.Take(MaxNearbyStops)];
         Notice noDirectBus = new(
             $"No direct bus to {leg.To.Name}",
             $"None of the buses within a 10-minute walk go within a 10-minute walk of {leg.To.Name}. Tray Times doesn't plan transfers yet.",
