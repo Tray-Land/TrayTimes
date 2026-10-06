@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:TrayTimes.Controls"
     xmlns:ex="using:WinUIEx"
+    xmlns:local="using:TrayTimes.Views"
     xmlns:map="using:WinUIEx.Maps"
     xmlns:models="using:TrayTimes.Models"
     Title="Tray Times Settings"
@@ -184,6 +185,78 @@
                 x:Name="KeepAwakeToggle"
                 Header="Keep the PC awake while tracking a bus"
                 Toggled="KeepAwakeToggle_Toggled" />
+
+            <!--  API usage  -->
+            <TextBlock
+                Margin="0,16,0,0"
+                Style="{StaticResource BodyStrongTextBlockStyle}"
+                Text="Transit API usage" />
+            <TextBlock
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Text="How many requests Tray Times has sent to the MCTS BusTime API, by endpoint. Counts cover the last 14 days."
+                TextWrapping="Wrap" />
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="72" />
+                    <ColumnDefinition Width="72" />
+                    <ColumnDefinition Width="72" />
+                </Grid.ColumnDefinitions>
+                <Grid.Resources>
+                    <Style BasedOn="{StaticResource CaptionTextBlockStyle}" TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Style>
+                </Grid.Resources>
+                <TextBlock Text="Endpoint" />
+                <TextBlock
+                    Grid.Column="1"
+                    HorizontalTextAlignment="End"
+                    Text="Today" />
+                <TextBlock
+                    Grid.Column="2"
+                    HorizontalTextAlignment="End"
+                    Text="7 days" />
+                <TextBlock
+                    Grid.Column="3"
+                    HorizontalTextAlignment="End"
+                    Text="14 days" />
+            </Grid>
+            <ItemsControl
+                x:Name="ApiUsageList"
+                AutomationProperties.Name="Transit API requests by endpoint"
+                IsTabStop="False">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="local:ApiUsageRow" x:DefaultBindMode="OneTime">
+                        <Grid Padding="0,4" ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="72" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock
+                                Grid.Column="1"
+                                HorizontalTextAlignment="End"
+                                Text="{x:Bind Today}" />
+                            <TextBlock
+                                Grid.Column="2"
+                                HorizontalTextAlignment="End"
+                                Text="{x:Bind Last7Days}" />
+                            <TextBlock
+                                Grid.Column="3"
+                                HorizontalTextAlignment="End"
+                                Text="{x:Bind Last14Days}" />
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Button
+                x:Name="ResetApiUsageButton"
+                AutomationProperties.Name="Reset API usage counts"
+                Click="ResetApiUsageButton_Click"
+                Content="Reset counts" />
 
             <!--  General  -->
             <TextBlock

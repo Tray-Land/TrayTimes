@@ -58,6 +58,9 @@ public sealed partial class SettingsWindow : WindowEx
         Closed += (_, _) => _stopIndex.Changed -= OnStopIndexChanged;
         UpdateStopIndexText();
 
+        ApiUsageService.Changed += OnApiUsageChanged;
+        Closed += (_, _) => ApiUsageService.Changed -= OnApiUsageChanged;
+        UpdateApiUsage();
         _selectedGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 20 };
         MapHelpers.ApplyStopColor(_selectedGlyph, Root);
         PickerMap.Layers.Add(_routeLayer);
@@ -212,6 +215,21 @@ public sealed partial class SettingsWindow : WindowEx
         SettingsService.KeepAwakeWhileTracking = KeepAwakeToggle.IsOn;
         App.Current.Tracker.ApplyKeepAwakeSetting();
     }
+
+    private void OnApiUsageChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(UpdateApiUsage);
+
+    private void UpdateApiUsage()
+    {
+        ApiCallSummary summary = ApiUsageService.GetSummary();
+        ApiUsageList.ItemsSource = new[] { ToRow("All requests", summary.Total) }
+            .Concat(summary.ByEndpoint.Select(e => ToRow(e.Key, e.Value)))
+            .ToList();
+
+        static ApiUsageRow ToRow(string name, ApiCallCounts counts) =>
+            new(name, counts.Today.ToString("N0"), counts.Last7Days.ToString("N0"), counts.Last14Days.ToString("N0"));
+    }
+
+    private void ResetApiUsageButton_Click(object sender, RoutedEventArgs e) => ApiUsageService.Reset();
 
     private void OnStopIndexChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(UpdateStopIndexText);
 

@@ -204,6 +204,53 @@ public sealed class BusTimeTransitServiceTests
     }
 
     [TestMethod]
+    public async Task GetArrivalsAsync_SendsRequest_RaisesEndpointCalled()
+    {
+        // Arrange
+        StubHandler handler = new("""{"bustime-response":{"prd":[]}}""");
+        BusTimeTransitService service = CreateService(handler);
+        List<string> endpoints = [];
+        service.EndpointCalled += (_, endpoint) => endpoints.Add(endpoint);
+
+        // Act
+        await service.GetArrivalsAsync(["1"]);
+
+        // Assert
+        CollectionAssert.AreEqual(new[] { "getpredictions" }, endpoints);
+    }
+
+    [TestMethod]
+    public async Task GetVehiclesAsync_ServerError_StillRaisesEndpointCalled()
+    {
+        // Arrange
+        StubHandler handler = new("oops", HttpStatusCode.InternalServerError);
+        BusTimeTransitService service = CreateService(handler);
+        List<string> endpoints = [];
+        service.EndpointCalled += (_, endpoint) => endpoints.Add(endpoint);
+
+        // Act
+        await Assert.ThrowsExactlyAsync<HttpRequestException>(() => service.GetVehiclesAsync(["5501"]));
+
+        // Assert
+        CollectionAssert.AreEqual(new[] { "getvehicles" }, endpoints);
+    }
+
+    [TestMethod]
+    public async Task GetRoutesAsync_WithoutApiKey_DoesNotRaiseEndpointCalled()
+    {
+        // Arrange
+        BusTimeTransitService service = new("Test", BaseUri, null, TimeZoneInfo.Utc, new HttpClient(new StubHandler("{}")));
+        int raised = 0;
+        service.EndpointCalled += (_, _) => raised++;
+
+        // Act
+        await Assert.ThrowsExactlyAsync<TransitApiException>(() => service.GetRoutesAsync());
+
+        // Assert
+        Assert.AreEqual(0, raised);
+    }
+
+    [TestMethod]
     [DataRow(0)]
     [DataRow(45)]
     [DataRow(90)]

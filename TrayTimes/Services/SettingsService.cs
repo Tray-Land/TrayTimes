@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TrayTimes.Models;
+using TrayTimes.Transit;
 using Windows.Storage;
 
 namespace TrayTimes.Services;
@@ -9,6 +10,7 @@ namespace TrayTimes.Services;
 [JsonSerializable(typeof(Place))]
 [JsonSerializable(typeof(List<FavoritePlace>))]
 [JsonSerializable(typeof(MapView))]
+[JsonSerializable(typeof(ApiCallLog))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 
 /// <summary>
@@ -95,6 +97,29 @@ internal static class SettingsService
     {
         get => Get(nameof(KeepAwakeWhileTracking), false);
         set => Set(nameof(KeepAwakeWhileTracking), value);
+    }
+
+    /// <summary>Transit API call tally; a fresh one if none is saved or it can't be read.</summary>
+    public static ApiCallLog ApiCallLog
+    {
+        get
+        {
+            if (Get<string?>(nameof(ApiCallLog), null) is not { } json)
+            {
+                return new ApiCallLog();
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize(json, SettingsJsonContext.Default.ApiCallLog) ?? new ApiCallLog();
+            }
+            catch (JsonException)
+            {
+                return new ApiCallLog();
+            }
+        }
+
+        set => Set(nameof(ApiCallLog), JsonSerializer.Serialize(value, SettingsJsonContext.Default.ApiCallLog));
     }
 
     public static IReadOnlyList<SavedStop> Stops

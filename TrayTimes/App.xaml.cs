@@ -101,6 +101,7 @@ public partial class App : Application
             (_, _) => _dispatcher.TryEnqueue(ShowFlyout), null, Timeout.Infinite, executeOnlyOnce: false);
 
         BusTimeTransitService mcts = BusTimeTransitService.CreateMcts(Secrets.MctsApiKey);
+        mcts.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
         _stopIndex = new StopIndexService(mcts);
         _monitor = new ArrivalsMonitor(mcts, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
         _monitor.Updated += (_, _) => UpdateTooltip();

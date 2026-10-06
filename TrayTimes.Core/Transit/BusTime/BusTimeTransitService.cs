@@ -46,6 +46,9 @@ public sealed class BusTimeTransitService : ITransitService
         FindTimeZone("America/Chicago"),
         http);
 
+    /// <summary>Raised with the endpoint name (e.g. "getpredictions") each time a request is sent, whether or not it succeeds. May fire on any thread.</summary>
+    public event EventHandler<string>? EndpointCalled;
+
     public string AgencyName { get; }
 
     public bool IsConfigured => _apiKey is not null;
@@ -165,6 +168,7 @@ public sealed class BusTimeTransitService : ITransitService
             query.Append('&').Append(name).Append('=').Append(Uri.EscapeDataString(value));
         }
 
+        EndpointCalled?.Invoke(this, endpoint);
         using HttpResponseMessage http = await _http.GetAsync(new Uri(_baseUri, query.ToString()), cancellationToken);
         http.EnsureSuccessStatusCode();
         await using Stream stream = await http.Content.ReadAsStreamAsync(cancellationToken);
