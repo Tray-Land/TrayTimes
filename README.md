@@ -24,6 +24,12 @@ The transit code sits behind `ITransitService` (`TrayTimes.Core/Transit/`), so a
 2. Put your MCTS BusTime key in `MctsApiKey`. Optionally, put an Azure Maps key in `AzureMapsKey` for the basemap and address search.
 3. Run from `TrayTimes/` with `dotnet run -c Debug -p:Platform=x64` (or `ARM64`). Tray apps keep running after `dotnet run` returns only when launched detached: `winapp run . --detach --arch x64`.
 
+### Command-line builds
+
+From the repository root, `winapp run .\TrayTimes\TrayTimes.csproj --detach` builds and launches for the current machine's architecture. `build-msix-for-gh.ps1` publishes x64 and ARM64 MSIX packages, signs them using the maintainer's local `sign-msix` function, and creates a draft release; pass `-SkipRelease` to build and sign without tagging or uploading.
+
+Keep named controls distinct from properties used by `x:Bind` in data templates. For example, the flyout's `EmptyStateText` control must not be named `EmptyText`, which is a bound `StopGroupItem` property. That collision produces WMC1507 in Visual Studio; the standalone XAML compiler used by CLI builds instead fails with WMC9999 while loading the warning's error-message resource.
+
 ## API budget
 
 The default key allows 10,000 requests a day. While the flyout is open, arrivals refresh every 30 s and bus positions every 15 s. A minute after it's dismissed the flyout closes and nothing refreshes, unless you're tracking a bus (the bell next to an arrival): then only that stop refreshes, every 60 s, then every 30 s under 10 minutes out and every 10 s under 5, until 5 minutes after the bus is due.
