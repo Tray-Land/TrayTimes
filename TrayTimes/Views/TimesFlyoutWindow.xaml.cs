@@ -38,6 +38,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const int ArrivalsPerStop = 4;
     private const int ArrivalsPerNearbyStop = 3;
     private const int MaxNearbyStops = 8;
+    private const int MaxRoutedStops = 12; // walking routes looked up per refresh
     private const double WalkingMetersPerMinute = 80; // about 3 mph
     private const double MovedMeters = 25; // Closer than this, a new fix doesn't change which stops are near.
     private static readonly TimeSpan PendingPopWindow = TimeSpan.FromSeconds(1);
@@ -536,7 +537,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return PlaceStops.Unavailable(new Notice("Can't find your location", locationError ?? "Try again in a moment.", "Try again", () => EnterMode(reframe: true)));
         }
 
-        IReadOnlyList<NearbyStop> stops = NearbyStop.Find(await _stopIndex.GetAsync(), point, MaxNearbyStops);
+        // Straight-line distance picks the candidates; the walking route decides which is quickest to reach.
+        IReadOnlyList<NearbyStop> candidates = NearbyStop.Find(await _stopIndex.GetAsync(), point, MaxRoutedStops);
+        IReadOnlyList<NearbyStop> stops = [.. (await WalkingRouteService.RankByWalkAsync(point, candidates)).Take(MaxNearbyStops)];
         return new PlaceStops(point, stops, new Notice("No stops nearby", $"There are no {_monitor.Service.AgencyName} stops within about a mile of you."));
     }
 
@@ -583,10 +586,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(originStops, destinationStops, patterns);
-        // Origin is closest first, so a stop is kept only if it's the nearest one for some direct line.
+        // Walk times reorder the closest few; the rest stay in straight-line order after them.
+        IReadOnlyList<NearbyStop> byWalk = [.. await WalkingRouteService.RankByWalkAsync(leg.Origin, origin.Take(MaxRoutedStops).ToList()), .. origin.Skip(MaxRoutedStops)];
+
+        // Quickest first, so a stop is kept only if it's the quickest walk for some direct line.
         HashSet<RouteDirection> claimed = [];
         List<NearbyStop> stops = [];
-        foreach (NearbyStop n in origin)
+        foreach (NearbyStop n in byWalk)
         {
             bool nearest = false;
             foreach (StopRouteInfo r in n.Stop.Routes)
@@ -852,12 +858,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         bool commute = _mode == FlyoutMode.Commute;
         bool Listed(string routeId, string directionId) => !commute || _directRoutes.Contains(new RouteDirection(routeId, directionId));
 
-        int walkMinutes = (int)Math.Ceiling(nearby.Meters / WalkingMetersPerMinute);
+        int walkMinutes = Math.Max(1, nearby.WalkMinutes(WalkingMetersPerMinute));
         string[] lines = [.. stop.Routes.Where(r => Listed(r.RouteId, r.DirectionId)).Select(r => r.RouteDisplayId).Distinct(StringComparer.OrdinalIgnoreCase)];
         string lineText = lines.Length == 0 ? string.Empty
             : lines.Length <= 5 ? $" · {string.Join(", ", lines)}"
             : $" · {string.Join(", ", lines.Take(5))} +{lines.Length - 5}";
-        string subtitle = $"{FormatDistance(nearby.Meters)} · {walkMinutes} min walk{lineText}";
+        string subtitle = $"{FormatDistance(nearby.DistanceMeters)} · {walkMinutes} min walk{lineText}";
 
         // Stops on opposite sides of a street share a name, so say which way the buses go.
         string[] directions = [.. stop.Routes
