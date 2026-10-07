@@ -24,7 +24,7 @@ public sealed class RequestBaselineTests
     public void Cleanup() => SettingsService.Reset();
 
     [TestMethod]
-    public async Task RefreshAsync_WarmFavoritesTimerAndDisplayEventBursts_CountsTwoPredictionsAndEightVehicles()
+    public async Task RefreshAsync_WarmFavoritesTimerAndDisplayEventBursts_CountsTwoPredictionsAndFourVehicles()
     {
         // Arrange: real monitor events, real BusTime HTTP path; display and vehicle-timer callbacks
         // replay the audited flyout boundary without WinUI, map rendering, or production traffic.
@@ -35,10 +35,18 @@ public sealed class RequestBaselineTests
         ArrivalsMonitor monitor = new(service, new ScheduleService(), dispatcher, clock);
         await monitor.RefreshAsync();
         monitor.IsForeground = true;
+        VehiclePositionsMonitor vehicles = new(service, _ => { }, clock) { IsForeground = true };
+        await vehicles.RefreshAsync(["5501"]);
+        clock.Advance(VehiclePositionsMonitor.RefreshInterval);
         List<Task> vehicleRequests = [];
-        monitor.Updated += (_, _) => vehicleRequests.Add(VehiclesAsync(service, TransitConsumer.Favorites,
-            monitor.IsLoading ? TransitTrigger.FavoritesLoading : TransitTrigger.FavoritesResult,
-            [.. monitor.Latest.Arrivals.Where(a => a.VehicleId is not null).Select(a => a.VehicleId!).Distinct()]));
+        monitor.Updated += (_, _) =>
+        {
+            if (!monitor.IsLoading)
+            {
+                vehicleRequests.Add(VehiclesAsync(vehicles, TransitConsumer.Favorites, TransitTrigger.FavoritesResult,
+                    [.. monitor.Latest.Arrivals.Where(a => a.VehicleId is not null).Select(a => a.VehicleId!).Distinct()]));
+            }
+        };
         int before = handler.Attempts;
 
         // Act: stable one-stop/one-vehicle, warm caches, [0,60) starting at a prediction-timer tick.
@@ -49,25 +57,25 @@ public sealed class RequestBaselineTests
                 await WaitForMonitorAsync(monitor, dispatcher.Timers[0].Fire);
             }
 
-            await VehiclesAsync(service, TransitConsumer.Favorites, TransitTrigger.Timer);
+            await VehiclesAsync(vehicles, TransitConsumer.Favorites, TransitTrigger.Timer);
             clock.Advance(TimeSpan.FromSeconds(15));
         }
 
         await Task.WhenAll(vehicleRequests);
 
         // Assert
-        Assert.AreEqual(10, handler.Attempts - before);
+        Assert.AreEqual(6, handler.Attempts - before);
         Assert.AreEqual(2, Completed(service, TransitEndpoint.Predictions).Count(o => o.Trigger == TransitTrigger.Timer));
-        Assert.AreEqual(8, Completed(service, TransitEndpoint.Vehicles).Count);
-        Assert.AreEqual(2, Completed(service, TransitEndpoint.Vehicles).Count(o => o.Trigger == TransitTrigger.FavoritesLoading));
+        Assert.AreEqual(5, Completed(service, TransitEndpoint.Vehicles).Count); // Includes the initial position.
+        Assert.AreEqual(0, Completed(service, TransitEndpoint.Vehicles).Count(o => o.Trigger == TransitTrigger.FavoritesLoading));
         Assert.AreEqual(2, Completed(service, TransitEndpoint.Vehicles).Count(o => o.Trigger == TransitTrigger.FavoritesResult));
-        Assert.AreEqual(11, ApiUsageService.GetSummary().Total.Today); // Includes the setup fetch.
+        Assert.AreEqual(8, ApiUsageService.GetSummary().Total.Today); // Includes setup predictions and position.
     }
 
     [TestMethod]
     [DataRow(TransitConsumer.Commute)]
     [DataRow(TransitConsumer.Nearby)]
-    public async Task GetArrivalsAsync_PlaceBoundaryReplayWithForegroundFavorites_CountsFourPredictionsAndEightVehicles(TransitConsumer consumer)
+    public async Task GetArrivalsAsync_PlaceBoundaryReplayWithForegroundFavorites_CountsFourPredictionsAndFourVehicles(TransitConsumer consumer)
     {
         // Arrange: real Favorites monitor; the place result/completion and timers are a replay of
         // audited UI call sites, not a measurement of location/discovery or rendered WinUI.
@@ -78,6 +86,9 @@ public sealed class RequestBaselineTests
         ArrivalsMonitor monitor = new(service, new ScheduleService(), dispatcher, clock);
         await monitor.RefreshAsync();
         monitor.IsForeground = true;
+        VehiclePositionsMonitor vehicles = new(service, _ => { }, clock) { IsForeground = true };
+        await vehicles.RefreshAsync(["5501"]);
+        clock.Advance(VehiclePositionsMonitor.RefreshInterval);
         int before = handler.Attempts;
 
         // Act
@@ -91,19 +102,21 @@ public sealed class RequestBaselineTests
                     await service.GetArrivalsAsync(["1", "2"]);
                 }
 
-                await VehiclesAsync(service, consumer, TransitTrigger.PlaceResult);
-                await VehiclesAsync(service, consumer, TransitTrigger.PlaceCompleted);
+                await VehiclesAsync(vehicles, consumer, TransitTrigger.PlaceResult);
+                await VehiclesAsync(vehicles, consumer, TransitTrigger.PlaceCompleted);
             }
 
-            await VehiclesAsync(service, consumer, TransitTrigger.Timer);
+            await VehiclesAsync(vehicles, consumer, TransitTrigger.Timer);
             clock.Advance(TimeSpan.FromSeconds(15));
         }
 
         // Assert
-        Assert.AreEqual(12, handler.Attempts - before);
+        Assert.AreEqual(8, handler.Attempts - before);
         Assert.AreEqual(2, Completed(service, TransitEndpoint.Predictions).Count(o => o.Consumer == consumer));
         Assert.AreEqual(2, Completed(service, TransitEndpoint.Predictions).Count(o => o.Consumer == TransitConsumer.Favorites && o.Trigger == TransitTrigger.Timer));
-        Assert.AreEqual(8, Completed(service, TransitEndpoint.Vehicles).Count);
+        Assert.AreEqual(5, Completed(service, TransitEndpoint.Vehicles).Count); // Includes the initial position.
+        Assert.AreEqual(0, Completed(service, TransitEndpoint.Vehicles).Count(o => o.Trigger == TransitTrigger.PlaceCompleted));
+        Assert.AreEqual(10, ApiUsageService.GetSummary().Total.Today);
     }
 
     [TestMethod]
@@ -314,10 +327,10 @@ public sealed class RequestBaselineTests
     private static List<TransitRequestObservation> Completed(BusTimeTransitService service, TransitEndpoint endpoint) =>
         [.. service.Diagnostics.Snapshot.Where(o => o.Endpoint == endpoint && o.Phase == TransitRequestPhase.Completed)];
 
-    private static async Task VehiclesAsync(BusTimeTransitService service, TransitConsumer consumer, TransitTrigger trigger, IReadOnlyCollection<string>? vehicleIds = null)
+    private static async Task VehiclesAsync(VehiclePositionsMonitor vehicles, TransitConsumer consumer, TransitTrigger trigger, IReadOnlyCollection<string>? vehicleIds = null)
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(consumer, trigger);
-        await service.GetVehiclesAsync(vehicleIds ?? ["5501"]);
+        await vehicles.RefreshAsync(vehicleIds ?? ["5501"]);
     }
 
     private static async Task WaitForMonitorAsync(ArrivalsMonitor monitor, Action trigger)

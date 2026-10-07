@@ -44,7 +44,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private static readonly TimeSpan PendingPopWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LocationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RecentDismissWindow = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan VehicleRefreshInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan PlaceRefreshInterval = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan PatternCacheLifetime = TimeSpan.FromHours(6);
 
@@ -52,6 +51,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly ArrivalsMonitor _monitor;
     private readonly BusTrackingService _tracker;
     private readonly StopIndexService _stopIndex;
+    private readonly VehiclePositionsMonitor _vehiclePositions;
     private readonly DispatcherQueueTimer _hideTimer;
     private readonly DispatcherQueueTimer _vehicleTimer;
     private readonly DispatcherQueueTimer _placeTimer;
@@ -119,6 +119,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _monitor = monitor;
         _tracker = tracker;
         _stopIndex = stopIndex;
+        _vehiclePositions = new VehiclePositionsMonitor(_monitor.Service, UpdateVehicles);
         _hwnd = (HWND)WindowNative.GetWindowHandle(this);
         AppWindow.SetIcon("Assets/AppIcon.ico");
         ConfigurePresenter();
@@ -127,7 +128,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         AppWindow.Closing += OnAppWindowClosing;
 
         _hideTimer = CreateTimer(TimeSpan.FromMilliseconds(150), repeating: false, HideIfFocusLeftWindow);
-        _vehicleTimer = CreateTimer(VehicleRefreshInterval, repeating: true, () => _ = RefreshVehiclesAsync(TransitTrigger.Timer));
+        _vehicleTimer = CreateTimer(VehiclePositionsMonitor.RefreshInterval, repeating: true, () => _ = RefreshVehiclesAsync(TransitTrigger.Timer));
         _placeTimer = CreateTimer(PlaceRefreshInterval, repeating: true, () => _ = LoadPlaceAsync(reframe: false, TransitTrigger.Timer));
         _captionTimer = CreateTimer(TimeSpan.FromSeconds(5), repeating: false, () => HideMapCaption(animate: true));
 
@@ -199,6 +200,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _hideTimer.Stop();
         _isShowing = true;
         _isPopupVisible = true;
+        _vehiclePositions.IsForeground = true;
 
         AppWindow.Show(true);
         Activate();
@@ -222,6 +224,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _isPopupVisible = false;
+        _vehiclePositions.IsForeground = false;
         _lastDismissedAtUtc = DateTime.UtcNow;
         _hideTimer.Stop();
         _vehicleTimer.Stop();
@@ -393,6 +396,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// <summary>Shows the current mode's stops, route lines, and arrivals, loading as needed.</summary>
     private void EnterMode(bool reframe, TransitTrigger trigger = TransitTrigger.ModeChanged)
     {
+        _vehiclePositions.Invalidate();
         // A fresh list: every row rises in again rather than silently swapping.
         _listSignature = null;
         _shownRows.Clear();
@@ -498,7 +502,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             {
                 _placeLoading = false;
                 Render();
-                _ = RefreshVehiclesAsync(TransitTrigger.PlaceCompleted);
             }
         }
     }
@@ -1043,14 +1046,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             // All-routes stops need other routes' colors; the catalog is cached after the first load.
             _routes = await _monitor.GetRouteCatalogAsync();
-            if (_allowClose)
+            if (_allowClose || _mode != FlyoutMode.Favorites)
             {
                 return;
             }
         }
 
         Render();
-        if (_isPopupVisible)
+        if (_isPopupVisible && trigger == TransitTrigger.FavoritesResult && !_monitor.IsLoading)
         {
             _ = RefreshVehiclesAsync(trigger);
         }
@@ -1141,7 +1144,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     }
 
     /// <summary>Moves the bus icons for the soonest arrivals in the current list.</summary>
-    private async Task RefreshVehiclesAsync(TransitTrigger trigger)
+    private async Task RefreshVehiclesAsync(TransitTrigger trigger, bool force = false)
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, trigger);
         if (!_monitor.Service.IsConfigured || !_isPopupVisible)
@@ -1149,7 +1152,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
-        FlyoutMode mode = _mode;
         List<ArrivalItem> upcoming = [.. _groups
             .SelectMany(g => g.Arrivals)
             .Where(a => a.Arrival.VehicleId is not null && a.Arrival.Status != ArrivalStatus.Canceled)
@@ -1157,21 +1159,18 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             .DistinctBy(a => a.Arrival.VehicleId)
             .Take(_monitor.Service.MaxStopsPerRequest)];
 
-        IReadOnlyList<Vehicle> vehicles;
         try
         {
-            vehicles = upcoming.Count == 0 ? [] : await _monitor.Service.GetVehiclesAsync([.. upcoming.Select(a => a.Arrival.VehicleId!)]);
+            await _vehiclePositions.RefreshAsync([.. upcoming.Select(a => a.Arrival.VehicleId!)], force);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
-            return;
+            System.Diagnostics.Debug.WriteLine($"Vehicle positions refresh failed: {ex.GetType().Name}. Keeping last-good map positions.");
         }
+    }
 
-        if (mode != _mode || !_isPopupVisible)
-        {
-            return;
-        }
-
+    private void UpdateVehicles(IReadOnlyList<Vehicle> vehicles)
+    {
         HashSet<string> seen = [];
         foreach (Vehicle vehicle in vehicles)
         {
@@ -1538,6 +1537,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void Refresh()
     {
         Motion.Spin(RefreshIcon);
+        _ = RefreshVehiclesAsync(TransitTrigger.ManualRefresh, force: true);
         if (_mode == FlyoutMode.Favorites)
         {
             _ = _monitor.RefreshAsync();
