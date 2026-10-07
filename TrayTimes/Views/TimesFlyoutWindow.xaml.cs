@@ -127,8 +127,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         AppWindow.Closing += OnAppWindowClosing;
 
         _hideTimer = CreateTimer(TimeSpan.FromMilliseconds(150), repeating: false, HideIfFocusLeftWindow);
-        _vehicleTimer = CreateTimer(VehicleRefreshInterval, repeating: true, () => _ = RefreshVehiclesAsync());
-        _placeTimer = CreateTimer(PlaceRefreshInterval, repeating: true, () => _ = LoadPlaceAsync(reframe: false));
+        _vehicleTimer = CreateTimer(VehicleRefreshInterval, repeating: true, () => _ = RefreshVehiclesAsync(TransitTrigger.Timer));
+        _placeTimer = CreateTimer(PlaceRefreshInterval, repeating: true, () => _ = LoadPlaceAsync(reframe: false, TransitTrigger.Timer));
         _captionTimer = CreateTimer(TimeSpan.FromSeconds(5), repeating: false, () => HideMapCaption(animate: true));
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
@@ -210,7 +210,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _monitor.IsForeground = true;
         _destinationId = null; // Each open guesses the next trip afresh.
         // Open where the map was left; only frame the stops when there's no previous view.
-        EnterMode(reframe: SettingsService.FlyoutMapView is null);
+        EnterMode(reframe: SettingsService.FlyoutMapView is null, TransitTrigger.FlyoutOpened);
         _vehicleTimer.Start();
     }
 
@@ -383,8 +383,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void SelectMode(FlyoutMode mode) => ModeBar.SelectedItem = ModeBar.Items[(int)mode];
 
+    private TransitConsumer RequestConsumer => _mode switch
+    {
+        FlyoutMode.Favorites => TransitConsumer.Favorites,
+        FlyoutMode.Commute => TransitConsumer.Commute,
+        _ => TransitConsumer.Nearby,
+    };
+
     /// <summary>Shows the current mode's stops, route lines, and arrivals, loading as needed.</summary>
-    private void EnterMode(bool reframe)
+    private void EnterMode(bool reframe, TransitTrigger trigger = TransitTrigger.ModeChanged)
     {
         // A fresh list: every row rises in again rather than silently swapping.
         _listSignature = null;
@@ -412,7 +419,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                 _ = FrameListedStopsAsync(MapAnimationKind.None);
             }
 
-            _ = RefreshVehiclesAsync();
+            _ = RefreshVehiclesAsync(trigger);
             return;
         }
 
@@ -428,12 +435,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         RebuildStopPins();
         Render();
         _placeTimer.Start();
-        _ = LoadPlaceAsync(reframe);
+        _ = LoadPlaceAsync(reframe, trigger);
     }
 
     /// <summary>Finds the mode's stops (the commute's boarding stops, or those near the device) and fetches their arrivals.</summary>
-    private async Task LoadPlaceAsync(bool reframe)
+    private async Task LoadPlaceAsync(bool reframe, TransitTrigger trigger)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, trigger);
         FlyoutMode mode = _mode;
         if (mode == FlyoutMode.Favorites)
         {
@@ -457,7 +465,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _ = _stopIndex.GetAsync();
             if (_routes.Count == 0)
             {
-                _ = _monitor.GetRouteCatalogAsync();
+                _ = _monitor.GetRouteCatalogAsync(RequestConsumer);
             }
 
             // On opening, a rough fix gets the list up quickly; the precise one then corrects it if it
@@ -471,6 +479,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             if (refined is not null && await refined is { } precise && here is { } rough
                 && GeoMath.DistanceMeters(rough, precise) > MovedMeters && !Stale())
             {
+                using IDisposable refinedScope = TransitRequestDiagnostics.BeginScope(RequestConsumer, TransitTrigger.RefinedLocation);
                 await ShowPlaceAsync(await FindPlaceStopsAsync(mode, precise, null), reframe, Stale);
             }
         }
@@ -489,7 +498,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             {
                 _placeLoading = false;
                 Render();
-                _ = RefreshVehiclesAsync();
+                _ = RefreshVehiclesAsync(TransitTrigger.PlaceCompleted);
             }
         }
     }
@@ -501,7 +510,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IReadOnlyList<Arrival> arrivals = stopIds.Length == 0 ? [] : _monitor.Schedule.AddScheduled(await _monitor.Service.GetArrivalsAsync(stopIds), stopIds);
         if (found.Stops.Count > 0 && _routes.Count == 0)
         {
-            _routes = await _monitor.GetRouteCatalogAsync();
+            _routes = await _monitor.GetRouteCatalogAsync(RequestConsumer);
         }
 
         if (stale())
@@ -535,7 +544,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         Render();
-        _ = RefreshVehiclesAsync();
+        _ = RefreshVehiclesAsync(TransitTrigger.PlaceResult);
     }
 
     private Task<PlaceStops> FindPlaceStopsAsync(FlyoutMode mode, GeoPoint? here, string? locationError) =>
@@ -545,7 +554,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (here is not { } point)
         {
-            return PlaceStops.Unavailable(new Notice("Can't find your location", locationError ?? "Try again in a moment.", "Try again", () => EnterMode(reframe: true)));
+            return PlaceStops.Unavailable(new Notice("Can't find your location", locationError ?? "Try again in a moment.", "Try again", () => EnterMode(reframe: true, TransitTrigger.Retry)));
         }
 
         // Straight-line distance picks the candidates; the walking route decides which is quickest to reach.
@@ -698,7 +707,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         item.Click += (_, _) =>
         {
             _destinationId = placeId;
-            EnterMode(reframe: true);
+            EnterMode(reframe: true, TransitTrigger.DestinationChanged);
         };
         return item;
     }
@@ -981,7 +990,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         if (_mode == FlyoutMode.Favorites)
         {
-            EnterMode(reframe: true);
+            EnterMode(reframe: true, TransitTrigger.StopsChanged);
         }
         else
         {
@@ -1001,7 +1010,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (_isPopupVisible && _mode == FlyoutMode.Commute)
         {
-            EnterMode(reframe: true);
+            EnterMode(reframe: true, TransitTrigger.PlacesChanged);
         }
     }
 
@@ -1018,12 +1027,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (_isPopupVisible && _mode != FlyoutMode.Favorites && !_allowClose)
         {
-            _ = LoadPlaceAsync(reframe: false);
+            _ = LoadPlaceAsync(reframe: false, TransitTrigger.TimetableLoaded);
         }
     });
 
     private async void OnArrivalsUpdated(object? sender, EventArgs e)
     {
+        TransitTrigger trigger = _monitor.IsLoading ? TransitTrigger.FavoritesLoading : TransitTrigger.FavoritesResult;
         if (_mode != FlyoutMode.Favorites)
         {
             return;
@@ -1042,7 +1052,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         Render();
         if (_isPopupVisible)
         {
-            _ = RefreshVehiclesAsync();
+            _ = RefreshVehiclesAsync(trigger);
         }
     }
 
@@ -1110,8 +1120,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, TransitTrigger.Metadata);
         if (_patternCache.TryGetValue(routeId, out (DateTime FetchedUtc, IReadOnlyList<RoutePattern> Patterns) cached) && DateTime.UtcNow - cached.FetchedUtc < PatternCacheLifetime)
         {
+            _monitor.Service.Diagnostics?.RecordReuse(TransitEndpoint.Patterns, inFlight: false, batchSize: 1);
             return cached.Patterns;
         }
 
@@ -1129,8 +1141,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     }
 
     /// <summary>Moves the bus icons for the soonest arrivals in the current list.</summary>
-    private async Task RefreshVehiclesAsync()
+    private async Task RefreshVehiclesAsync(TransitTrigger trigger)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, trigger);
         if (!_monitor.Service.IsConfigured || !_isPopupVisible)
         {
             return;
@@ -1531,7 +1544,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
         else
         {
-            _ = LoadPlaceAsync(reframe: false);
+            _ = LoadPlaceAsync(reframe: false, TransitTrigger.ManualRefresh);
         }
     }
 

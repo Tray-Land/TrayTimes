@@ -29,13 +29,14 @@ public sealed class BusTimeTransitService : ITransitService
     private readonly TimeZoneInfo _agencyTimeZone;
 
     /// <param name="http">The client to send requests with; omit to share one app-wide client.</param>
-    public BusTimeTransitService(string agencyName, Uri baseUri, string? apiKey, TimeZoneInfo agencyTimeZone, HttpClient? http = null)
+    public BusTimeTransitService(string agencyName, Uri baseUri, string? apiKey, TimeZoneInfo agencyTimeZone, HttpClient? http = null, TransitRequestDiagnostics? diagnostics = null)
     {
         AgencyName = agencyName;
         _baseUri = baseUri;
         _apiKey = string.IsNullOrWhiteSpace(apiKey) ? null : apiKey;
         _agencyTimeZone = agencyTimeZone;
         _http = http ?? SharedHttp;
+        Diagnostics = diagnostics ?? new TransitRequestDiagnostics();
     }
 
     /// <summary>Milwaukee County Transit System.</summary>
@@ -55,9 +56,11 @@ public sealed class BusTimeTransitService : ITransitService
 
     public int MaxStopsPerRequest => MaxIdsPerRequest;
 
+    public TransitRequestDiagnostics Diagnostics { get; }
+
     public async Task<IReadOnlyList<TransitRoute>> GetRoutesAsync(CancellationToken cancellationToken = default)
     {
-        BusTimeResponse response = await GetAsync("getroutes", [], cancellationToken);
+        BusTimeResponse response = await GetAsync("getroutes", TransitEndpoint.Routes, 0, [], cancellationToken);
         return (response.Routes ?? [])
             .Where(r => !string.IsNullOrEmpty(r.Route))
             .Select(r => new TransitRoute(r.Route!, NonEmpty(r.DisplayDesignator) ?? r.Route!, NonEmpty(r.Name) ?? r.Route!, NonEmpty(r.Color)))
@@ -66,7 +69,7 @@ public sealed class BusTimeTransitService : ITransitService
 
     public async Task<IReadOnlyList<TransitDirection>> GetDirectionsAsync(string routeId, CancellationToken cancellationToken = default)
     {
-        BusTimeResponse response = await GetAsync("getdirections", [("rt", routeId)], cancellationToken);
+        BusTimeResponse response = await GetAsync("getdirections", TransitEndpoint.Directions, 1, [("rt", routeId)], cancellationToken);
         return (response.Directions ?? [])
             .Where(d => !string.IsNullOrEmpty(d.Id))
             .Select(d => new TransitDirection(d.Id!, NonEmpty(d.Name) ?? d.Id!))
@@ -75,7 +78,7 @@ public sealed class BusTimeTransitService : ITransitService
 
     public async Task<IReadOnlyList<TransitStop>> GetStopsAsync(string routeId, string directionId, CancellationToken cancellationToken = default)
     {
-        BusTimeResponse response = await GetAsync("getstops", [("rt", routeId), ("dir", directionId)], cancellationToken);
+        BusTimeResponse response = await GetAsync("getstops", TransitEndpoint.Stops, 1, [("rt", routeId), ("dir", directionId)], cancellationToken);
         return (response.Stops ?? [])
             .Where(s => !string.IsNullOrEmpty(s.StopId))
             .Select(s => new TransitStop(s.StopId!, NonEmpty(s.Name) ?? s.StopId!, new GeoPoint(s.Lat, s.Lon)))
@@ -89,7 +92,7 @@ public sealed class BusTimeTransitService : ITransitService
             return [];
         }
 
-        BusTimeResponse response = await GetAsync("getpredictions", [("stpid", JoinIds(stopIds))], cancellationToken);
+        BusTimeResponse response = await GetAsync("getpredictions", TransitEndpoint.Predictions, Math.Min(stopIds.Count, MaxIdsPerRequest), [("stpid", JoinIds(stopIds))], cancellationToken);
         DateTimeOffset now = DateTimeOffset.Now;
         List<Arrival> arrivals = [];
         foreach (BusTimePrediction p in response.Predictions ?? [])
@@ -135,7 +138,7 @@ public sealed class BusTimeTransitService : ITransitService
             return [];
         }
 
-        BusTimeResponse response = await GetAsync("getvehicles", [("vid", JoinIds(vehicleIds))], cancellationToken);
+        BusTimeResponse response = await GetAsync("getvehicles", TransitEndpoint.Vehicles, Math.Min(vehicleIds.Count, MaxIdsPerRequest), [("vid", JoinIds(vehicleIds))], cancellationToken);
         return (response.Vehicles ?? [])
             .Where(v => !string.IsNullOrEmpty(v.VehicleId) && double.IsFinite(v.Lat) && double.IsFinite(v.Lon))
             .Select(v => new Vehicle(v.VehicleId!, v.Route ?? string.Empty, v.Destination ?? string.Empty, new GeoPoint(v.Lat, v.Lon), v.Heading, v.Delayed))
@@ -144,7 +147,7 @@ public sealed class BusTimeTransitService : ITransitService
 
     public async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId, CancellationToken cancellationToken = default)
     {
-        BusTimeResponse response = await GetAsync("getpatterns", [("rt", routeId)], cancellationToken);
+        BusTimeResponse response = await GetAsync("getpatterns", TransitEndpoint.Patterns, 1, [("rt", routeId)], cancellationToken);
         return (response.Patterns ?? [])
             .Where(p => p.Points is { Count: > 1 })
             .Select(p => new RoutePattern(
@@ -155,7 +158,7 @@ public sealed class BusTimeTransitService : ITransitService
             .ToList();
     }
 
-    private async Task<BusTimeResponse> GetAsync(string endpoint, (string Name, string Value)[] parameters, CancellationToken cancellationToken)
+    private async Task<BusTimeResponse> GetAsync(string endpoint, TransitEndpoint diagnosticEndpoint, int batchSize, (string Name, string Value)[] parameters, CancellationToken cancellationToken)
     {
         if (_apiKey is null)
         {
@@ -168,33 +171,62 @@ public sealed class BusTimeTransitService : ITransitService
             query.Append('&').Append(name).Append('=').Append(Uri.EscapeDataString(value));
         }
 
-        EndpointCalled?.Invoke(this, endpoint);
-        using HttpResponseMessage http = await _http.GetAsync(new Uri(_baseUri, query.ToString()), cancellationToken);
-        http.EnsureSuccessStatusCode();
-        await using Stream stream = await http.Content.ReadAsStreamAsync(cancellationToken);
-
-        BusTimeResponse response;
+        Uri uri = new(_baseUri, query.ToString());
+        TransitRequestDiagnostics.Attempt attempt = Diagnostics.Start(diagnosticEndpoint, batchSize);
+        TransitRequestOutcome outcome = TransitRequestOutcome.Failure;
+        int? httpStatus = null;
         try
         {
-            response = (await JsonSerializer.DeserializeAsync(stream, BusTimeJsonContext.Default.BusTimeEnvelope, cancellationToken))?.Response
-                ?? throw new TransitApiException($"{AgencyName} returned an empty response.");
-        }
-        catch (JsonException ex)
-        {
-            throw new TransitApiException($"{AgencyName} returned data this app couldn't read ({ex.Message}).");
-        }
+            EndpointCalled?.Invoke(this, endpoint);
+            using HttpResponseMessage http = await _http.GetAsync(uri, cancellationToken);
+            httpStatus = (int)http.StatusCode;
+            http.EnsureSuccessStatusCode();
+            await using Stream stream = await http.Content.ReadAsStreamAsync(cancellationToken);
 
-        // Errors can be per-ID alongside good data (e.g. one of several stops has no service).
-        // Only fail when every error is a real one and there's no data at all.
-        string? failure = response.Errors?
-            .Select(e => e.Message)
-            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m) && !EmptyResultMessages.Any(benign => m.Contains(benign, StringComparison.OrdinalIgnoreCase)));
-        if (failure is not null && !HasData(response))
-        {
-            throw new TransitApiException(failure);
-        }
+            BusTimeResponse response;
+            try
+            {
+                response = (await JsonSerializer.DeserializeAsync(stream, BusTimeJsonContext.Default.BusTimeEnvelope, cancellationToken))?.Response
+                    ?? throw new TransitApiException($"{AgencyName} returned an empty response.");
+            }
+            catch (JsonException ex)
+            {
+                throw new TransitApiException($"{AgencyName} returned data this app couldn't read ({ex.Message}).");
+            }
 
-        return response;
+            // Errors can be per-ID alongside good data (e.g. one of several stops has no service).
+            // Only fail when every error is a real one and there's no data at all.
+            string? failure = response.Errors?
+                .Select(e => e.Message)
+                .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m) && !EmptyResultMessages.Any(benign => m.Contains(benign, StringComparison.OrdinalIgnoreCase)));
+            if (failure is not null && !HasData(response))
+            {
+                throw new TransitApiException(failure);
+            }
+
+            outcome = TransitRequestOutcome.Success;
+            return response;
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = cancellationToken.IsCancellationRequested ? TransitRequestOutcome.Canceled : TransitRequestOutcome.Timeout;
+            throw;
+        }
+        catch (HttpRequestException ex)
+        {
+            httpStatus ??= ex.StatusCode is { } status ? (int)status : null;
+            outcome = httpStatus is null ? TransitRequestOutcome.TransportFailure : TransitRequestOutcome.HttpFailure;
+            throw;
+        }
+        catch (TransitApiException)
+        {
+            outcome = TransitRequestOutcome.ApiFailure;
+            throw;
+        }
+        finally
+        {
+            Diagnostics.Complete(attempt, outcome, httpStatus);
+        }
     }
 
     private static bool HasData(BusTimeResponse r) =>

@@ -18,6 +18,7 @@ The transit code sits behind `ITransitService` (`TrayTimes.Core/Transit/`), so a
 - `TrayTimes/`: the WinUI 3 app. `Views/` and `Controls/` hold the UI; `Services/` holds code that needs Windows (settings storage, location, the stop directory cache, tray placement).
 - `TrayTimes.Core/`: plain .NET code with no WinUI or Windows dependencies. `Transit/` has the provider-neutral models, the BusTime client, and the GTFS timetable reader; `Models/` has the favorite stops and places and the arrival snapshots; `Commute/` works out the likely next trip and its direct routes.
 - `TrayTimes.Tests/`: MSTest unit tests for `TrayTimes.Core`, laid out to mirror it. Run them with `dotnet test TrayTimes.Tests`. They need no API key or package identity.
+- **Request diagnostics:** the BusTime client's `Diagnostics.Observed` event and bounded `Diagnostics.Snapshot` (last 256 observations) distinguish physical request starts/completions from existing cache/task reuse, with consumer, trigger, duration, outcome, and batch size. Debug builds also emit credential-safe `Transit request` lines to the debugger. The saved Settings endpoint tally still counts attempts, including failures, not cache hits or server billing. Reproducible baseline procedures and measurements are recorded in [the optimization plan](docs/transit-api-optimization-plan.md).
 
 ## Setup
 

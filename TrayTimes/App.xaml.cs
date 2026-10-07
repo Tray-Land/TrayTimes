@@ -102,6 +102,7 @@ public partial class App : Application
 
         BusTimeTransitService mcts = BusTimeTransitService.CreateMcts(Secrets.MctsApiKey);
         mcts.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
+        mcts.Diagnostics.Observed += (_, observation) => ApiUsageService.Observe(observation);
         _stopIndex = new StopIndexService(mcts);
         _monitor = new ArrivalsMonitor(mcts, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
         _monitor.Updated += (_, _) => UpdateTooltip();

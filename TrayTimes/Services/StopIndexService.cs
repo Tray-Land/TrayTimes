@@ -101,6 +101,7 @@ internal sealed class StopIndexService(ITransitService service)
 
     private async Task<StopIndexFile> BuildAsync()
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.StopDirectory, TransitTrigger.DirectoryBuild);
         IReadOnlyList<TransitRoute> routes = await service.GetRoutesAsync();
         Dictionary<string, IndexedStop> stops = [];
         using SemaphoreSlim throttle = new(MaxConcurrentRequests);

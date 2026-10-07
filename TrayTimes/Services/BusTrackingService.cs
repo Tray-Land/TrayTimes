@@ -18,11 +18,13 @@ internal sealed class BusTrackingService
 {
     private readonly ITransitService _service;
     private readonly DispatcherQueueTimer _timer;
+    private readonly TimeProvider _time;
     private int _generation;
 
-    public BusTrackingService(ITransitService service, DispatcherQueue dispatcher)
+    public BusTrackingService(ITransitService service, DispatcherQueue dispatcher, TimeProvider? timeProvider = null)
     {
         _service = service;
+        _time = timeProvider ?? TimeProvider.System;
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = false;
         _timer.Tick += (_, _) => _ = RefreshAsync();
@@ -37,13 +39,13 @@ internal sealed class BusTrackingService
     public bool IsTracking => Current is not null;
 
     /// <summary>True once the tracked bus is within the rider's head-out time.</summary>
-    public bool IsTimeToGo => Current is { } bus && bus.MinutesAway(DateTimeOffset.Now) <= SettingsService.HeadOutMinutes;
+    public bool IsTimeToGo => Current is { } bus && bus.MinutesAway(_time.GetLocalNow()) <= SettingsService.HeadOutMinutes;
 
     /// <summary>Starts tracking <paramref name="arrival"/>, replacing any bus already tracked.</summary>
     public void Start(Arrival arrival, string stopName)
     {
         NotificationService.Clear();
-        DateTimeOffset now = DateTimeOffset.Now;
+        DateTimeOffset now = _time.GetLocalNow();
         Current = TrackedBus.Start(arrival, stopName, SettingsService.HeadOutMinutes, now);
         ++_generation;
         SetKeepAwake(SettingsService.KeepAwakeWhileTracking);
@@ -67,6 +69,7 @@ internal sealed class BusTrackingService
 
     private async Task RefreshAsync()
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Tracking, TransitTrigger.Timer);
         if (Current is not { } bus)
         {
             return;
@@ -77,7 +80,7 @@ internal sealed class BusTrackingService
         try
         {
             // A scheduled bus has no real-time data until shortly before it's due, so don't ask yet.
-            arrivals = bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, DateTimeOffset.Now)
+            arrivals = bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, _time.GetLocalNow())
                 ? null
                 : await _service.GetArrivalsAsync([bus.StopId]);
         }
@@ -91,7 +94,7 @@ internal sealed class BusTrackingService
             return;
         }
 
-        DateTimeOffset now = DateTimeOffset.Now;
+        DateTimeOffset now = _time.GetLocalNow();
         TrackingStep step = Current.Advance(arrivals, SettingsService.HeadOutMinutes, now);
         Current = step.Bus;
         if (step.Alert is { } alert)

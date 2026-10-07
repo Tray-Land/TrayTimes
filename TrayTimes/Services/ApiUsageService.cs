@@ -11,6 +11,9 @@ internal static class ApiUsageService
     /// <summary>Raised after a call is recorded or the tally is cleared. May fire on any thread.</summary>
     public static event EventHandler? Changed;
 
+    public static void Observe(TransitRequestObservation observation) =>
+        System.Diagnostics.Debug.WriteLine(observation);
+
     public static void Record(string endpoint)
     {
         lock (Gate)

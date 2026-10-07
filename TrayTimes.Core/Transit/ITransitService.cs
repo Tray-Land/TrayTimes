@@ -12,6 +12,9 @@ public interface ITransitService
     /// <summary>The most stop IDs one <see cref="GetArrivalsAsync"/> call accepts.</summary>
     int MaxStopsPerRequest { get; }
 
+    /// <summary>Optional bounded request observations; separate from saved endpoint attempts.</summary>
+    TransitRequestDiagnostics? Diagnostics => null;
+
     Task<IReadOnlyList<TransitRoute>> GetRoutesAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<TransitDirection>> GetDirectionsAsync(string routeId, CancellationToken cancellationToken = default);

@@ -304,7 +304,7 @@ public sealed partial class SettingsWindow : WindowEx
             return;
         }
 
-        IReadOnlyDictionary<string, TransitRoute> catalog = await _monitor.GetRouteCatalogAsync();
+        IReadOnlyDictionary<string, TransitRoute> catalog = await _monitor.GetRouteCatalogAsync(TransitConsumer.Settings);
         if (catalog.Count == 0)
         {
             RouteBox.PlaceholderText = "Couldn't load routes";
@@ -319,6 +319,7 @@ public sealed partial class SettingsWindow : WindowEx
 
     private async void RouteBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection);
         if (RouteBox.SelectedItem is not TransitRoute route)
         {
             return;
@@ -356,6 +357,7 @@ public sealed partial class SettingsWindow : WindowEx
 
     private async void DirectionBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection);
         if (RouteBox.SelectedItem is not TransitRoute route || DirectionBox.SelectedItem is not TransitDirection direction)
         {
             return;
@@ -513,6 +515,7 @@ public sealed partial class SettingsWindow : WindowEx
     {
         if (_patterns.TryGetValue(routeId, out IReadOnlyList<RoutePattern>? cached))
         {
+            _service.Diagnostics?.RecordReuse(TransitEndpoint.Patterns, inFlight: false, batchSize: 1);
             return cached;
         }
 

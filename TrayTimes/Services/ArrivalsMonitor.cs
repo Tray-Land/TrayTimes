@@ -15,26 +15,28 @@ internal sealed class ArrivalsMonitor
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
 
     private readonly DispatcherQueueTimer _timer;
+    private readonly TimeProvider _time;
     private Task<IReadOnlyDictionary<string, TransitRoute>>? _routesTask;
     private IReadOnlyList<Arrival> _live = [];
     private bool _isForeground;
     private bool _stopsChanged;
     private int _refreshGeneration;
 
-    public ArrivalsMonitor(ITransitService service, ScheduleService schedule, DispatcherQueue dispatcher)
+    public ArrivalsMonitor(ITransitService service, ScheduleService schedule, DispatcherQueue dispatcher, TimeProvider? timeProvider = null)
     {
         Service = service;
         Schedule = schedule;
+        _time = timeProvider ?? TimeProvider.System;
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = true;
         _timer.Interval = RefreshInterval;
-        _timer.Tick += (_, _) => _ = RefreshAsync();
+        _timer.Tick += (_, _) => _ = RefreshAsync(TransitTrigger.Timer);
         SettingsService.StopsChanged += OnStopsChanged;
         schedule.Loaded += (_, _) => dispatcher.TryEnqueue(() =>
         {
             if (_isForeground)
             {
-                _ = RefreshAsync();
+                _ = RefreshAsync(TransitTrigger.TimetableLoaded);
             }
         });
     }
@@ -63,9 +65,15 @@ internal sealed class ArrivalsMonitor
             }
 
             _timer.Start();
-            if (_stopsChanged || Latest.FetchedAt is not { } at || DateTimeOffset.Now - at > TimeSpan.FromSeconds(15))
+            if (_stopsChanged || Latest.FetchedAt is not { } at || _time.GetLocalNow() - at > TimeSpan.FromSeconds(15))
             {
-                _ = RefreshAsync();
+                _ = RefreshAsync(TransitTrigger.FlyoutOpened);
+            }
+            else
+            {
+                using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, TransitTrigger.FlyoutOpened);
+                Service.Diagnostics?.RecordReuse(TransitEndpoint.Predictions, inFlight: false,
+                    batchSize: Math.Min(SavedStop.DistinctStopCount(SettingsService.Stops), Service.MaxStopsPerRequest));
             }
         }
     }
@@ -81,8 +89,14 @@ internal sealed class ArrivalsMonitor
     }
 
     /// <summary>Route metadata (display names and colors) keyed by route ID; fetched once per session.</summary>
-    public async Task<IReadOnlyDictionary<string, TransitRoute>> GetRouteCatalogAsync()
+    public async Task<IReadOnlyDictionary<string, TransitRoute>> GetRouteCatalogAsync(TransitConsumer consumer = TransitConsumer.Favorites)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(consumer, TransitTrigger.Metadata);
+        if (_routesTask is { } task && (task.IsCompletedSuccessfully || !task.IsCompleted))
+        {
+            Service.Diagnostics?.RecordReuse(TransitEndpoint.Routes, inFlight: !task.IsCompletedSuccessfully);
+        }
+
         _routesTask ??= LoadRoutesAsync();
         try
         {
@@ -96,8 +110,9 @@ internal sealed class ArrivalsMonitor
         }
     }
 
-    public async Task RefreshAsync()
+    public async Task RefreshAsync(TransitTrigger trigger = TransitTrigger.ManualRefresh)
     {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, trigger);
         IReadOnlyList<SavedStop> stops = SettingsService.Stops;
         int generation = ++_refreshGeneration;
         _stopsChanged = false;
@@ -126,7 +141,7 @@ internal sealed class ArrivalsMonitor
                 _live = live;
             }
 
-            result = new ArrivalsSnapshot(DateTimeOffset.Now, Schedule.AddScheduled(live, stopIds), null);
+            result = new ArrivalsSnapshot(_time.GetLocalNow(), Schedule.AddScheduled(live, stopIds), null);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
@@ -151,7 +166,7 @@ internal sealed class ArrivalsMonitor
     {
         if (_isForeground)
         {
-            _ = RefreshAsync();
+            _ = RefreshAsync(TransitTrigger.StopsChanged);
         }
         else
         {
