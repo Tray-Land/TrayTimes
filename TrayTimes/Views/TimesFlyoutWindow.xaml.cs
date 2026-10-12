@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http;
 using Microsoft.UI.Dispatching;
@@ -5,6 +6,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.Windows.ApplicationModel.Resources;
 using TrayTimes.Commute;
 using TrayTimes.Models;
 using TrayTimes.Services;
@@ -22,6 +24,7 @@ using WinUIEx.Maps;
 using MapElementsLayer = WinUIEx.Maps.MapElementsLayer;
 using MapIcon = WinUIEx.Maps.MapIcon;
 using MapPolyline = WinUIEx.Maps.MapPolyline;
+using Notice = TrayTimes.Commute.PlaceNotice;
 
 namespace TrayTimes.Views;
 
@@ -38,20 +41,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const int ArrivalsPerStop = 4;
     private const int ArrivalsPerNearbyStop = 3;
     private const int MaxNearbyStops = 8;
-    private const int MaxRoutedStops = 12; // walking routes looked up per refresh
+    private const int MaxRoutedStops = 12; // walking routes looked up per discovery
     private const double WalkingMetersPerMinute = 80; // about 3 mph
-    private const double MovedMeters = 25; // Closer than this, a new fix doesn't change which stops are near.
     private static readonly TimeSpan PendingPopWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LocationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RecentDismissWindow = TimeSpan.FromMilliseconds(300);
     private static readonly TimeSpan PlaceRefreshInterval = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan PatternCacheLifetime = TimeSpan.FromHours(6);
 
     private readonly HWND _hwnd;
     private readonly ArrivalsMonitor _monitor;
     private readonly BusTrackingService _tracker;
     private readonly StopIndexService _stopIndex;
     private readonly VehiclePositionsMonitor _vehiclePositions;
+    private readonly PlaceArrivalsMonitor _placeMonitor;
     private readonly DispatcherQueueTimer _hideTimer;
     private readonly DispatcherQueueTimer _vehicleTimer;
     private readonly DispatcherQueueTimer _placeTimer;
@@ -69,7 +71,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly Dictionary<string, (int Heading, double MapHeading, bool Selected, bool DarkMap)> _vehicleArrowStates = [];
     private readonly Dictionary<MapIcon, string> _stopPins = [];
     private readonly Dictionary<string, Vehicle> _vehicles = [];
-    private readonly Dictionary<string, (DateTime FetchedUtc, IReadOnlyList<RoutePattern> Patterns)> _patternCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly FontIcon _stopGlyph;
     private readonly FontIcon _busGlyph;
     private readonly FontIcon _busBackdropGlyph;
@@ -85,6 +86,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private bool _allowClose;
     private bool _mapRevealStarted;
     private bool _savedStopsDirty = true;
+    private bool _locationPermissionRequired;
+    private bool _locationPermissionPending;
+    private bool _isRequestingLocationPermission;
+    private string? _locationPermissionError;
+    private CancellationTokenSource? _routesCancellation;
     private DateTime _lastDismissedAtUtc;
 
     private Action? _emptyAction;
@@ -97,8 +103,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private DateTimeOffset? _placeFetchedAt;
     private string? _placeError;
     private Notice? _placeNotice;
-    private bool _placeLoading;
-    private int _placeVersion;
+    private PlaceStops? _shownPlace;
+    private PredictionSnapshot? _shownPlaceSnapshot;
+    private bool _placeReframe;
     private CommuteLeg? _commuteLeg;
     private IReadOnlySet<RouteDirection> _directRoutes = new HashSet<RouteDirection>();
     private string? _destinationId; // The place picked from Going to, or null to guess.
@@ -120,6 +127,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _tracker = tracker;
         _stopIndex = stopIndex;
         _vehiclePositions = new VehiclePositionsMonitor(_monitor.Service, UpdateVehicles);
+        _placeMonitor = new PlaceArrivalsMonitor(_monitor.Predictions, LocatePlaceAsync, FindPlaceStopsAsync);
+        _placeMonitor.Updated += OnPlaceUpdated;
         _hwnd = (HWND)WindowNative.GetWindowHandle(this);
         AppWindow.SetIcon("Assets/AppIcon.ico");
         ConfigurePresenter();
@@ -224,7 +233,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _isPopupVisible = false;
+        _locationPermissionPending = false;
         _vehiclePositions.IsForeground = false;
+        _routesCancellation?.Cancel();
         _lastDismissedAtUtc = DateTime.UtcNow;
         _hideTimer.Stop();
         _vehicleTimer.Stop();
@@ -232,6 +243,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _captionTimer.Stop();
         HideMapCaption(animate: false);
         _monitor.IsForeground = false;
+        ClearPlacePredictionDemand();
         SaveMapView();
         AppWindow.Hide();
         PopupHidden?.Invoke(this, EventArgs.Empty);
@@ -242,7 +254,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         _allowClose = true;
         HidePopup();
-        ++_placeVersion; // Drop any in-flight place load.
+        _placeMonitor.Updated -= OnPlaceUpdated;
         _monitor.Updated -= OnArrivalsUpdated;
         _tracker.Changed -= OnTrackingChanged;
         _stopIndex.Changed -= OnStopIndexChanged;
@@ -295,10 +307,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             _isShowing = false;
             _hideTimer.Stop();
+            if (_locationPermissionPending && !_isRequestingLocationPermission)
+            {
+                RetryLocationAfterPermission();
+            }
             return;
         }
 
-        if (_isShowing || !_isPopupVisible)
+        if (_isShowing || !_isPopupVisible || _locationPermissionPending)
         {
             return;
         }
@@ -310,7 +326,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void HideIfFocusLeftWindow()
     {
-        if (!ShouldRemainVisible(PInvoke.GetForegroundWindow()))
+        if (!_locationPermissionPending && !ShouldRemainVisible(PInvoke.GetForegroundWindow()))
         {
             HidePopup();
         }
@@ -377,6 +393,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _mode = (FlyoutMode)index;
+        _locationPermissionPending = false;
         SettingsService.FlyoutMode = _mode;
         if (_isPopupVisible)
         {
@@ -397,6 +414,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void EnterMode(bool reframe, TransitTrigger trigger = TransitTrigger.ModeChanged)
     {
         _vehiclePositions.Invalidate();
+        ClearPlacePredictionDemand();
         // A fresh list: every row rises in again rather than silently swapping.
         _listSignature = null;
         _shownRows.Clear();
@@ -409,7 +427,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (_mode == FlyoutMode.Favorites)
         {
             _placeTimer.Stop();
-            ++_placeVersion; // Drop any in-flight place load.
             if (_savedStopsDirty)
             {
                 _savedStopsDirty = false;
@@ -427,64 +444,151 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
-        _placeOrigin = null;
-        _placeStops = [];
-        _placeArrivals = [];
-        _destinationEtas = new Dictionary<Arrival, DateTimeOffset>();
-        _placeFetchedAt = null;
-        _placeError = null;
-        _placeNotice = null;
-        _commuteLeg = null;
-        _directRoutes = new HashSet<RouteDirection>();
-        RebuildStopPins();
-        Render();
+        ConfigurePlace();
+        _shownPlace = null; // Mode entry cleared the map layers, not the valid discovery.
+        _placeReframe = reframe;
+        _placeMonitor.IsForeground = true;
+        OnPlaceUpdated(this, EventArgs.Empty);
         _placeTimer.Start();
         _ = LoadPlaceAsync(reframe, trigger);
     }
 
-    /// <summary>Finds the mode's stops (the commute's boarding stops, or those near the device) and fetches their arrivals.</summary>
-    private async Task LoadPlaceAsync(bool reframe, TransitTrigger trigger)
+    private void ConfigurePlace() =>
+        _placeMonitor.Configure(new PlaceContext(_mode, SettingsService.Places, _destinationId), _stopIndex.BuiltAt);
+
+    private async Task<PlaceLocation> LocatePlaceAsync(bool quick)
     {
-        using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, trigger);
-        FlyoutMode mode = _mode;
-        if (mode == FlyoutMode.Favorites)
+        int version = _placeMonitor.Version;
+        string? error = null;
+        bool permissionRequired = false;
+        GeoPoint? point;
+        Task<GeoPoint?>? refined = null;
+        if (quick)
+        {
+            (point, refined) = await LocationService.TryGetQuickLocationAsync(
+                LocationTimeout, message => error = message, () => permissionRequired = true);
+        }
+        else
+        {
+            point = await LocationService.TryGetDeviceLocationAsync(
+                LocationTimeout, message => error = message, () => permissionRequired = true);
+        }
+
+        if (version == _placeMonitor.Version && _isPopupVisible && !_allowClose)
+        {
+            _locationPermissionRequired = permissionRequired;
+            if (!permissionRequired)
+            {
+                _locationPermissionError = null;
+            }
+            Render();
+        }
+
+        return new PlaceLocation(point, refined, error);
+    }
+
+    private async void GrantLocationPermissionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isRequestingLocationPermission)
         {
             return;
         }
 
-        int version = ++_placeVersion;
-        bool Stale() => version != _placeVersion || mode != _mode;
-        _placeLoading = true;
+        _isRequestingLocationPermission = true;
+        _locationPermissionPending = true;
+        _locationPermissionError = null;
+        _hideTimer.Stop();
         Render();
+        try
+        {
+            GeolocationAccessStatus? access = await LocationService.RequestAccessAsync(
+                message => _locationPermissionError = message);
+            if (!_isPopupVisible || _allowClose)
+            {
+                return;
+            }
+
+            if (access is GeolocationAccessStatus.Denied or GeolocationAccessStatus.Unspecified)
+            {
+                // Previously denied access needs Windows Settings; keep the flyout until the user returns.
+                if (!await Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:privacy-location")))
+                {
+                    Debug.WriteLine("Windows location settings could not be opened.");
+                    _locationPermissionError = new ResourceLoader().GetString("LocationSettingsUnavailable");
+                }
+            }
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+        {
+            Debug.WriteLine($"Opening Windows location settings failed: {ex}");
+            _locationPermissionError = new ResourceLoader().GetString("LocationSettingsUnavailable");
+        }
+        finally
+        {
+            _isRequestingLocationPermission = false;
+            if (_isPopupVisible && !_allowClose)
+            {
+                Render();
+                if (ShouldRemainVisible(PInvoke.GetForegroundWindow()))
+                {
+                    RetryLocationAfterPermission();
+                }
+            }
+        }
+    }
+
+    private void RetryLocationAfterPermission()
+    {
+        _locationPermissionPending = false;
+        if (_isPopupVisible && _mode != FlyoutMode.Favorites && !_allowClose)
+        {
+            // Cancel any discovery started before permission changed, rather than joining that old attempt.
+            EnterMode(reframe: true, TransitTrigger.Retry);
+        }
+    }
+
+    /// <summary>Refreshes predictions independently of any location/discovery work.</summary>
+    private async Task LoadPlaceAsync(bool reframe, TransitTrigger trigger)
+    {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, trigger);
+        FlyoutMode mode = _mode;
+        if (mode == FlyoutMode.Favorites || !_isPopupVisible || _allowClose)
+        {
+            return;
+        }
+
+        ConfigurePlace();
+        int version = _placeMonitor.Version;
+        PlaceContext context = new(mode, SettingsService.Places, _destinationId);
+        bool Stale() => version != _placeMonitor.Version || mode != _mode || !_isPopupVisible || _allowClose
+            || (mode == FlyoutMode.Commute && (context.DestinationId != _destinationId
+                || !context.Places.SequenceEqual(SettingsService.Places)));
+        _placeReframe |= reframe;
 
         try
         {
             if (!_monitor.Service.IsConfigured)
             {
-                await ShowPlaceAsync(PlaceStops.Unavailable(new Notice("API key needed", $"Add your {_monitor.Service.AgencyName} key to OAuth.resw and rebuild.")), reframe, Stale);
+                _placeNotice = new Notice("API key needed", $"Add your {_monitor.Service.AgencyName} key to OAuth.resw and rebuild.");
+                Render();
                 return;
             }
 
-            // Warm the stop directory and route list while the location comes in.
-            _ = _stopIndex.GetAsync();
-            if (_routes.Count == 0)
+            if (trigger == TransitTrigger.TimetableLoaded)
             {
-                _ = _monitor.GetRouteCatalogAsync(RequestConsumer);
+                await _placeMonitor.RefreshTimetableAsync();
             }
-
-            // On opening, a rough fix gets the list up quickly; the precise one then corrects it if it
-            // lands elsewhere. Refreshes already have a precise origin, so they wait for another.
-            string? locationError = null;
-            (GeoPoint? here, Task<GeoPoint?>? refined) = _placeOrigin is null
-                ? await LocationService.TryGetQuickLocationAsync(LocationTimeout, message => locationError = message)
-                : (await LocationService.TryGetDeviceLocationAsync(LocationTimeout, message => locationError = message), null);
-            await ShowPlaceAsync(await FindPlaceStopsAsync(mode, here, locationError), reframe, Stale);
-
-            if (refined is not null && await refined is { } precise && here is { } rough
-                && GeoMath.DistanceMeters(rough, precise) > MovedMeters && !Stale())
+            else
             {
-                using IDisposable refinedScope = TransitRequestDiagnostics.BeginScope(RequestConsumer, TransitTrigger.RefinedLocation);
-                await ShowPlaceAsync(await FindPlaceStopsAsync(mode, precise, null), reframe, Stale);
+                await _placeMonitor.RefreshAsync(force: trigger is TransitTrigger.ManualRefresh or TransitTrigger.Retry);
+            }
+            if (!Stale() && _placeStops.Count > 0 && _routes.Count == 0)
+            {
+                _routes = await _monitor.GetRouteCatalogAsync(RequestConsumer);
+                if (!Stale())
+                {
+                    DrawCommuteRoutes();
+                }
             }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
@@ -500,48 +604,78 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             if (!Stale())
             {
-                _placeLoading = false;
+                if (trigger != TransitTrigger.TimetableLoaded)
+                {
+                    _placeReframe = false;
+                }
                 Render();
             }
         }
     }
 
-    /// <summary>Fetches the found stops' arrivals and shows them, unless the load has gone stale meanwhile.</summary>
-    private async Task ShowPlaceAsync(PlaceStops found, bool reframe, Func<bool> stale)
+    /// <summary>Publishes cached rows immediately, and recomputes walking/ETA presentation on metadata updates.</summary>
+    private void OnPlaceUpdated(object? sender, EventArgs e)
     {
-        string[] stopIds = [.. found.Stops.Select(n => n.Stop.Id)];
-        IReadOnlyList<Arrival> arrivals = stopIds.Length == 0 ? [] : _monitor.Schedule.AddScheduled(await _monitor.Service.GetArrivalsAsync(stopIds), stopIds);
-        if (found.Stops.Count > 0 && _routes.Count == 0)
-        {
-            _routes = await _monitor.GetRouteCatalogAsync(RequestConsumer);
-        }
-
-        if (stale())
+        if (!_isPopupVisible || _mode == FlyoutMode.Favorites || _allowClose)
         {
             return;
         }
 
-        bool moved = _placeOrigin is not { } previous || found.Origin is not { } origin
-            || GeoMath.DistanceMeters(previous, origin) > MovedMeters
-            || _commuteLeg?.To.Id != found.Leg?.To.Id;
+        PlaceStops? found = _placeMonitor.Discovery;
+        if (found?.DirectoryBuiltAt is { } directoryAt && directoryAt != _stopIndex.BuiltAt)
+        {
+            ConfigurePlace();
+            _ = LoadPlaceAsync(reframe: false, TransitTrigger.StopsChanged);
+            return;
+        }
+        if (found is null)
+        {
+            _placeOrigin = null;
+            _placeStops = [];
+            _placeArrivals = [];
+            _destinationEtas = new Dictionary<Arrival, DateTimeOffset>();
+            _placeFetchedAt = null;
+            _placeError = null;
+            _placeNotice = null;
+            _commuteLeg = null;
+            _directRoutes = new HashSet<RouteDirection>();
+            _shownPlace = null;
+            _shownPlaceSnapshot = null;
+            _stopLayer.MapElements.Clear();
+            _stopPins.Clear();
+            _placeLayer.MapElements.Clear();
+            _commuteRouteLayer.MapElements.Clear();
+            Render();
+            return;
+        }
+
+        PredictionSnapshot? snapshot = _placeMonitor.Snapshot;
+        IReadOnlyList<Arrival> arrivals = snapshot is null ? []
+            : _monitor.Schedule.AddScheduled(snapshot.Arrivals, [.. found.Stops.Select(n => n.Stop.Id)]);
+        bool changed = !ReferenceEquals(_shownPlace, found);
         _placeOrigin = found.Origin;
         _placeStops = found.Stops;
         _placeArrivals = arrivals;
         _destinationEtas = EstimateDestinationArrivals(found, arrivals);
         _commuteLeg = found.Leg;
         _directRoutes = found.DirectRoutes ?? new HashSet<RouteDirection>();
-        _placeFetchedAt = found.Origin is null ? null : DateTimeOffset.Now;
-        _placeError = null;
+        if (snapshot is not null && !ReferenceEquals(snapshot, _shownPlaceSnapshot))
+        {
+            _placeError = null;
+        }
+        _shownPlaceSnapshot = snapshot;
+        _placeFetchedAt = found.Origin is null ? null : snapshot?.FetchedAt;
         _placeNotice = found.Stops.Count == 0 ? found.EmptyNotice : null;
 
-        if (moved)
+        if (changed)
         {
+            _shownPlace = found;
             RebuildStopPins();
             ShowPlaceMarkers(found);
             DrawCommuteRoutes();
         }
 
-        if (reframe)
+        if (_placeReframe && changed)
         {
             _ = FrameListedStopsAsync(MapAnimationKind.None);
         }
@@ -550,10 +684,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _ = RefreshVehiclesAsync(TransitTrigger.PlaceResult);
     }
 
-    private Task<PlaceStops> FindPlaceStopsAsync(FlyoutMode mode, GeoPoint? here, string? locationError) =>
-        mode == FlyoutMode.Commute ? FindCommuteStopsAsync(here) : FindNearbyStopsAsync(here, locationError);
+    private void ClearPlacePredictionDemand()
+    {
+        _placeMonitor.IsForeground = false;
+    }
 
-    private async Task<PlaceStops> FindNearbyStopsAsync(GeoPoint? here, string? locationError)
+    private Task<PlaceStops> FindPlaceStopsAsync(PlaceContext context, PlaceLocation location, CancellationToken cancellationToken) =>
+        context.Mode == FlyoutMode.Commute
+            ? FindCommuteStopsAsync(context, location.Point, cancellationToken)
+            : FindNearbyStopsAsync(location.Point, location.Error, cancellationToken);
+
+    private async Task<PlaceStops> FindNearbyStopsAsync(GeoPoint? here, string? locationError, CancellationToken cancellationToken)
     {
         if (here is not { } point)
         {
@@ -561,9 +702,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         // Straight-line distance picks the candidates; the walking route decides which is quickest to reach.
-        IReadOnlyList<NearbyStop> candidates = NearbyStop.Find(await _stopIndex.GetAsync(), point, MaxRoutedStops);
-        IReadOnlyList<NearbyStop> stops = [.. (await WalkingRouteService.RankByWalkAsync(point, candidates)).Take(MaxNearbyStops)];
-        return new PlaceStops(point, stops, new Notice("No stops nearby", $"There are no {_monitor.Service.AgencyName} stops within about a mile of you."));
+        IReadOnlyList<IndexedStop> directory = await _stopIndex.GetAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        DateTimeOffset? builtAt = _stopIndex.BuiltAt;
+        IReadOnlyList<NearbyStop> candidates = NearbyStop.Find(directory, point, MaxRoutedStops);
+        IReadOnlyList<NearbyStop> stops = [.. (await WalkingRouteService.RankByWalkAsync(point, candidates, cancellationToken)).Take(MaxNearbyStops)];
+        return new PlaceStops(point, stops, new Notice("No stops nearby", $"There are no {_monitor.Service.AgencyName} stops within about a mile of you."),
+            DirectoryBuiltAt: builtAt);
     }
 
     /// <summary>
@@ -571,9 +716,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// that gets there in one ride.
     /// </summary>
     /// <param name="here">The device's location, or null (it's off, or the PC can't tell), in which case the planner guesses from the time of day.</param>
-    private async Task<PlaceStops> FindCommuteStopsAsync(GeoPoint? here)
+    private async Task<PlaceStops> FindCommuteStopsAsync(PlaceContext context, GeoPoint? here, CancellationToken cancellationToken)
     {
-        IReadOnlyList<FavoritePlace> places = SettingsService.Places;
+        IReadOnlyList<FavoritePlace> places = context.Places;
         Notice setUp = new(
             "Set your favorite places",
             "Add home, plus work or school, in settings. Commute then shows the buses to wherever you're headed next.",
@@ -584,7 +729,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return PlaceStops.Unavailable(setUp);
         }
 
-        CommuteLeg? leg = CommutePlanner.Plan(places, here, DateTimeOffset.Now, places.FirstOrDefault(p => p.Id == _destinationId));
+        CommuteLeg? leg = CommutePlanner.Plan(places, here, DateTimeOffset.Now, places.FirstOrDefault(p => p.Id == context.DestinationId));
         if (leg is null)
         {
             return PlaceStops.Unavailable(setUp);
@@ -596,6 +741,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         IReadOnlyList<IndexedStop> directory = await _stopIndex.GetAsync();
+        cancellationToken.ThrowIfCancellationRequested();
+        DateTimeOffset? builtAt = _stopIndex.BuiltAt;
         List<NearbyStop> origin = [.. NearbyStop.Find(directory, leg.Origin, int.MaxValue, CommutePlanner.WalkRadiusMeters)];
         List<IndexedStop> originStops = [.. origin.Select(n => n.Stop)];
         List<NearbyStop> destination = [.. NearbyStop.Find(directory, leg.To.Location, int.MaxValue, CommutePlanner.WalkRadiusMeters)];
@@ -604,14 +751,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         // Shapes tell a route's two directions apart, so only buses heading toward the destination are listed.
         IEnumerable<string> routeIds = CommutePlanner.SharedRoutes(originStops, destinationStops).Select(r => r.RouteId).Distinct(StringComparer.OrdinalIgnoreCase);
         Dictionary<string, IReadOnlyList<RoutePattern>> patterns = new(StringComparer.OrdinalIgnoreCase);
-        foreach ((string routeId, IReadOnlyList<RoutePattern> routePatterns) in await Task.WhenAll(routeIds.Select(async id => (id, await GetPatternsAsync(id)))))
+        foreach ((string routeId, IReadOnlyList<RoutePattern> routePatterns) in await Task.WhenAll(routeIds.Select(async id => (id, await GetPatternsAsync(id, required: true, cancellationToken)))))
         {
             patterns[routeId] = routePatterns;
         }
 
         IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(originStops, destinationStops, patterns);
         // Walk times reorder the closest few; the rest stay in straight-line order after them.
-        IReadOnlyList<NearbyStop> byWalk = [.. await WalkingRouteService.RankByWalkAsync(leg.Origin, origin.Take(MaxRoutedStops).ToList()), .. origin.Skip(MaxRoutedStops)];
+        IReadOnlyList<NearbyStop> byWalk = [.. await WalkingRouteService.RankByWalkAsync(leg.Origin, origin.Take(MaxRoutedStops).ToList(), cancellationToken), .. origin.Skip(MaxRoutedStops)];
 
         // Quickest first, so a stop is kept only if it's the quickest walk for some direct line.
         HashSet<RouteDirection> claimed = [];
@@ -640,13 +787,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             $"None of the buses within a 10-minute walk go within a 10-minute walk of {leg.To.Name}. Tray Times doesn't plan transfers yet.",
             "Show nearby stops",
             () => SelectMode(FlyoutMode.Nearby));
-        return new PlaceStops(leg.Origin, stops, noDirectBus, leg, direct, stops.Count == 0 ? null : await WalkFromStopsAsync(leg.To.Location, destination));
+        return new PlaceStops(leg.Origin, stops, noDirectBus, leg, direct,
+            stops.Count == 0 ? null : await WalkFromStopsAsync(leg.To.Location, destination, cancellationToken), builtAt);
     }
 
     /// <summary>Seconds to walk between each stop near <paramref name="place"/> and it, by stop ID. Routed for the closest few; the rest are estimated.</summary>
-    private static async Task<IReadOnlyDictionary<string, double>> WalkFromStopsAsync(GeoPoint place, IReadOnlyList<NearbyStop> nearby)
+    private static async Task<IReadOnlyDictionary<string, double>> WalkFromStopsAsync(GeoPoint place, IReadOnlyList<NearbyStop> nearby, CancellationToken cancellationToken)
     {
-        IReadOnlyList<NearbyStop> routed = await WalkingRouteService.RankByWalkAsync(place, [.. nearby.Take(MaxRoutedStops)]);
+        IReadOnlyList<NearbyStop> routed = await WalkingRouteService.RankByWalkAsync(place, [.. nearby.Take(MaxRoutedStops)], cancellationToken);
         return routed.Concat(nearby.Skip(MaxRoutedStops)).ToDictionary(
             n => n.Stop.Id,
             n => n.WalkSeconds ?? n.Meters / WalkingMetersPerMinute * 60);
@@ -752,10 +900,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _commuteRouteLayer.MapElements.Clear();
         foreach (RouteDirection route in _directRoutes)
         {
-            if (_patternCache.TryGetValue(route.RouteId, out (DateTime FetchedUtc, IReadOnlyList<RoutePattern> Patterns) cached))
+            if (_monitor.Metadata.TryGetPatterns(route.RouteId, out IReadOnlyList<RoutePattern> patterns))
             {
                 Color color = RouteColor(route.RouteId, null, null);
-                _commuteRouteLayer.MapElements.AddRange(cached.Patterns
+                _commuteRouteLayer.MapElements.AddRange(patterns
                     .Where(p => string.Equals(p.DirectionId, route.DirectionId, StringComparison.OrdinalIgnoreCase))
                     .Select(p => CreateRouteLine(p, color)));
             }
@@ -804,9 +952,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
         else
         {
-            error = _placeError;
+            error = _placeError ?? (_locationPermissionRequired ? null : _placeMonitor.LocationError);
             fetchedAt = _placeFetchedAt;
-            loading = _placeLoading;
+            loading = _placeMonitor.IsLoading;
             HashSet<string> savedIds = [.. saved.Select(s => s.StopId)];
             string emptyText = fetchedAt is null ? string.Empty : "No upcoming arrivals.";
             Arrival? tracked = _tracker.Current?.FindListed(_placeArrivals);
@@ -823,8 +971,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                     ? new Notice("Getting the stop list", $"Downloading every {_monitor.Service.AgencyName} stop. This happens once a week and takes a minute.")
                     : new Notice("Finding stops…", string.Empty);
             }
+
+            if (_mode == FlyoutMode.Nearby && _locationPermissionRequired && _placeStops.Count == 0)
+            {
+                ResourceLoader resources = new();
+                busy = false;
+                empty = new Notice(resources.GetString("LocationPermissionEmptyTitle"), resources.GetString("LocationPermissionEmptyText"));
+            }
         }
 
+        LocationPermissionBar.IsOpen = _mode != FlyoutMode.Favorites && _locationPermissionRequired;
+        LocationPermissionBar.Visibility = LocationPermissionBar.IsOpen ? Visibility.Visible : Visibility.Collapsed;
+        LocationPermissionBar.Message = _locationPermissionError ?? new ResourceLoader().GetString("LocationPermissionBar/Message");
+        GrantLocationPermissionButton.IsEnabled = !_isRequestingLocationPermission;
         LoadingRing.IsActive = loading;
         LiveDot.Opacity = error is null ? 1 : 0.35;
         UpdatedText.Text = fetchedAt is { } at ? $"Updated {at.ToLocalTime():t}" : loading ? "Loading…" : string.Empty;
@@ -1021,11 +1180,20 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (_isPopupVisible && _mode != FlyoutMode.Favorites)
         {
-            Render();
+            PlaceStops? previous = _placeMonitor.Discovery;
+            ConfigurePlace();
+            if (previous is not null && _placeMonitor.Discovery is null)
+            {
+                _ = LoadPlaceAsync(reframe: false, TransitTrigger.StopsChanged);
+            }
+            else
+            {
+                Render();
+            }
         }
     });
 
-    /// <summary>Scheduled times are now available: refetch the Commute/Nearby list to include them (Favorites refreshes itself).</summary>
+    /// <summary>Locally enrich current rows and destination ETAs; Favorites re-merges its own raw snapshot.</summary>
     private void OnScheduleLoaded(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
     {
         if (_isPopupVisible && _mode != FlyoutMode.Favorites && !_allowClose)
@@ -1093,11 +1261,39 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// <summary>Draws each saved stop's route (in its direction) in the route's color.</summary>
     private async Task RebuildRoutesAsync()
     {
+        _routesCancellation?.Cancel();
+        CancellationTokenSource cancellation = new();
+        _routesCancellation = cancellation;
+        try
+        {
+            await DrawRoutesAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Dismissed before the lines loaded: draw them on the next open. A newer rebuild owns the flag.
+            if (ReferenceEquals(_routesCancellation, cancellation))
+            {
+                _savedStopsDirty = true;
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_routesCancellation, cancellation))
+            {
+                _routesCancellation = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private async Task DrawRoutesAsync(CancellationToken cancellationToken)
+    {
         IReadOnlyList<SavedStop> stops = SettingsService.Stops;
         List<MapPolyline> lines = [];
         foreach (IGrouping<string, SavedStop> byRoute in stops.GroupBy(s => s.RouteId, StringComparer.OrdinalIgnoreCase))
         {
-            IReadOnlyList<RoutePattern> patterns = await GetPatternsAsync(byRoute.Key);
+            IReadOnlyList<RoutePattern> patterns = await GetPatternsAsync(byRoute.Key, cancellationToken: cancellationToken);
             Color color = MapHelpers.ParseRouteColor(byRoute.First().RouteColor);
             foreach (RoutePattern pattern in patterns.Where(p => byRoute.Any(s => s.AllRoutes || string.Equals(s.DirectionId, p.DirectionId, StringComparison.OrdinalIgnoreCase))))
             {
@@ -1121,24 +1317,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         StrokeThickness = 4,
     };
 
-    private async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId)
+    private async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId, bool required = false, CancellationToken cancellationToken = default)
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, TransitTrigger.Metadata);
-        if (_patternCache.TryGetValue(routeId, out (DateTime FetchedUtc, IReadOnlyList<RoutePattern> Patterns) cached) && DateTime.UtcNow - cached.FetchedUtc < PatternCacheLifetime)
-        {
-            _monitor.Service.Diagnostics?.RecordReuse(TransitEndpoint.Patterns, inFlight: false, batchSize: 1);
-            return cached.Patterns;
-        }
-
         try
         {
-            IReadOnlyList<RoutePattern> patterns = await _monitor.Service.GetPatternsAsync(routeId);
-            _patternCache[routeId] = (DateTime.UtcNow, patterns);
-            return patterns;
+            return await _monitor.Metadata.GetPatternsAsync(routeId, cancellationToken);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
+        catch (Exception ex) when (!required && !cancellationToken.IsCancellationRequested && ex is (HttpRequestException or TaskCanceledException or TransitApiException))
         {
-            // Route lines are decoration; the next open retries.
+            System.Diagnostics.Debug.WriteLine($"Decorative route shape load failed: {ex.GetType().Name}. The next open can retry.");
             return [];
         }
     }
@@ -1573,18 +1761,4 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         HidePopup();
     }
 
-    /// <summary>What the list says when it has nothing to show, and what its button does.</summary>
-    private sealed record Notice(string Title, string Text, string? Button = null, Action? Action = null);
-
-    /// <summary>What a Commute or Nearby load found: where it looked, the stops to list, and what to say if there are none.</summary>
-    private sealed record PlaceStops(
-        GeoPoint? Origin,
-        IReadOnlyList<NearbyStop> Stops,
-        Notice EmptyNotice,
-        CommuteLeg? Leg = null,
-        IReadOnlySet<RouteDirection>? DirectRoutes = null,
-        IReadOnlyDictionary<string, double>? DestinationWalks = null)
-    {
-        public static PlaceStops Unavailable(Notice notice, CommuteLeg? leg = null) => new(null, [], notice, leg);
-    }
 }

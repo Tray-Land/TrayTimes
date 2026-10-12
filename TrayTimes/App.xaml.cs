@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.Windows.AppLifecycle;
 using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
@@ -13,8 +14,8 @@ using WinUIEx;
 namespace TrayTimes;
 
 /// <summary>
-/// Tray-only application: no window at launch, just a notification-area icon that toggles the
-/// arrivals flyout (pattern from github.com/TheJoeFin/Traydio).
+/// Tray application: manual launches open a window; Windows startup launches stay in the tray.
+/// The notification-area icon toggles the arrivals flyout (pattern from github.com/TheJoeFin/Traydio).
 /// <para>Browsing mode: the flyout and its polling exist only while it's in use, and are torn down
 /// a minute after it's dismissed. Tracking mode: <see cref="BusTrackingService"/> follows one bus
 /// with no window open, showing its minutes away as the tray icon.</para>
@@ -75,20 +76,24 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        bool isStartupTask = AppInstance.GetCurrent().GetActivatedEventArgs().Kind == ExtendedActivationKind.StartupTask;
         _singleInstanceMutex = new Mutex(true, MutexName, out bool createdNew);
         if (!createdNew)
         {
-            // Another instance owns the tray icon: ask it to open its flyout, then quit.
-            try
+            if (!isStartupTask)
             {
-                // Let the running instance take the foreground when it shows its flyout.
-                Windows.Win32.PInvoke.AllowSetForegroundWindow(unchecked((uint)-1)); // ASFW_ANY
-                using EventWaitHandle existing = EventWaitHandle.OpenExisting(ShowEventName);
-                existing.Set();
-            }
-            catch
-            {
-                // The other instance may be shutting down; nothing to do.
+                // Another instance owns the tray icon: ask it to open a window, then quit.
+                try
+                {
+                    // Let the running instance take the foreground when it shows its window.
+                    Windows.Win32.PInvoke.AllowSetForegroundWindow(unchecked((uint)-1)); // ASFW_ANY
+                    using EventWaitHandle existing = EventWaitHandle.OpenExisting(ShowEventName);
+                    existing.Set();
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Unable to show the running instance: {ex.Message}");
+                }
             }
 
             Exit();
@@ -98,15 +103,16 @@ public partial class App : Application
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
         ThreadPool.RegisterWaitForSingleObject(_showEvent,
-            (_, _) => _dispatcher.TryEnqueue(ShowFlyout), null, Timeout.Infinite, executeOnlyOnce: false);
+            (_, _) => _dispatcher.TryEnqueue(ShowLaunchWindow), null, Timeout.Infinite, executeOnlyOnce: false);
 
         BusTimeTransitService mcts = BusTimeTransitService.CreateMcts(Secrets.MctsApiKey);
         mcts.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
         mcts.Diagnostics.Observed += (_, observation) => ApiUsageService.Observe(observation);
-        _stopIndex = new StopIndexService(mcts);
-        _monitor = new ArrivalsMonitor(mcts, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
+        MetadataTransitService transit = new(new CooldownTransitService(mcts));
+        _stopIndex = new StopIndexService(transit);
+        _monitor = new ArrivalsMonitor(transit, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
         _monitor.Updated += (_, _) => UpdateTooltip();
-        _tracker = new BusTrackingService(mcts, _dispatcher);
+        _tracker = new BusTrackingService(transit, _dispatcher, predictions: _monitor.Predictions);
         _tracker.Changed += (_, _) => OnTrackingChanged();
 
         _flyoutCloseTimer = _dispatcher.CreateTimer();
@@ -138,11 +144,25 @@ public partial class App : Application
                 TaskScheduler.Default);
         }
 
-        // First run: nothing to show yet, so go straight to setup.
-        if (SettingsService.Stops.Count == 0 && SettingsService.Places.Count == 0)
+        if (!isStartupTask)
+        {
+            ShowLaunchWindow();
+        }
+    }
+
+    private void ShowLaunchWindow()
+    {
+        if (!SettingsService.HasShownLaunchWindow
+            && SettingsService.Stops.Count == 0 && SettingsService.Places.Count == 0)
         {
             ShowSettings();
         }
+        else
+        {
+            ShowFlyout();
+        }
+
+        SettingsService.HasShownLaunchWindow = true;
     }
 
     public void ShowSettings()

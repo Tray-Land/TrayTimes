@@ -12,40 +12,41 @@ namespace TrayTimes.Services;
 /// </summary>
 internal sealed class ArrivalsMonitor
 {
-    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan RefreshInterval = PredictionCoordinator.BrowsingInterval;
 
     private readonly DispatcherQueueTimer _timer;
     private readonly TimeProvider _time;
-    private Task<IReadOnlyDictionary<string, TransitRoute>>? _routesTask;
     private IReadOnlyList<Arrival> _live = [];
+    private IReadOnlySet<string>? _liveStopIds;
     private bool _isForeground;
     private bool _stopsChanged;
     private int _refreshGeneration;
+    private CancellationTokenSource? _refreshCancellation;
 
-    public ArrivalsMonitor(ITransitService service, ScheduleService schedule, DispatcherQueue dispatcher, TimeProvider? timeProvider = null)
+    public ArrivalsMonitor(ITransitService service, ScheduleService schedule, DispatcherQueue dispatcher, TimeProvider? timeProvider = null, PredictionCoordinator? predictions = null)
     {
-        Service = service;
+        Metadata = service as MetadataTransitService ?? new MetadataTransitService(service, timeProvider);
+        Service = Metadata;
         Schedule = schedule;
         _time = timeProvider ?? TimeProvider.System;
+        Predictions = predictions ?? new PredictionCoordinator(Service, _time);
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = true;
         _timer.Interval = RefreshInterval;
         _timer.Tick += (_, _) => _ = RefreshAsync(TransitTrigger.Timer);
         SettingsService.StopsChanged += OnStopsChanged;
-        schedule.Loaded += (_, _) => dispatcher.TryEnqueue(() =>
-        {
-            if (_isForeground)
-            {
-                _ = RefreshAsync(TransitTrigger.TimetableLoaded);
-            }
-        });
+        schedule.Loaded += (_, _) => dispatcher.TryEnqueue(OnScheduleLoaded);
     }
 
     public event EventHandler? Updated;
 
     public ITransitService Service { get; }
 
+    public MetadataTransitService Metadata { get; }
+
     public ScheduleService Schedule { get; }
+
+    public PredictionCoordinator Predictions { get; }
 
     public ArrivalsSnapshot Latest { get; private set; } = ArrivalsSnapshot.Empty;
 
@@ -61,9 +62,14 @@ internal sealed class ArrivalsMonitor
             if (!value)
             {
                 _timer.Stop();
+                ++_refreshGeneration;
+                _refreshCancellation?.Cancel();
+                Predictions.SetBrowsingStops(TransitConsumer.Favorites, []);
+                IsLoading = false;
                 return;
             }
 
+            Predictions.SetBrowsingStops(TransitConsumer.Favorites, [.. SettingsService.Stops.Select(s => s.StopId)]);
             _timer.Start();
             if (_stopsChanged || Latest.FetchedAt is not { } at || _time.GetLocalNow() - at > TimeSpan.FromSeconds(15))
             {
@@ -71,6 +77,7 @@ internal sealed class ArrivalsMonitor
             }
             else
             {
+                RemergeSchedule();
                 using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, TransitTrigger.FlyoutOpened);
                 Service.Diagnostics?.RecordReuse(TransitEndpoint.Predictions, inFlight: false,
                     batchSize: Math.Min(SavedStop.DistinctStopCount(SettingsService.Stops), Service.MaxStopsPerRequest));
@@ -78,34 +85,30 @@ internal sealed class ArrivalsMonitor
         }
     }
 
-    /// <summary>Stops polling and drops the cached arrivals and route catalog (the flyout was closed).</summary>
+    /// <summary>Stops polling and drops cached arrivals; shared metadata outlives the flyout.</summary>
     public void Clear()
     {
         IsForeground = false;
         ++_refreshGeneration; // Drop any in-flight refresh.
-        _routesTask = null;
         _live = [];
+        _liveStopIds = null;
         Publish(ArrivalsSnapshot.Empty);
     }
 
-    /// <summary>Route metadata (display names and colors) keyed by route ID; fetched once per session.</summary>
-    public async Task<IReadOnlyDictionary<string, TransitRoute>> GetRouteCatalogAsync(TransitConsumer consumer = TransitConsumer.Favorites)
+    /// <summary>Shared route metadata (display names and colors) keyed by route ID.</summary>
+    public async Task<IReadOnlyDictionary<string, TransitRoute>> GetRouteCatalogAsync(
+        TransitConsumer consumer = TransitConsumer.Favorites, CancellationToken cancellationToken = default)
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(consumer, TransitTrigger.Metadata);
-        if (_routesTask is { } task && (task.IsCompletedSuccessfully || !task.IsCompleted))
-        {
-            Service.Diagnostics?.RecordReuse(TransitEndpoint.Routes, inFlight: !task.IsCompletedSuccessfully);
-        }
-
-        _routesTask ??= LoadRoutesAsync();
         try
         {
-            return await _routesTask;
+            IReadOnlyList<TransitRoute> routes = await Metadata.GetRoutesAsync(cancellationToken);
+            return routes.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
+            && ex is HttpRequestException or OperationCanceledException or TransitApiException)
         {
-            // Try again next time rather than caching the failure.
-            _routesTask = null;
+            System.Diagnostics.Debug.WriteLine($"Route catalog load failed: {ex.GetType().Name}. Metadata remains retryable.");
             return new Dictionary<string, TransitRoute>();
         }
     }
@@ -113,18 +116,28 @@ internal sealed class ArrivalsMonitor
     public async Task RefreshAsync(TransitTrigger trigger = TransitTrigger.ManualRefresh)
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, trigger);
+        if (!_isForeground)
+        {
+            return;
+        }
+
         IReadOnlyList<SavedStop> stops = SettingsService.Stops;
         int generation = ++_refreshGeneration;
         _stopsChanged = false;
 
         if (!Service.IsConfigured)
         {
+            _refreshCancellation?.Cancel();
             Publish(new ArrivalsSnapshot(null, [], $"No {Service.AgencyName} API key. Add MctsApiKey to OAuth.resw and rebuild."));
             return;
         }
 
         if (stops.Count == 0)
         {
+            _refreshCancellation?.Cancel();
+            Predictions.SetBrowsingStops(TransitConsumer.Favorites, []);
+            _live = [];
+            _liveStopIds = null;
             Publish(ArrivalsSnapshot.Empty);
             return;
         }
@@ -132,16 +145,31 @@ internal sealed class ArrivalsMonitor
         IsLoading = true;
         Updated?.Invoke(this, EventArgs.Empty);
         ArrivalsSnapshot result;
-        string[] stopIds = [.. stops.Select(s => s.StopId).Distinct().Take(Service.MaxStopsPerRequest)];
+        string[] stopIds = [.. stops.Select(s => s.StopId).Distinct()];
+        Predictions.SetBrowsingStops(TransitConsumer.Favorites, stopIds);
+        using CancellationTokenSource cancellation = new();
+        CancellationTokenSource? previous = _refreshCancellation;
+        _refreshCancellation = cancellation;
         try
         {
-            IReadOnlyList<Arrival> live = await Service.GetArrivalsAsync(stopIds);
+            Task<PredictionSnapshot> pending = Predictions.GetAsync(stopIds,
+                trigger == TransitTrigger.FlyoutOpened ? TimeSpan.FromSeconds(15) : RefreshInterval,
+                force: trigger is TransitTrigger.ManualRefresh or TransitTrigger.Retry,
+                combineBrowsing: true, cancellationToken: cancellation.Token);
+            previous?.Cancel(); // Attach the replacement waiter before releasing its shared batch.
+            PredictionSnapshot snapshot = await pending;
+            IReadOnlyList<Arrival> live = snapshot.Arrivals;
             if (generation == _refreshGeneration)
             {
                 _live = live;
+                _liveStopIds = stopIds.ToHashSet(StringComparer.Ordinal);
             }
 
-            result = new ArrivalsSnapshot(_time.GetLocalNow(), Schedule.AddScheduled(live, stopIds), null);
+            result = new ArrivalsSnapshot(snapshot.FetchedAt, Schedule.AddScheduled(live, stopIds), null);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
@@ -154,6 +182,13 @@ internal sealed class ArrivalsMonitor
 
             // Keep showing the last good predictions, and the schedule, alongside the error.
             result = new ArrivalsSnapshot(Latest.FetchedAt, Schedule.AddScheduled(_live, stopIds), message);
+        }
+        finally
+        {
+            if (ReferenceEquals(_refreshCancellation, cancellation))
+            {
+                _refreshCancellation = null;
+            }
         }
 
         if (generation == _refreshGeneration)
@@ -174,6 +209,28 @@ internal sealed class ArrivalsMonitor
         }
     }
 
+    private void OnScheduleLoaded()
+    {
+        if (_isForeground && !RemergeSchedule() && !IsLoading)
+        {
+            _ = RefreshAsync(TransitTrigger.TimetableLoaded);
+        }
+    }
+
+    private bool RemergeSchedule()
+    {
+        string[] stopIds = [.. SettingsService.Stops.Select(s => s.StopId).Distinct()];
+        if (_stopsChanged || Latest.FetchedAt is null || _liveStopIds is null || !_liveStopIds.SetEquals(stopIds))
+        {
+            return false;
+        }
+
+        // Local enrichment must not reset a pending refresh, its error, or the HTTP timestamp.
+        Latest = Latest with { Arrivals = Schedule.AddScheduled(_live, stopIds) };
+        Updated?.Invoke(this, EventArgs.Empty);
+        return true;
+    }
+
     private void Publish(ArrivalsSnapshot snapshot)
     {
         IsLoading = false;
@@ -181,9 +238,4 @@ internal sealed class ArrivalsMonitor
         Updated?.Invoke(this, EventArgs.Empty);
     }
 
-    private async Task<IReadOnlyDictionary<string, TransitRoute>> LoadRoutesAsync()
-    {
-        IReadOnlyList<TransitRoute> routes = await Service.GetRoutesAsync();
-        return routes.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
-    }
 }

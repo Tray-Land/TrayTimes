@@ -1,4 +1,3 @@
-using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using TrayTimes.Models;
@@ -12,6 +11,8 @@ internal sealed class StopIndexFile
     public DateTimeOffset BuiltAt { get; set; }
 
     public List<IndexedStop> Stops { get; set; } = [];
+
+    public StopDirectoryMetadata? Metadata { get; set; }
 }
 
 [JsonSerializable(typeof(StopIndexFile))]
@@ -22,13 +23,29 @@ internal sealed partial class StopIndexJsonContext : JsonSerializerContext;
 /// so this crawls routes → directions → stops (about a hundred requests for MCTS), caches the
 /// result in LocalState, and rebuilds it weekly.
 /// </summary>
-internal sealed class StopIndexService(ITransitService service)
+internal sealed class StopIndexService
 {
     private const string FileName = "stop-index.json";
-    private const int MaxConcurrentRequests = 4;
-    private static readonly TimeSpan MaxAge = TimeSpan.FromDays(7);
+    private static readonly TimeSpan MaxAge = MetadataTransitService.DirectoryLifetime;
 
+    private readonly StopDirectoryBuildCoordinator _builder;
+    private readonly MetadataTransitService _metadata;
+    private StopDirectoryMetadata? _builtMetadata;
     private Task<IReadOnlyList<IndexedStop>>? _loadTask;
+
+    public StopIndexService(MetadataTransitService service)
+    {
+        _metadata = service;
+        _builder = new StopDirectoryBuildCoordinator(async cancellationToken =>
+        {
+            // A rebuild must actually refresh the directory, not crawl still-fresh cached endpoints.
+            _metadata.Invalidate();
+            StopDirectoryBuilder builder = new(service);
+            IReadOnlyList<IndexedStop> stops = await builder.BuildAsync(cancellationToken);
+            _builtMetadata = builder.Metadata;
+            return stops;
+        });
+    }
 
     /// <summary>Raised (on the thread that finished the work) when the directory loads or rebuilds.</summary>
     public event EventHandler? Changed;
@@ -42,15 +59,15 @@ internal sealed class StopIndexService(ITransitService service)
     /// <summary>The directory, loading it from disk or building it on first use.</summary>
     public async Task<IReadOnlyList<IndexedStop>> GetAsync()
     {
-        _loadTask ??= LoadOrBuildAsync(forceRebuild: false);
+        Task<IReadOnlyList<IndexedStop>> task = _loadTask ??= LoadOrBuildAsync(forceRebuild: false);
         try
         {
-            return await _loadTask;
+            return await task;
         }
         catch
         {
-            // Don't cache the failure; the next caller retries.
-            _loadTask = null;
+            // Don't cache the failure; the next caller retries (after the build hold-off). A newer load must survive.
+            _ = Interlocked.CompareExchange(ref _loadTask, null, task);
             throw;
         }
     }
@@ -64,9 +81,14 @@ internal sealed class StopIndexService(ITransitService service)
         }
     }
 
+    /// <summary>A user-requested rebuild: it ignores the failure hold-off but joins a build that is already running.</summary>
     public Task<IReadOnlyList<IndexedStop>> RebuildAsync()
     {
-        _loadTask = LoadOrBuildAsync(forceRebuild: true);
+        if (!IsBuilding || _loadTask is null)
+        {
+            _loadTask = LoadOrBuildAsync(forceRebuild: true);
+        }
+
         return GetAsync();
     }
 
@@ -83,7 +105,7 @@ internal sealed class StopIndexService(ITransitService service)
         Changed?.Invoke(this, EventArgs.Empty);
         try
         {
-            StopIndexFile built = await BuildAsync();
+            StopIndexFile built = await BuildAsync(forceRebuild);
             await using (FileStream stream = File.Create(path))
             {
                 await JsonSerializer.SerializeAsync(stream, built, StopIndexJsonContext.Default.StopIndexFile);
@@ -99,55 +121,13 @@ internal sealed class StopIndexService(ITransitService service)
         }
     }
 
-    private async Task<StopIndexFile> BuildAsync()
+    private async Task<StopIndexFile> BuildAsync(bool manual)
     {
-        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.StopDirectory, TransitTrigger.DirectoryBuild);
-        IReadOnlyList<TransitRoute> routes = await service.GetRoutesAsync();
-        Dictionary<string, IndexedStop> stops = [];
-        using SemaphoreSlim throttle = new(MaxConcurrentRequests);
-        int failures = 0;
-
-        async Task CrawlRouteAsync(TransitRoute route)
-        {
-            await throttle.WaitAsync();
-            try
-            {
-                foreach (TransitDirection direction in await service.GetDirectionsAsync(route.Id))
-                {
-                    StopRouteInfo info = new(route.Id, route.DisplayId, route.Color, direction.Id, direction.Name);
-                    foreach (TransitStop stop in await service.GetStopsAsync(route.Id, direction.Id))
-                    {
-                        lock (stops)
-                        {
-                            if (!stops.TryGetValue(stop.Id, out IndexedStop? entry))
-                            {
-                                entry = new IndexedStop(stop.Id, stop.Name, stop.Location.Lat, stop.Location.Lon, []);
-                                stops[stop.Id] = entry;
-                            }
-
-                            entry.Routes.Add(info);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
-            {
-                // One bad route shouldn't sink the directory; a failed build is retried next time.
-                Interlocked.Increment(ref failures);
-            }
-            finally
-            {
-                throttle.Release();
-            }
-        }
-
-        await Task.WhenAll(routes.Select(CrawlRouteAsync));
-        if (stops.Count == 0 || failures > routes.Count / 4)
-        {
-            throw new TransitApiException($"Couldn't download the {service.AgencyName} stop list ({failures} of {routes.Count} routes failed).");
-        }
-
-        return new StopIndexFile { BuiltAt = DateTimeOffset.Now, Stops = [.. stops.Values] };
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(
+            TransitConsumer.StopDirectory,
+            manual ? TransitTrigger.ManualRefresh : TransitTrigger.DirectoryBuild);
+        IReadOnlyList<IndexedStop> stops = await _builder.BuildAsync(manual);
+        return new StopIndexFile { BuiltAt = DateTimeOffset.Now, Stops = [.. stops], Metadata = _builtMetadata };
     }
 
     private static async Task<StopIndexFile?> TryReadAsync(string path)
@@ -167,5 +147,6 @@ internal sealed class StopIndexService(ITransitService service)
     {
         BuiltAt = file.BuiltAt;
         Count = file.Stops.Count;
+        _metadata.SeedDirectory(file.Metadata, file.BuiltAt);
     }
 }

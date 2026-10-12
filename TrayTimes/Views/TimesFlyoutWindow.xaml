@@ -21,6 +21,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="230" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
@@ -285,8 +286,27 @@
             </SelectorBarItem>
         </SelectorBar>
 
+        <InfoBar
+            x:Name="LocationPermissionBar"
+            x:Uid="LocationPermissionBar"
+            Grid.Row="2"
+            Margin="8,4,8,8"
+            AutomationProperties.AutomationId="LocationPermissionBar"
+            IsClosable="False"
+            IsOpen="False"
+            Severity="Warning"
+            Visibility="Collapsed">
+            <InfoBar.ActionButton>
+                <Button
+                    x:Name="GrantLocationPermissionButton"
+                    x:Uid="GrantLocationPermissionButton"
+                    AutomationProperties.AutomationId="GrantLocationPermissionButton"
+                    Click="GrantLocationPermissionButton_Click" />
+            </InfoBar.ActionButton>
+        </InfoBar>
+
         <!--  Map  -->
-        <Grid Grid.Row="2">
+        <Grid Grid.Row="3">
             <map:MapControl
                 x:Name="Map"
                 AutomationProperties.Name="Map of your stops and approaching buses"
@@ -318,7 +338,7 @@
         </Grid>
 
         <!--  Arrivals  -->
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />

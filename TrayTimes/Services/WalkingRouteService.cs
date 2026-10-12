@@ -79,7 +79,8 @@ internal static class WalkingRouteService
 
             return null;
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException
+            && !cancellationToken.IsCancellationRequested)
         {
             // Offline, throttled or unroutable: the caller falls back to the straight-line estimate.
             return null;

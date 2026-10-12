@@ -1,5 +1,6 @@
 using TrayTimes.Models;
 using TrayTimes.Transit;
+using TrayTimes.Transit.Gtfs;
 
 // Only platform boundaries are doubled: tests compile the production monitor, tracker, and tally.
 namespace Microsoft.UI.Dispatching
@@ -63,7 +64,7 @@ namespace TrayTimes.Services
 
         public static int HeadOutMinutes { get; set; } = 5;
 
-        public static bool KeepAwakeWhileTracking => false;
+        public static bool KeepAwakeWhileTracking { get; set; }
 
         public static void RaiseStopsChanged() => StopsChanged?.Invoke(null, EventArgs.Empty);
 
@@ -72,14 +73,24 @@ namespace TrayTimes.Services
             StopsChanged = null;
             Stops = [];
             HeadOutMinutes = 5;
+            KeepAwakeWhileTracking = false;
+            Windows.Win32.PInvoke.ExecutionStates.Clear();
         }
     }
 
-    internal sealed class ScheduleService
+    internal sealed class ScheduleService(TimeProvider? timeProvider = null)
     {
         public event EventHandler? Loaded;
 
-        public IReadOnlyList<Arrival> AddScheduled(IReadOnlyList<Arrival> live, IReadOnlyCollection<string> stopIds) => live;
+        public GtfsTimetable? Timetable { get; set; }
+
+        public IReadOnlyList<Arrival> AddScheduled(IReadOnlyList<Arrival> live, IReadOnlyCollection<string> stopIds)
+        {
+            DateTimeOffset now = (timeProvider ?? TimeProvider.System).GetLocalNow();
+            return Timetable is { } timetable
+                ? ArrivalMerge.WithSchedule(live, timetable.GetArrivals(stopIds, now, now.AddHours(3)))
+                : live;
+        }
 
         public void RaiseLoaded() => Loaded?.Invoke(this, EventArgs.Empty);
     }
@@ -91,9 +102,11 @@ namespace TrayTimes.Services
 
     internal static class NotificationService
     {
+        public static List<string> Titles { get; } = [];
+
         public static void Clear() { }
 
-        public static void Show(string title, string text, bool canStopTracking) { }
+        public static void Show(string title, string text, bool canStopTracking) => Titles.Add(title);
     }
 }
 
@@ -110,6 +123,8 @@ namespace Windows.Win32
 {
     internal static class PInvoke
     {
-        public static void SetThreadExecutionState(System.Power.EXECUTION_STATE state) { }
+        public static List<System.Power.EXECUTION_STATE> ExecutionStates { get; } = [];
+
+        public static void SetThreadExecutionState(System.Power.EXECUTION_STATE state) => ExecutionStates.Add(state);
     }
 }

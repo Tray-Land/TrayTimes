@@ -18,6 +18,7 @@ public sealed class RequestBaselineTests
         SettingsService.Reset();
         SettingsService.Stops = [new SavedStop("1", "Fixture stop", 0, 0, "14", "14", null, "N", "North", false)];
         ApiUsageService.Reset();
+        NotificationService.Titles.Clear();
     }
 
     [TestCleanup]
@@ -33,11 +34,10 @@ public sealed class RequestBaselineTests
         BusTimeTransitService service = CreateCountedService(handler, clock);
         DispatcherQueue dispatcher = new();
         ArrivalsMonitor monitor = new(service, new ScheduleService(), dispatcher, clock);
-        await monitor.RefreshAsync();
-        monitor.IsForeground = true;
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
         VehiclePositionsMonitor vehicles = new(service, _ => { }, clock) { IsForeground = true };
         await vehicles.RefreshAsync(["5501"]);
-        clock.Advance(VehiclePositionsMonitor.RefreshInterval);
+        clock.Advance(PredictionCoordinator.BrowsingInterval);
         List<Task> vehicleRequests = [];
         monitor.Updated += (_, _) =>
         {
@@ -75,7 +75,7 @@ public sealed class RequestBaselineTests
     [TestMethod]
     [DataRow(TransitConsumer.Commute)]
     [DataRow(TransitConsumer.Nearby)]
-    public async Task GetArrivalsAsync_PlaceBoundaryReplayWithForegroundFavorites_CountsFourPredictionsAndFourVehicles(TransitConsumer consumer)
+    public async Task GetArrivalsAsync_PlaceBoundaryReplayWithForegroundFavorites_CountsTwoPredictionsAndFourVehicles(TransitConsumer consumer)
     {
         // Arrange: real Favorites monitor; the place result/completion and timers are a replay of
         // audited UI call sites, not a measurement of location/discovery or rendered WinUI.
@@ -84,11 +84,11 @@ public sealed class RequestBaselineTests
         BusTimeTransitService service = CreateCountedService(handler, clock);
         DispatcherQueue dispatcher = new();
         ArrivalsMonitor monitor = new(service, new ScheduleService(), dispatcher, clock);
-        await monitor.RefreshAsync();
-        monitor.IsForeground = true;
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
+        monitor.Predictions.SetBrowsingStops(consumer, ["1", "2"]);
         VehiclePositionsMonitor vehicles = new(service, _ => { }, clock) { IsForeground = true };
         await vehicles.RefreshAsync(["5501"]);
-        clock.Advance(VehiclePositionsMonitor.RefreshInterval);
+        clock.Advance(PredictionCoordinator.BrowsingInterval);
         int before = handler.Attempts;
 
         // Act
@@ -99,7 +99,7 @@ public sealed class RequestBaselineTests
                 await WaitForMonitorAsync(monitor, dispatcher.Timers[0].Fire);
                 using (TransitRequestDiagnostics.BeginScope(consumer, TransitTrigger.Timer))
                 {
-                    await service.GetArrivalsAsync(["1", "2"]);
+                    await monitor.Predictions.GetAsync(["1", "2"], PredictionCoordinator.BrowsingInterval, combineBrowsing: true);
                 }
 
                 await VehiclesAsync(vehicles, consumer, TransitTrigger.PlaceResult);
@@ -111,12 +111,12 @@ public sealed class RequestBaselineTests
         }
 
         // Assert
-        Assert.AreEqual(8, handler.Attempts - before);
-        Assert.AreEqual(2, Completed(service, TransitEndpoint.Predictions).Count(o => o.Consumer == consumer));
+        Assert.AreEqual(6, handler.Attempts - before);
+        Assert.AreEqual(0, Completed(service, TransitEndpoint.Predictions).Count(o => o.Consumer == consumer));
         Assert.AreEqual(2, Completed(service, TransitEndpoint.Predictions).Count(o => o.Consumer == TransitConsumer.Favorites && o.Trigger == TransitTrigger.Timer));
         Assert.AreEqual(5, Completed(service, TransitEndpoint.Vehicles).Count); // Includes the initial position.
         Assert.AreEqual(0, Completed(service, TransitEndpoint.Vehicles).Count(o => o.Trigger == TransitTrigger.PlaceCompleted));
-        Assert.AreEqual(10, ApiUsageService.GetSummary().Total.Today);
+        Assert.AreEqual(8, ApiUsageService.GetSummary().Total.Today);
     }
 
     [TestMethod]
@@ -137,7 +137,7 @@ public sealed class RequestBaselineTests
         schedule.RaiseLoaded();
         dispatcher.Timers[0].Fire();
         monitor.IsForeground = true; // Fresh reopen reuses display data: no HTTP.
-        Assert.AreEqual(2, handler.Attempts);
+        Assert.AreEqual(1, handler.Attempts);
         monitor.IsForeground = false;
         clock.Advance(TimeSpan.FromSeconds(16));
         await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
@@ -149,23 +149,21 @@ public sealed class RequestBaselineTests
         // Assert
         CollectionAssert.AreEqual(new[]
         {
-            TransitTrigger.FlyoutOpened, TransitTrigger.TimetableLoaded, TransitTrigger.FlyoutOpened,
-            TransitTrigger.StopsChanged, TransitTrigger.FlyoutOpened,
+            TransitTrigger.FlyoutOpened, TransitTrigger.FlyoutOpened,
         }, Completed(service, TransitEndpoint.Predictions).Select(o => o.Trigger).ToArray());
-        Assert.AreEqual(5, handler.Attempts);
-        Assert.AreEqual(5, ApiUsageService.GetSummary().Total.Today);
+        Assert.AreEqual(2, handler.Attempts);
+        Assert.AreEqual(2, ApiUsageService.GetSummary().Total.Today);
         Assert.AreEqual(TimeSpan.FromSeconds(30), dispatcher.Timers[0].Interval);
     }
 
     [TestMethod]
-    public async Task RefreshAsync_SlowOverlappingTimetableAndReopen_ObservesBothAttemptsWithoutChangingScheduling()
+    public async Task RefreshAsync_SlowOverlappingTimetableAndReopen_SharesOneAttempt()
     {
         // Arrange
         TaskCompletionSource<HttpResponseMessage> first = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        TaskCompletionSource<HttpResponseMessage> second = new(TaskCreationOptions.RunContinuationsAsynchronously);
         RequestTestClock clock = new();
         RequestTestHandler handler = new();
-        handler.RespondAsync = (_, _) => handler.Attempts == 1 ? first.Task : second.Task;
+        handler.RespondAsync = (_, token) => first.Task.WaitAsync(token);
         BusTimeTransitService service = CreateCountedService(handler, clock);
         ScheduleService schedule = new();
         ArrivalsMonitor monitor = new(service, schedule, new DispatcherQueue(), clock);
@@ -175,14 +173,14 @@ public sealed class RequestBaselineTests
         Task completed = WaitForMonitorAsync(monitor, schedule.RaiseLoaded);
         clock.Advance(TimeSpan.FromSeconds(2));
         first.SetResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
-        second.SetResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
         await completed;
 
         // Assert
-        Assert.AreEqual(2, handler.Attempts);
-        Assert.AreEqual(2, ApiUsageService.GetSummary().Total.Today);
+        Assert.AreEqual(1, handler.Attempts);
+        Assert.AreEqual(1, ApiUsageService.GetSummary().Total.Today);
         TransitRequestObservation[] started = [.. service.Diagnostics.Snapshot.Where(o => o.Phase == TransitRequestPhase.Started)];
-        CollectionAssert.AreEqual(new[] { TransitTrigger.FlyoutOpened, TransitTrigger.TimetableLoaded }, started.Select(o => o.Trigger).ToArray());
+        CollectionAssert.AreEqual(new[] { TransitTrigger.FlyoutOpened }, started.Select(o => o.Trigger).ToArray());
+        Assert.AreEqual(0, service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.InFlightReuse));
         Assert.IsNotNull(monitor.Latest.FetchedAt);
     }
 
@@ -205,20 +203,48 @@ public sealed class RequestBaselineTests
         // Assert
         Assert.AreEqual(1, handler.Attempts);
         Assert.AreEqual(1, ApiUsageService.GetSummary().Total.Today);
-        Assert.AreSame(await favorites, await settings);
+        CollectionAssert.AreEqual((await favorites).Values.ToArray(), (await settings).Values.ToArray());
         Assert.AreEqual(TransitConsumer.Settings, service.Diagnostics.Snapshot.Single(o => o.Phase == TransitRequestPhase.InFlightReuse).Consumer);
         Assert.AreEqual(TransitConsumer.Nearby, service.Diagnostics.Snapshot.Single(o => o.Phase == TransitRequestPhase.CacheReuse).Consumer);
     }
 
     [TestMethod]
-    public async Task RefreshAsync_EmptySuccessThenFailure_PreservesTimestampAndSurfacesFailure()
+    public async Task GetRouteCatalogAsync_FlyoutClearAndRecreatedConsumer_DoesNotDiscardAppMetadata()
     {
         // Arrange
         RequestTestClock clock = new();
         RequestTestHandler handler = new();
+        ArrivalsMonitor monitor = new(CreateCountedService(handler, clock), new ScheduleService(), new DispatcherQueue(), clock);
+        await monitor.GetRouteCatalogAsync();
+
+        // Act
+        monitor.Clear();
+        await monitor.GetRouteCatalogAsync(TransitConsumer.Settings);
+        ArrivalsMonitor recreated = new(monitor.Metadata, new ScheduleService(), new DispatcherQueue(), clock);
+        await recreated.GetRouteCatalogAsync(TransitConsumer.Favorites);
+        monitor.Metadata.Invalidate();
+        await monitor.GetRouteCatalogAsync(TransitConsumer.Settings);
+
+        // Assert
+        Assert.AreEqual(2, handler.Attempts); // Initial and intentional invalidation only.
+        Assert.AreEqual(2, ApiUsageService.GetSummary().Total.Today);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task RefreshAsync_SuccessThenFailure_PreservesLastGoodTimestampAndArrivals(bool empty)
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        RequestTestHandler handler = new()
+        {
+            RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
+                empty ? RequestTestHandler.EmptyBody : RequestTestHandler.LiveBody)),
+        };
         BusTimeTransitService service = CreateCountedService(handler, clock);
         ArrivalsMonitor monitor = new(service, new ScheduleService(), new DispatcherQueue(), clock);
-        await monitor.RefreshAsync();
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
         DateTimeOffset? fetched = monitor.Latest.FetchedAt;
         handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("error", HttpStatusCode.ServiceUnavailable));
         clock.Advance(TimeSpan.FromSeconds(30));
@@ -230,7 +256,7 @@ public sealed class RequestBaselineTests
         Assert.IsNotNull(fetched);
         Assert.AreEqual(fetched, monitor.Latest.FetchedAt);
         Assert.IsNotNull(monitor.Latest.Error);
-        Assert.IsEmpty(monitor.Latest.Arrivals);
+        Assert.AreEqual(empty ? 0 : 1, monitor.Latest.Arrivals.Count);
         CollectionAssert.AreEqual(new[] { TransitRequestOutcome.Success, TransitRequestOutcome.HttpFailure },
             Completed(service, TransitEndpoint.Predictions).Select(o => o.Outcome).ToArray());
         Assert.AreEqual(2, ApiUsageService.GetSummary().Total.Today);
@@ -313,6 +339,234 @@ public sealed class RequestBaselineTests
         Assert.IsFalse(tracker.Current.HasPassed);
         Assert.AreEqual(TransitRequestOutcome.HttpFailure, Completed(service, TransitEndpoint.Predictions).Single().Outcome);
         Assert.AreEqual(1, ApiUsageService.GetSummary().Total.Today);
+        tracker.Stop();
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_ManualForceAndHiddenCalls_PreservesIntentionalRefreshAndHiddenInactivity()
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        RequestTestHandler handler = new();
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        ArrivalsMonitor monitor = new(service, new ScheduleService(), new DispatcherQueue(), clock);
+        await monitor.RefreshAsync();
+        Assert.AreEqual(0, handler.Attempts);
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
+        DateTimeOffset? original = monitor.Latest.FetchedAt;
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        // Act
+        await monitor.RefreshAsync(TransitTrigger.Timer);
+        Assert.AreEqual(original, monitor.Latest.FetchedAt);
+        await monitor.RefreshAsync();
+        monitor.IsForeground = false;
+        await monitor.RefreshAsync();
+
+        // Assert
+        Assert.AreEqual(2, handler.Attempts);
+        Assert.AreEqual(original!.Value.AddSeconds(1), monitor.Latest.FetchedAt);
+        Assert.AreEqual(TransitTrigger.ManualRefresh, Completed(service, TransitEndpoint.Predictions).Last().Trigger);
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_HideDuringSharedTrackingFetch_PreservesTooltipSnapshotAndHiddenTracker()
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        RequestTestHandler handler = new();
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        DispatcherQueue dispatcher = new();
+        ArrivalsMonitor monitor = new(service, new ScheduleService(), dispatcher, clock);
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
+        DateTimeOffset? lastGood = monitor.Latest.FetchedAt;
+        TaskCompletionSource<HttpResponseMessage> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
+        BusTrackingService tracker = new(service, dispatcher, clock, monitor.Predictions);
+        tracker.Start(ArrivalAt(clock.GetUtcNow().AddMinutes(4)), "Fixture stop");
+        clock.Advance(TimeSpan.FromSeconds(30));
+
+        // Act
+        Task browsing = monitor.RefreshAsync(TransitTrigger.Timer);
+        Task tracking = WaitForTrackerAsync(tracker, dispatcher.Timers[1].Fire);
+        monitor.IsForeground = false;
+        await browsing;
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
+        await tracking;
+
+        // Assert
+        Assert.AreEqual(2, handler.Attempts);
+        Assert.AreEqual(lastGood, monitor.Latest.FetchedAt);
+        Assert.IsFalse(monitor.IsLoading);
+        Assert.IsTrue(tracker.IsTracking);
+        Assert.AreEqual(1, Completed(service, TransitEndpoint.Predictions).Count(o => o.Trigger == TransitTrigger.Timer));
+        tracker.Stop();
+    }
+
+    [TestMethod]
+    [DataRow(TransitConsumer.Commute)]
+    [DataRow(TransitConsumer.Nearby)]
+    public async Task Start_SharedBrowsingPredictionAndRepeatedTicks_EmitsOneAlertWithoutAnotherHttp(TransitConsumer consumer)
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        RequestTestHandler handler = new()
+        {
+            RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
+                """{"bustime-response":{"prd":[{"stpid":"1","rt":"14","rtdir":"N","vid":"5501","prdtm":"20261006 20:04","dyn":0}]}}""")),
+        };
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        DispatcherQueue dispatcher = new();
+        PredictionCoordinator predictions = new(service, clock);
+        BusTrackingService tracker = new(service, dispatcher, clock, predictions);
+        tracker.Start(ArrivalAt(clock.GetUtcNow().AddMinutes(8)), "Fixture stop");
+        clock.Advance(TimeSpan.FromSeconds(30));
+        using (TransitRequestDiagnostics.BeginScope(consumer, TransitTrigger.Timer))
+        {
+            await predictions.GetAsync(["1", "2"], TimeSpan.FromSeconds(30), combineBrowsing: true);
+        }
+
+        // Act
+        await WaitForTrackerAsync(tracker, dispatcher.Timers[0].Fire);
+        await WaitForTrackerAsync(tracker, dispatcher.Timers[0].Fire); // Same fresh shared result.
+
+        // Assert
+        Assert.AreEqual(1, handler.Attempts);
+        CollectionAssert.AreEqual(new[] { "Time to head out" }, NotificationService.Titles);
+        Assert.AreEqual(TimeSpan.FromSeconds(10), dispatcher.Timers[0].Interval);
+        Assert.AreEqual(2, service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.CacheReuse && o.Consumer == TransitConsumer.Tracking));
+        tracker.Stop();
+    }
+
+    [TestMethod]
+    [DataRow(TransitConsumer.Commute)]
+    [DataRow(TransitConsumer.Nearby)]
+    public async Task GetAsync_MultiBatchPlaceReplayWithFavorites_CountsFourPredictionsAndFourVehicles(TransitConsumer consumer)
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        RequestTestHandler handler = new();
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        DispatcherQueue dispatcher = new();
+        SettingsService.Stops = [.. Enumerable.Range(1, 10).Select(i =>
+            new SavedStop(i.ToString(System.Globalization.CultureInfo.InvariantCulture), "Fixture stop", 0, 0, "14", "14", null, "N", "North", false))];
+        ArrivalsMonitor monitor = new(service, new ScheduleService(), dispatcher, clock);
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
+        string[] place = [.. Enumerable.Range(11, 8).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture))];
+        monitor.Predictions.SetBrowsingStops(consumer, place);
+        await monitor.Predictions.GetAsync(place, TimeSpan.FromSeconds(30), combineBrowsing: true);
+        VehiclePositionsMonitor vehicles = new(service, _ => { }, clock) { IsForeground = true };
+        await vehicles.RefreshAsync(["5501"]);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        int before = handler.Attempts;
+
+        // Act
+        for (int second = 0; second < 60; second += 15)
+        {
+            if (second % 30 == 0)
+            {
+                await WaitForMonitorAsync(monitor, dispatcher.Timers[0].Fire);
+                using (TransitRequestDiagnostics.BeginScope(consumer, TransitTrigger.Timer))
+                {
+                    await monitor.Predictions.GetAsync(place, TimeSpan.FromSeconds(30), combineBrowsing: true);
+                }
+            }
+
+            await VehiclesAsync(vehicles, consumer, TransitTrigger.Timer);
+            clock.Advance(TimeSpan.FromSeconds(15));
+        }
+
+        // Assert
+        Assert.AreEqual(8, handler.Attempts - before);
+        Assert.AreEqual(4, Completed(service, TransitEndpoint.Predictions).Count(o => o.Trigger == TransitTrigger.Timer));
+        CollectionAssert.AreEqual(new[] { 10, 8, 10, 8 },
+            Completed(service, TransitEndpoint.Predictions).Where(o => o.Trigger == TransitTrigger.Timer).Select(o => o.BatchSize).ToArray());
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_StopChangeToEmptyDuringFetch_ClearsDemandAndCancelsOldWaiter()
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        RequestTestHandler handler = new();
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        ArrivalsMonitor monitor = new(service, new ScheduleService(), new DispatcherQueue(), clock);
+        await WaitForMonitorAsync(monitor, () => monitor.IsForeground = true);
+        TaskCompletionSource<HttpResponseMessage> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
+        Task refresh = monitor.RefreshAsync();
+
+        // Act
+        SettingsService.Stops = [];
+        SettingsService.RaiseStopsChanged();
+        await refresh;
+
+        // Assert
+        Assert.IsEmpty(monitor.Latest.Arrivals);
+        Assert.IsNull(monitor.Latest.FetchedAt);
+        Assert.IsFalse(monitor.IsLoading);
+    }
+
+    [TestMethod]
+    public async Task Start_SharedBatchHasErrorForDueBus_DoesNotTreatOtherStopsSuccessAsPassage()
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        TaskCompletionSource<HttpResponseMessage> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        RequestTestHandler handler = new() { RespondAsync = (_, token) => pending.Task.WaitAsync(token) };
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        PredictionCoordinator predictions = new(service, clock);
+        DispatcherQueue dispatcher = new();
+        BusTrackingService tracker = new(service, dispatcher, clock, predictions);
+        tracker.Start(ArrivalAt(clock.GetUtcNow()) with { IsDue = true }, "Fixture stop");
+        clock.Advance(TimeSpan.FromSeconds(10));
+        Task<PredictionSnapshot> browsing = predictions.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
+        Task tracking = WaitForTrackerAsync(tracker, dispatcher.Timers[0].Fire);
+
+        // Act
+        pending.SetResult(RequestTestHandler.Response(
+            """{"bustime-response":{"prd":[{"stpid":"2","rt":"14","prdtm":"20261006 20:24"}],"error":[{"stpid":"1","msg":"Invalid parameter"}]}}"""));
+        await Assert.ThrowsExactlyAsync<TransitApiException>(() => browsing);
+        await tracking;
+
+        // Assert
+        Assert.IsNotNull(tracker.Current);
+        Assert.IsFalse(tracker.Current.HasPassed);
+        Assert.IsEmpty(NotificationService.Titles);
+        Assert.AreEqual(1, handler.Attempts);
+        Assert.AreEqual(TransitRequestOutcome.ApiFailure, Completed(service, TransitEndpoint.Predictions).Single().Outcome);
+        tracker.Stop();
+    }
+
+    [TestMethod]
+    public async Task Start_SharedFetchCrossesFiveMinuteThreshold_RechecksCurrentFreshnessForOnlyTrackedStop()
+    {
+        // Arrange
+        RequestTestClock clock = new();
+        TaskCompletionSource<HttpResponseMessage> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        RequestTestHandler handler = new();
+        handler.RespondAsync = (_, token) => handler.Attempts == 1
+            ? pending.Task.WaitAsync(token)
+            : Task.FromResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
+        BusTimeTransitService service = CreateCountedService(handler, clock);
+        PredictionCoordinator predictions = new(service, clock);
+        DispatcherQueue dispatcher = new();
+        BusTrackingService tracker = new(service, dispatcher, clock, predictions);
+        tracker.Start(ArrivalAt(clock.GetUtcNow().AddSeconds(301)), "Fixture stop");
+        Task<PredictionSnapshot> browsing = predictions.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
+        Task tracking = WaitForTrackerAsync(tracker, dispatcher.Timers[0].Fire);
+
+        // Act
+        clock.Advance(TimeSpan.FromSeconds(11));
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
+        await browsing;
+        await tracking;
+
+        // Assert
+        Assert.AreEqual(2, handler.Attempts);
+        CollectionAssert.AreEqual(new[] { 2, 1 }, Completed(service, TransitEndpoint.Predictions).Select(o => o.BatchSize).ToArray());
+        Assert.AreEqual(TimeSpan.FromSeconds(10), dispatcher.Timers[0].Interval);
+        Assert.IsTrue(tracker.IsTracking);
         tracker.Stop();
     }
 

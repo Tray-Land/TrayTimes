@@ -16,15 +16,16 @@ namespace TrayTimes.Services;
 /// </summary>
 internal sealed class BusTrackingService
 {
-    private readonly ITransitService _service;
     private readonly DispatcherQueueTimer _timer;
     private readonly TimeProvider _time;
+    private readonly PredictionCoordinator _predictions;
     private int _generation;
+    private bool _refreshing;
 
-    public BusTrackingService(ITransitService service, DispatcherQueue dispatcher, TimeProvider? timeProvider = null)
+    public BusTrackingService(ITransitService service, DispatcherQueue dispatcher, TimeProvider? timeProvider = null, PredictionCoordinator? predictions = null)
     {
-        _service = service;
         _time = timeProvider ?? TimeProvider.System;
+        _predictions = predictions ?? new PredictionCoordinator(service, _time);
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = false;
         _timer.Tick += (_, _) => _ = RefreshAsync();
@@ -70,32 +71,57 @@ internal sealed class BusTrackingService
     private async Task RefreshAsync()
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Tracking, TransitTrigger.Timer);
-        if (Current is not { } bus)
+        if (Current is not { } bus || _refreshing)
         {
             return;
         }
 
         int generation = _generation;
+        _refreshing = true;
         IReadOnlyList<Arrival>? arrivals;
+        DateTimeOffset? predictionFetchedAt = null;
         try
         {
             // A scheduled bus has no real-time data until shortly before it's due, so don't ask yet.
-            arrivals = bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, _time.GetLocalNow())
-                ? null
-                : await _service.GetArrivalsAsync([bus.StopId]);
+            if (bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, _time.GetLocalNow()))
+            {
+                arrivals = null;
+            }
+            else
+            {
+                TimeSpan maxAge = bus.RefreshInterval(_time.GetLocalNow());
+                PredictionSnapshot snapshot = await _predictions.GetAsync([bus.StopId], maxAge);
+                TimeSpan currentInterval = bus.RefreshInterval(_time.GetLocalNow());
+                if (currentInterval < maxAge && generation == _generation)
+                {
+                    snapshot = await _predictions.GetAsync([bus.StopId], currentInterval);
+                }
+
+                arrivals = snapshot.Arrivals;
+                predictionFetchedAt = snapshot.FetchedAt;
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
             arrivals = null; // Keep counting down from the last prediction; the next poll retries.
         }
+        finally
+        {
+            _refreshing = false;
+        }
 
         if (generation != _generation || Current is null)
         {
+            if (Current is not null)
+            {
+                ScheduleNext(_time.GetLocalNow());
+            }
+
             return;
         }
 
         DateTimeOffset now = _time.GetLocalNow();
-        TrackingStep step = Current.Advance(arrivals, SettingsService.HeadOutMinutes, now);
+        TrackingStep step = Current.Advance(arrivals, SettingsService.HeadOutMinutes, now, predictionFetchedAt);
         Current = step.Bus;
         if (step.Alert is { } alert)
         {
@@ -115,7 +141,18 @@ internal sealed class BusTrackingService
     private void ScheduleNext(DateTimeOffset now)
     {
         _timer.Stop();
-        _timer.Interval = Current!.RefreshInterval(now);
+        TrackedBus bus = Current!;
+        TimeSpan interval = bus.RefreshInterval(now);
+        if (bus.DueSince is { } dueSince)
+        {
+            TimeSpan remaining = dueSince + TrackedBus.PassedGrace - now;
+            if (remaining > TimeSpan.Zero && remaining < interval)
+            {
+                interval = remaining;
+            }
+        }
+
+        _timer.Interval = interval;
         _timer.Start();
     }
 
