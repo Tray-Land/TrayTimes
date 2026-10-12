@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Controls;
 using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
+using Windows.Devices.Geolocation;
 
 namespace TrayTimes.Controls;
 
@@ -132,7 +133,9 @@ public sealed partial class PlacePicker : UserControl
         LocateButton.IsEnabled = false;
         CurrentText.Text = "Finding your location…";
         string? error = null;
-        GeoPoint? point = await LocationService.TryGetDeviceLocationAsync(TimeSpan.FromSeconds(15), message => error = message);
+        GeoPoint? point = await LocationService.RequestAccessAsync(message => error = message) == GeolocationAccessStatus.Allowed
+            ? await LocationService.TryGetDeviceLocationAsync(TimeSpan.FromSeconds(15), message => error = message)
+            : null;
         LocateButton.IsEnabled = true;
         if (point is not { } p)
         {

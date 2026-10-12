@@ -8,7 +8,8 @@
     xmlns:local="using:TrayTimes.Views"
     xmlns:map="using:WinUIEx.Maps"
     xmlns:models="using:TrayTimes.Models"
-    Title="Tray Times Settings"
+    MinHeight="480"
+    MinWidth="520"
     IsMaximizable="False"
     IsMinimizable="False">
 
@@ -16,285 +17,514 @@
         <MicaBackdrop />
     </ex:WindowEx.SystemBackdrop>
 
-    <ScrollViewer x:Name="Root">
-        <StackPanel Padding="28,24" Spacing="8">
-            <TextBlock
-                Margin="0,0,0,8"
-                Style="{StaticResource TitleTextBlockStyle}"
-                Text="Settings" />
+    <Grid x:Name="Root">
+        <Grid.Resources>
+            <Style
+                x:Key="SettingsDescriptionStyle"
+                BasedOn="{StaticResource CaptionTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <Style
+                x:Key="SettingsSectionStyle"
+                BasedOn="{StaticResource SubtitleTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="Margin" Value="0,24,0,4" />
+                <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="AutomationProperties.HeadingLevel" Value="Level2" />
+            </Style>
+            <Style
+                x:Key="SettingsCardTitleStyle"
+                BasedOn="{StaticResource BodyStrongTextBlockStyle}"
+                TargetType="TextBlock">
+                <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+            <Style x:Key="SettingsCardStyle" TargetType="Grid">
+                <Setter Property="Padding" Value="20,16" />
+                <Setter Property="ColumnSpacing" Value="16" />
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="8" />
+            </Style>
+            <Style x:Key="SettingsExpanderStyle" TargetType="Expander">
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            </Style>
+            <Style x:Key="SettingsIconStyle" TargetType="FontIcon">
+                <Setter Property="FontSize" Value="20" />
+                <Setter Property="Width" Value="20" />
+                <Setter Property="AutomationProperties.AccessibilityView" Value="Raw" />
+            </Style>
+        </Grid.Resources>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <InfoBar
-                x:Name="KeyBar"
-                Title="No MCTS API key"
-                IsClosable="False"
-                IsOpen="False"
-                Message="Copy OAuth.resw.sample to OAuth.resw, paste your BusTime key into MctsApiKey, and rebuild."
-                Severity="Error" />
+        <TitleBar x:Name="SettingsTitleBar" x:Uid="SettingsTitleBar">
+            <TitleBar.IconSource>
+                <ImageIconSource ImageSource="ms-appx:///Assets/Square44x44Logo.png" />
+            </TitleBar.IconSource>
+        </TitleBar>
 
-            <!--  Favorite places  -->
-            <TextBlock Style="{StaticResource BodyStrongTextBlockStyle}" Text="Favorite places" />
-            <TextBlock
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="The flyout's Commute tab uses these to guess where you're headed next: home when you're out, and work (or school) when you're home."
-                TextWrapping="Wrap" />
-            <controls:PlacePicker x:Name="HomePicker" Header="Home" PlaceChosen="FixedPlacePicker_PlaceChosen" />
-            <controls:PlacePicker x:Name="WorkPicker" Header="Work" PlaceChosen="FixedPlacePicker_PlaceChosen" />
-            <controls:PlacePicker x:Name="SchoolPicker" Header="School" PlaceChosen="FixedPlacePicker_PlaceChosen" />
-            <StackPanel x:Name="CustomPlacesPanel" Spacing="8" />
-            <Button
-                x:Name="AddPlaceButton"
-                AutomationProperties.Name="Add a custom place"
-                Click="AddPlaceButton_Click">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <FontIcon FontSize="14" Glyph="&#xE710;" />
-                    <TextBlock Text="Add a place" />
-                </StackPanel>
-            </Button>
+        <ScrollViewer
+            x:Name="SettingsScrollViewer"
+            Grid.Row="1"
+            AutomationProperties.AutomationId="SettingsScrollViewer"
+            HorizontalScrollBarVisibility="Disabled"
+            HorizontalScrollMode="Disabled"
+            VerticalScrollBarVisibility="Auto">
+            <StackPanel
+                MaxWidth="760"
+                Padding="32,16,32,32"
+                Spacing="8">
+                <TextBlock
+                    x:Uid="SettingsHeading"
+                    AutomationProperties.HeadingLevel="Level1"
+                    Style="{StaticResource TitleTextBlockStyle}" />
+                <TextBlock x:Uid="SettingsIntroduction" Style="{StaticResource SettingsDescriptionStyle}" />
 
-            <!--  Saved stops  -->
-            <TextBlock
-                Margin="0,16,0,0"
-                Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="Favorite stops" />
-            <TextBlock
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="Drag to reorder. The first three appear in the tray icon's tooltip."
-                TextWrapping="Wrap" />
-            <ListView
-                x:Name="SavedStopsList"
-                AllowDrop="True"
-                AutomationProperties.Name="Favorite stops"
-                CanDragItems="True"
-                CanReorderItems="True"
-                DragItemsCompleted="SavedStopsList_DragItemsCompleted"
-                SelectionMode="None">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="models:SavedStop" x:DefaultBindMode="OneTime">
-                        <Grid Padding="0,6" ColumnSpacing="12">
+                <InfoBar
+                    x:Name="KeyBar"
+                    x:Uid="SettingsKeyBar"
+                    IsClosable="False"
+                    IsOpen="False"
+                    Severity="Error" />
+
+                <TextBlock x:Uid="SettingsCommuteHeading" Style="{StaticResource SettingsSectionStyle}" />
+
+                <Expander
+                    x:Name="PlacesExpander"
+                    x:Uid="SettingsPlacesExpander"
+                    AutomationProperties.AutomationId="PlacesExpander"
+                    Style="{StaticResource SettingsExpanderStyle}">
+                    <Expander.Header>
+                        <Grid ColumnSpacing="16">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind StopName}" TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind Description}" />
+                            <FontIcon Glyph="&#xE80F;" Style="{StaticResource SettingsIconStyle}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock x:Uid="SettingsPlacesTitle" Style="{StaticResource SettingsCardTitleStyle}" />
+                                <TextBlock x:Uid="SettingsPlacesDescription" Style="{StaticResource SettingsDescriptionStyle}" />
                             </StackPanel>
-                            <Button
-                                Grid.Column="1"
-                                AutomationProperties.Name="Remove stop"
-                                Click="RemoveStopButton_Click"
-                                Style="{StaticResource ToolbarButtonStyle}"
-                                ToolTipService.ToolTip="Remove">
-                                <FontIcon FontSize="14" Glyph="&#xE74D;" />
-                            </Button>
                         </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-            <TextBlock
-                x:Name="NoStopsText"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="No stops yet. Add one below." />
+                    </Expander.Header>
+                    <StackPanel Spacing="16">
+                        <TextBlock x:Uid="SettingsPlacesHelp" Style="{StaticResource SettingsDescriptionStyle}" />
+                        <controls:PlacePicker
+                            x:Name="HomePicker"
+                            x:Uid="SettingsHomePicker"
+                            AutomationProperties.AutomationId="HomePicker"
+                            PlaceChosen="FixedPlacePicker_PlaceChosen" />
+                        <controls:PlacePicker
+                            x:Name="WorkPicker"
+                            x:Uid="SettingsWorkPicker"
+                            AutomationProperties.AutomationId="WorkPicker"
+                            PlaceChosen="FixedPlacePicker_PlaceChosen" />
+                        <controls:PlacePicker
+                            x:Name="SchoolPicker"
+                            x:Uid="SettingsSchoolPicker"
+                            AutomationProperties.AutomationId="SchoolPicker"
+                            PlaceChosen="FixedPlacePicker_PlaceChosen" />
+                        <StackPanel x:Name="CustomPlacesPanel" Spacing="16" />
+                        <Button
+                            x:Name="AddPlaceButton"
+                            x:Uid="SettingsAddPlaceButton"
+                            AutomationProperties.AutomationId="AddPlaceButton"
+                            HorizontalAlignment="Left"
+                            Click="AddPlaceButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <FontIcon
+                                    AutomationProperties.AccessibilityView="Raw"
+                                    FontSize="14"
+                                    Glyph="&#xE710;" />
+                                <TextBlock x:Uid="SettingsAddPlaceLabel" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Expander>
 
-            <!--  Add a stop  -->
-            <TextBlock
-                Margin="0,16,0,0"
-                Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="Add a stop" />
-            <TextBlock
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="Choose a route and direction, then pick a stop from the list or tap it on the map."
-                TextWrapping="Wrap" />
-            <ComboBox
-                x:Name="RouteBox"
-                MinWidth="320"
-                Header="Route"
-                IsEnabled="False"
-                PlaceholderText="Loading routes…"
-                SelectionChanged="RouteBox_SelectionChanged" />
-            <ComboBox
-                x:Name="DirectionBox"
-                MinWidth="320"
-                Header="Direction"
-                IsEnabled="False"
-                SelectionChanged="DirectionBox_SelectionChanged" />
-            <ComboBox
-                x:Name="StopBox"
-                MinWidth="320"
-                Header="Stop"
-                IsEnabled="False"
-                SelectionChanged="StopBox_SelectionChanged" />
-            <Grid
-                Height="280"
-                Margin="0,4,0,0"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8">
-                <map:MapControl
-                    x:Name="PickerMap"
-                    AutomationProperties.Name="Map of the route's stops. Tap a stop to choose it."
-                    MapStyle="Road" />
-                <ProgressRing
-                    x:Name="PickerLoadingRing"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    AutomationProperties.Name="Loading stops"
-                    IsActive="False" />
-            </Grid>
-            <CheckBox x:Name="AllRoutesCheck" Content="Show every route that serves this stop" />
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <Button
-                    x:Name="AddStopButton"
-                    Click="AddStopButton_Click"
-                    Content="Add stop"
-                    IsEnabled="False"
-                    Style="{StaticResource AccentButtonStyle}" />
-                <TextBlock
-                    x:Name="AddStatusText"
-                    VerticalAlignment="Center"
-                    AutomationProperties.LiveSetting="Polite"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextWrapping="Wrap" />
-            </StackPanel>
+                <Expander
+                    x:Name="SavedStopsExpander"
+                    x:Uid="SettingsSavedStopsExpander"
+                    AutomationProperties.AutomationId="SavedStopsExpander"
+                    Style="{StaticResource SettingsExpanderStyle}">
+                    <Expander.Header>
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE734;" Style="{StaticResource SettingsIconStyle}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock x:Uid="SettingsSavedStopsTitle" Style="{StaticResource SettingsCardTitleStyle}" />
+                                <TextBlock x:Uid="SettingsSavedStopsDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                        <ListView
+                            x:Name="SavedStopsList"
+                            x:Uid="SettingsSavedStopsList"
+                            AutomationProperties.AutomationId="SavedStopsList"
+                            MaxHeight="280"
+                            AllowDrop="True"
+                            CanDragItems="True"
+                            CanReorderItems="True"
+                            DragItemsCompleted="SavedStopsList_DragItemsCompleted"
+                            SelectionMode="None">
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="models:SavedStop" x:DefaultBindMode="OneTime">
+                                    <Grid Padding="0,8" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <FontIcon
+                                            AutomationProperties.AccessibilityView="Raw"
+                                            FontSize="16"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="&#xE700;" />
+                                        <StackPanel
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            Spacing="4">
+                                            <TextBlock Text="{x:Bind StopName}" TextWrapping="Wrap" />
+                                            <TextBlock Style="{StaticResource SettingsDescriptionStyle}" Text="{x:Bind Description}" />
+                                        </StackPanel>
+                                        <Button
+                                            x:Uid="SettingsRemoveStopButton"
+                                            Grid.Column="2"
+                                            Click="RemoveStopButton_Click"
+                                            Style="{StaticResource ToolbarButtonStyle}">
+                                            <FontIcon
+                                                AutomationProperties.AccessibilityView="Raw"
+                                                FontSize="14"
+                                                Glyph="&#xE74D;" />
+                                        </Button>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                        <TextBlock
+                            x:Name="NoStopsText"
+                            x:Uid="SettingsNoStopsText"
+                            Style="{StaticResource SettingsDescriptionStyle}" />
+                    </StackPanel>
+                </Expander>
 
-            <!--  Tracking  -->
-            <TextBlock
-                Margin="0,16,0,0"
-                Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="Bus alerts" />
-            <TextBlock
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="Ring the bell next to a bus to track it. Tray Times keeps its minutes away in the tray icon and notifies you when it's time to leave."
-                TextWrapping="Wrap" />
-            <NumberBox
-                x:Name="HeadOutBox"
-                MinWidth="200"
-                HorizontalAlignment="Left"
-                Header="Notify me this many minutes before the bus arrives"
-                SmallChange="1"
-                SpinButtonPlacementMode="Inline"
-                ValueChanged="HeadOutBox_ValueChanged" />
-            <ToggleSwitch
-                x:Name="KeepAwakeToggle"
-                Header="Keep the PC awake while tracking a bus"
-                Toggled="KeepAwakeToggle_Toggled" />
+                <Expander
+                    x:Name="AddStopExpander"
+                    x:Uid="SettingsAddStopExpander"
+                    AutomationProperties.AutomationId="AddStopExpander"
+                    Style="{StaticResource SettingsExpanderStyle}">
+                    <Expander.Header>
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE710;" Style="{StaticResource SettingsIconStyle}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock x:Uid="SettingsAddStopTitle" Style="{StaticResource SettingsCardTitleStyle}" />
+                                <TextBlock x:Uid="SettingsAddStopDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="12">
+                        <ComboBox
+                            x:Name="RouteBox"
+                            x:Uid="SettingsRouteBox"
+                            AutomationProperties.AutomationId="RouteBox"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="False"
+                            SelectionChanged="RouteBox_SelectionChanged" />
+                        <ComboBox
+                            x:Name="DirectionBox"
+                            x:Uid="SettingsDirectionBox"
+                            AutomationProperties.AutomationId="DirectionBox"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="False"
+                            SelectionChanged="DirectionBox_SelectionChanged" />
+                        <ComboBox
+                            x:Name="StopBox"
+                            x:Uid="SettingsStopBox"
+                            AutomationProperties.AutomationId="StopBox"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="False"
+                            SelectionChanged="StopBox_SelectionChanged" />
+                        <Grid
+                            Height="280"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <map:MapControl
+                                x:Name="PickerMap"
+                                x:Uid="SettingsPickerMap"
+                                AutomationProperties.AutomationId="PickerMap"
+                                MapStyle="Road" />
+                            <ProgressRing
+                                x:Name="PickerLoadingRing"
+                                x:Uid="SettingsPickerLoadingRing"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                IsActive="False" />
+                        </Grid>
+                        <CheckBox
+                            x:Name="AllRoutesCheck"
+                            x:Uid="SettingsAllRoutesCheck"
+                            AutomationProperties.AutomationId="AllRoutesCheck">
+                            <TextBlock x:Uid="SettingsAllRoutesLabel" TextWrapping="Wrap" />
+                        </CheckBox>
+                        <Button
+                            x:Name="AddStopButton"
+                            x:Uid="SettingsAddStopButton"
+                            AutomationProperties.AutomationId="AddStopButton"
+                            HorizontalAlignment="Left"
+                            Click="AddStopButton_Click"
+                            IsEnabled="False"
+                            Style="{StaticResource AccentButtonStyle}" />
+                        <TextBlock
+                            x:Name="AddStatusText"
+                            AutomationProperties.LiveSetting="Polite"
+                            Style="{StaticResource SettingsDescriptionStyle}" />
+                    </StackPanel>
+                </Expander>
 
-            <!--  API usage  -->
-            <TextBlock
-                Margin="0,16,0,0"
-                Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="Transit API usage" />
-            <TextBlock
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="How many requests Tray Times has sent to the MCTS BusTime API, by endpoint. Counts cover the last 14 days."
-                TextWrapping="Wrap" />
-            <Grid ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="72" />
-                    <ColumnDefinition Width="72" />
-                    <ColumnDefinition Width="72" />
-                </Grid.ColumnDefinitions>
-                <Grid.Resources>
-                    <Style BasedOn="{StaticResource CaptionTextBlockStyle}" TargetType="TextBlock">
-                        <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
-                    </Style>
-                </Grid.Resources>
-                <TextBlock Text="Endpoint" />
+                <TextBlock x:Uid="SettingsAlertsHeading" Style="{StaticResource SettingsSectionStyle}" />
                 <TextBlock
-                    Grid.Column="1"
-                    HorizontalTextAlignment="End"
-                    Text="Today" />
-                <TextBlock
-                    Grid.Column="2"
-                    HorizontalTextAlignment="End"
-                    Text="7 days" />
-                <TextBlock
-                    Grid.Column="3"
-                    HorizontalTextAlignment="End"
-                    Text="14 days" />
-            </Grid>
-            <ItemsControl
-                x:Name="ApiUsageList"
-                AutomationProperties.Name="Transit API requests by endpoint"
-                IsTabStop="False">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="local:ApiUsageRow" x:DefaultBindMode="OneTime">
-                        <Grid Padding="0,4" ColumnSpacing="12">
+                    x:Uid="SettingsAlertsHelp"
+                    Margin="0,0,0,4"
+                    Style="{StaticResource SettingsDescriptionStyle}" />
+                <Grid Style="{StaticResource SettingsCardStyle}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="20" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE823;" Style="{StaticResource SettingsIconStyle}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Spacing="4">
+                        <TextBlock
+                            x:Name="HeadOutLabel"
+                            x:Uid="SettingsHeadOutTitle"
+                            Style="{StaticResource SettingsCardTitleStyle}" />
+                        <TextBlock x:Uid="SettingsHeadOutDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                    </StackPanel>
+                    <NumberBox
+                        x:Name="HeadOutBox"
+                        x:Uid="SettingsHeadOutBox"
+                        Grid.Column="2"
+                        AutomationProperties.AutomationId="HeadOutBox"
+                        AutomationProperties.LabeledBy="{x:Bind HeadOutLabel, Mode=OneTime}"
+                        Width="124"
+                        VerticalAlignment="Center"
+                        SmallChange="1"
+                        SpinButtonPlacementMode="Inline"
+                        ValueChanged="HeadOutBox_ValueChanged" />
+                </Grid>
+                <Grid Style="{StaticResource SettingsCardStyle}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="20" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE708;" Style="{StaticResource SettingsIconStyle}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Spacing="4">
+                        <TextBlock
+                            x:Name="KeepAwakeLabel"
+                            x:Uid="SettingsKeepAwakeTitle"
+                            Style="{StaticResource SettingsCardTitleStyle}" />
+                        <TextBlock x:Uid="SettingsKeepAwakeDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                    </StackPanel>
+                    <ToggleSwitch
+                        x:Name="KeepAwakeToggle"
+                        Grid.Column="2"
+                        AutomationProperties.AutomationId="KeepAwakeToggle"
+                        AutomationProperties.LabeledBy="{x:Bind KeepAwakeLabel, Mode=OneTime}"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        Toggled="KeepAwakeToggle_Toggled" />
+                </Grid>
+
+                <TextBlock x:Uid="SettingsAppHeading" Style="{StaticResource SettingsSectionStyle}" />
+                <Grid Style="{StaticResource SettingsCardStyle}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="20" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <FontIcon Glyph="&#xE7F4;" Style="{StaticResource SettingsIconStyle}" />
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Spacing="4">
+                        <TextBlock
+                            x:Name="StartupLabel"
+                            x:Uid="SettingsStartupTitle"
+                            Style="{StaticResource SettingsCardTitleStyle}" />
+                        <TextBlock x:Uid="SettingsStartupDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                        <TextBlock
+                            x:Name="StartupStatusText"
+                            AutomationProperties.LiveSetting="Polite"
+                            Style="{StaticResource SettingsDescriptionStyle}"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                    <ToggleSwitch
+                        x:Name="StartupToggle"
+                        Grid.Column="2"
+                        AutomationProperties.AutomationId="StartupToggle"
+                        AutomationProperties.LabeledBy="{x:Bind StartupLabel, Mode=OneTime}"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        Toggled="StartupToggle_Toggled" />
+                </Grid>
+
+                <Expander
+                    x:Uid="SettingsDirectoryExpander"
+                    AutomationProperties.AutomationId="DirectoryExpander"
+                    Style="{StaticResource SettingsExpanderStyle}">
+                    <Expander.Header>
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE8F1;" Style="{StaticResource SettingsIconStyle}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock x:Uid="SettingsDirectoryTitle" Style="{StaticResource SettingsCardTitleStyle}" />
+                                <TextBlock x:Uid="SettingsDirectoryDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="12">
+                        <TextBlock
+                            x:Name="StopIndexText"
+                            AutomationProperties.LiveSetting="Polite"
+                            Style="{StaticResource SettingsDescriptionStyle}" />
+                        <Button
+                            x:Name="RebuildIndexButton"
+                            x:Uid="SettingsRebuildIndexButton"
+                            AutomationProperties.AutomationId="RebuildIndexButton"
+                            HorizontalAlignment="Left"
+                            Click="RebuildIndexButton_Click" />
+                    </StackPanel>
+                </Expander>
+
+                <Expander
+                    x:Uid="SettingsApiUsageExpander"
+                    AutomationProperties.AutomationId="ApiUsageExpander"
+                    Style="{StaticResource SettingsExpanderStyle}">
+                    <Expander.Header>
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE9D9;" Style="{StaticResource SettingsIconStyle}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock x:Uid="SettingsApiUsageTitle" Style="{StaticResource SettingsCardTitleStyle}" />
+                                <TextBlock x:Uid="SettingsApiUsageDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="12">
+                        <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="72" />
-                                <ColumnDefinition Width="72" />
-                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="64" />
+                                <ColumnDefinition Width="64" />
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Uid="SettingsEndpointHeading" Style="{StaticResource SettingsDescriptionStyle}" />
                             <TextBlock
+                                x:Uid="SettingsTodayHeading"
                                 Grid.Column="1"
                                 HorizontalTextAlignment="End"
-                                Text="{x:Bind Today}" />
+                                Style="{StaticResource SettingsDescriptionStyle}" />
                             <TextBlock
+                                x:Uid="SettingsWeekHeading"
                                 Grid.Column="2"
                                 HorizontalTextAlignment="End"
-                                Text="{x:Bind Last7Days}" />
+                                Style="{StaticResource SettingsDescriptionStyle}" />
                             <TextBlock
+                                x:Uid="SettingsFortnightHeading"
                                 Grid.Column="3"
                                 HorizontalTextAlignment="End"
-                                Text="{x:Bind Last14Days}" />
+                                Style="{StaticResource SettingsDescriptionStyle}" />
                         </Grid>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <Button
-                x:Name="ResetApiUsageButton"
-                AutomationProperties.Name="Reset API usage counts"
-                Click="ResetApiUsageButton_Click"
-                Content="Reset counts" />
+                        <ItemsControl
+                            x:Name="ApiUsageList"
+                            x:Uid="SettingsApiUsageList"
+                            IsTabStop="False">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="local:ApiUsageRow" x:DefaultBindMode="OneTime">
+                                    <Grid Padding="0,6" ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="64" />
+                                            <ColumnDefinition Width="64" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{x:Bind Name}" TextWrapping="Wrap" />
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            HorizontalTextAlignment="End"
+                                            Text="{x:Bind Today}" />
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            HorizontalTextAlignment="End"
+                                            Text="{x:Bind Last7Days}" />
+                                        <TextBlock
+                                            Grid.Column="3"
+                                            HorizontalTextAlignment="End"
+                                            Text="{x:Bind Last14Days}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Button
+                            x:Name="ResetApiUsageButton"
+                            x:Uid="SettingsResetApiUsageButton"
+                            AutomationProperties.AutomationId="ResetApiUsageButton"
+                            HorizontalAlignment="Left"
+                            Click="ResetApiUsageButton_Click" />
+                    </StackPanel>
+                </Expander>
 
-            <!--  General  -->
-            <TextBlock
-                Margin="0,16,0,0"
-                Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="General" />
-            <StackPanel Orientation="Horizontal" Spacing="12">
-                <TextBlock
-                    x:Name="StopIndexText"
-                    VerticalAlignment="Center"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextWrapping="Wrap" />
-                <Button
-                    x:Name="RebuildIndexButton"
-                    Click="RebuildIndexButton_Click"
-                    Content="Update now" />
+                <Expander
+                    x:Uid="SettingsAboutExpander"
+                    AutomationProperties.AutomationId="AboutExpander"
+                    Style="{StaticResource SettingsExpanderStyle}">
+                    <Expander.Header>
+                        <Grid ColumnSpacing="16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="20" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon Glyph="&#xE946;" Style="{StaticResource SettingsIconStyle}" />
+                            <StackPanel Grid.Column="1" Spacing="4">
+                                <TextBlock x:Uid="SettingsAboutTitle" Style="{StaticResource SettingsCardTitleStyle}" />
+                                <TextBlock x:Uid="SettingsAboutDescription" Style="{StaticResource SettingsDescriptionStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                        <TextBlock x:Uid="SettingsTransitCredits" Style="{StaticResource SettingsDescriptionStyle}" />
+                        <TextBlock x:Uid="SettingsMapCredits" Style="{StaticResource SettingsDescriptionStyle}" />
+                    </StackPanel>
+                </Expander>
             </StackPanel>
-            <ToggleSwitch
-                x:Name="StartupToggle"
-                Header="Start with Windows"
-                Toggled="StartupToggle_Toggled" />
-            <TextBlock
-                x:Name="StartupStatusText"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                TextWrapping="Wrap"
-                Visibility="Collapsed" />
-
-            <!--  About  -->
-            <TextBlock
-                Margin="0,16,0,0"
-                Style="{StaticResource BodyStrongTextBlockStyle}"
-                Text="About" />
-            <TextBlock Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap">
-                <Run Text="Arrival times and bus locations: Milwaukee County Transit System real-time BusTime API." />
-                <LineBreak />
-                <Run Text="Basemap: Azure Maps. Map control: WinUIEx.Maps by Morten Nielsen." />
-            </TextBlock>
-        </StackPanel>
-    </ScrollViewer>
+        </ScrollViewer>
+    </Grid>
 </ex:WindowEx>

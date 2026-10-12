@@ -1,0 +1,324 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
+  </resheader>
+  <data name="LocationPermissionBar.Title" xml:space="preserve">
+    <value>Location permission needed</value>
+  </data>
+  <data name="LocationPermissionBar.Message" xml:space="preserve">
+    <value>Allow location access to find stops near this device.</value>
+  </data>
+  <data name="GrantLocationPermissionButton.Content" xml:space="preserve">
+    <value>Grant Location Permission</value>
+  </data>
+  <data name="GrantLocationPermissionButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Grant Location Permission</value>
+  </data>
+  <data name="LocationPermissionEmptyTitle" xml:space="preserve">
+    <value>Find nearby stops</value>
+  </data>
+  <data name="LocationPermissionEmptyText" xml:space="preserve">
+    <value>Use the banner above to allow location access.</value>
+  </data>
+  <data name="LocationAccessOff" xml:space="preserve">
+    <value>Location access is off. Turn it on in Windows Settings &gt; Privacy &amp; security &gt; Location.</value>
+  </data>
+  <data name="LocationUnavailable" xml:space="preserve">
+    <value>Couldn't determine your location. Try again in a moment.</value>
+  </data>
+  <data name="LocationSettingsUnavailable" xml:space="preserve">
+    <value>Couldn't open Windows Settings. Open Settings &gt; Privacy &amp; security &gt; Location to allow access, then return here.</value>
+  </data>
+  <data name="SettingsWindowTitle" xml:space="preserve">
+    <value>Tray Times Settings</value>
+  </data>
+  <data name="SettingsTitleBar.Title" xml:space="preserve">
+    <value>Tray Times Settings</value>
+  </data>
+  <data name="SettingsHeading.Text" xml:space="preserve">
+    <value>Settings</value>
+  </data>
+  <data name="SettingsIntroduction.Text" xml:space="preserve">
+    <value>Customize your commute and how Tray Times runs.</value>
+  </data>
+  <data name="SettingsKeyBar.Title" xml:space="preserve">
+    <value>No MCTS API key</value>
+  </data>
+  <data name="SettingsKeyBar.Message" xml:space="preserve">
+    <value>Copy OAuth.resw.sample to OAuth.resw, paste your BusTime key into MctsApiKey, and rebuild.</value>
+  </data>
+  <data name="SettingsCommuteHeading.Text" xml:space="preserve">
+    <value>Your commute</value>
+  </data>
+  <data name="SettingsPlacesExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Favorite places</value>
+  </data>
+  <data name="SettingsPlacesTitle.Text" xml:space="preserve">
+    <value>Favorite places</value>
+  </data>
+  <data name="SettingsPlacesDescription.Text" xml:space="preserve">
+    <value>Home, work, school, and the places you go most.</value>
+  </data>
+  <data name="SettingsPlacesHelp.Text" xml:space="preserve">
+    <value>The flyout's Commute tab uses these to guess where you're headed next: home when you're out, and work (or school) when you're home.</value>
+  </data>
+  <data name="SettingsHomePicker.Header" xml:space="preserve">
+    <value>Home</value>
+  </data>
+  <data name="SettingsWorkPicker.Header" xml:space="preserve">
+    <value>Work</value>
+  </data>
+  <data name="SettingsSchoolPicker.Header" xml:space="preserve">
+    <value>School</value>
+  </data>
+  <data name="SettingsAddPlaceButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Add a custom place</value>
+  </data>
+  <data name="SettingsAddPlaceLabel.Text" xml:space="preserve">
+    <value>Add a place</value>
+  </data>
+  <data name="SettingsSavedStopsExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Favorite stops</value>
+  </data>
+  <data name="SettingsSavedStopsTitle.Text" xml:space="preserve">
+    <value>Favorite stops</value>
+  </data>
+  <data name="SettingsSavedStopsDescription.Text" xml:space="preserve">
+    <value>Drag to reorder. The first three appear in the tray tooltip.</value>
+  </data>
+  <data name="SettingsSavedStopsList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Favorite stops</value>
+  </data>
+  <data name="SettingsRemoveStopButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Remove stop</value>
+  </data>
+  <data name="SettingsRemoveStopButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Remove</value>
+  </data>
+  <data name="SettingsNoStopsText.Text" xml:space="preserve">
+    <value>No stops yet. Expand Add a stop below to get started.</value>
+  </data>
+  <data name="SettingsAddStopExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Add a stop</value>
+  </data>
+  <data name="SettingsAddStopTitle.Text" xml:space="preserve">
+    <value>Add a stop</value>
+  </data>
+  <data name="SettingsAddStopDescription.Text" xml:space="preserve">
+    <value>Choose a route, direction, and stop, or select it on the map.</value>
+  </data>
+  <data name="SettingsRouteBox.Header" xml:space="preserve">
+    <value>Route</value>
+  </data>
+  <data name="SettingsRouteBox.PlaceholderText" xml:space="preserve">
+    <value>Loading routes...</value>
+  </data>
+  <data name="SettingsRouteBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Route</value>
+  </data>
+  <data name="SettingsDirectionBox.Header" xml:space="preserve">
+    <value>Direction</value>
+  </data>
+  <data name="SettingsDirectionBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Direction</value>
+  </data>
+  <data name="SettingsStopBox.Header" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="SettingsStopBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Stop</value>
+  </data>
+  <data name="SettingsPickerMap.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Map of the route's stops. Select a stop to choose it.</value>
+  </data>
+  <data name="SettingsPickerLoadingRing.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Loading stops</value>
+  </data>
+  <data name="SettingsAllRoutesCheck.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Show every route that serves this stop</value>
+  </data>
+  <data name="SettingsAllRoutesLabel.Text" xml:space="preserve">
+    <value>Show every route that serves this stop</value>
+  </data>
+  <data name="SettingsAddStopButton.Content" xml:space="preserve">
+    <value>Add stop</value>
+  </data>
+  <data name="SettingsAddStopButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Add stop</value>
+  </data>
+  <data name="SettingsAlertsHeading.Text" xml:space="preserve">
+    <value>Bus alerts</value>
+  </data>
+  <data name="SettingsAlertsHelp.Text" xml:space="preserve">
+    <value>Ring the bell next to a bus in the flyout to track its arrival in the tray.</value>
+  </data>
+  <data name="SettingsHeadOutTitle.Text" xml:space="preserve">
+    <value>Time to head out</value>
+  </data>
+  <data name="SettingsHeadOutDescription.Text" xml:space="preserve">
+    <value>Notify me this many minutes before my bus arrives.</value>
+  </data>
+  <data name="SettingsHeadOutBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.HelpText" xml:space="preserve">
+    <value>Number of minutes before the bus arrives to send a notification.</value>
+  </data>
+  <data name="SettingsKeepAwakeTitle.Text" xml:space="preserve">
+    <value>Keep awake while tracking</value>
+  </data>
+  <data name="SettingsKeepAwakeDescription.Text" xml:space="preserve">
+    <value>Prevent this PC from sleeping until bus tracking ends.</value>
+  </data>
+  <data name="SettingsAppHeading.Text" xml:space="preserve">
+    <value>App &amp; data</value>
+  </data>
+  <data name="SettingsStartupTitle.Text" xml:space="preserve">
+    <value>Start with Windows</value>
+  </data>
+  <data name="SettingsStartupDescription.Text" xml:space="preserve">
+    <value>Keep Tray Times ready in the notification area when you sign in.</value>
+  </data>
+  <data name="SettingsDirectoryExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Stop directory</value>
+  </data>
+  <data name="SettingsDirectoryTitle.Text" xml:space="preserve">
+    <value>Stop directory</value>
+  </data>
+  <data name="SettingsDirectoryDescription.Text" xml:space="preserve">
+    <value>Cached stops used to find nearby routes.</value>
+  </data>
+  <data name="SettingsRebuildIndexButton.Content" xml:space="preserve">
+    <value>Update now</value>
+  </data>
+  <data name="SettingsRebuildIndexButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Update stop directory now</value>
+  </data>
+  <data name="SettingsApiUsageExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Transit API usage</value>
+  </data>
+  <data name="SettingsApiUsageTitle.Text" xml:space="preserve">
+    <value>Transit API usage</value>
+  </data>
+  <data name="SettingsApiUsageDescription.Text" xml:space="preserve">
+    <value>MCTS BusTime requests by endpoint over the last 14 days.</value>
+  </data>
+  <data name="SettingsEndpointHeading.Text" xml:space="preserve">
+    <value>Endpoint</value>
+  </data>
+  <data name="SettingsTodayHeading.Text" xml:space="preserve">
+    <value>Today</value>
+  </data>
+  <data name="SettingsWeekHeading.Text" xml:space="preserve">
+    <value>7 days</value>
+  </data>
+  <data name="SettingsFortnightHeading.Text" xml:space="preserve">
+    <value>14 days</value>
+  </data>
+  <data name="SettingsApiUsageList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Transit API requests by endpoint</value>
+  </data>
+  <data name="SettingsResetApiUsageButton.Content" xml:space="preserve">
+    <value>Reset counts</value>
+  </data>
+  <data name="SettingsResetApiUsageButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Reset API usage counts</value>
+  </data>
+  <data name="SettingsAboutExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>About Tray Times</value>
+  </data>
+  <data name="SettingsAboutTitle.Text" xml:space="preserve">
+    <value>About Tray Times</value>
+  </data>
+  <data name="SettingsAboutDescription.Text" xml:space="preserve">
+    <value>Transit data, maps, and acknowledgments.</value>
+  </data>
+  <data name="SettingsTransitCredits.Text" xml:space="preserve">
+    <value>Arrival times and bus locations: Milwaukee County Transit System real-time BusTime API.</value>
+  </data>
+  <data name="SettingsMapCredits.Text" xml:space="preserve">
+    <value>Basemap: Azure Maps. Map control: WinUIEx.Maps by Morten Nielsen.</value>
+  </data>
+  <data name="SettingsCustomPlaceName" xml:space="preserve">
+    <value>Place name</value>
+  </data>
+  <data name="SettingsCustomPlacePlaceholder" xml:space="preserve">
+    <value>Gym, the library, Grandma's...</value>
+  </data>
+  <data name="SettingsCustomPlaceDefaultName" xml:space="preserve">
+    <value>Custom place</value>
+  </data>
+  <data name="SettingsRemovePlaceFormat" xml:space="preserve">
+    <value>Remove {0}</value>
+  </data>
+  <data name="SettingsPlaceAddressFormat" xml:space="preserve">
+    <value>{0} address</value>
+  </data>
+  <data name="SettingsAllRequests" xml:space="preserve">
+    <value>All requests</value>
+  </data>
+  <data name="SettingsDirectoryDownloading" xml:space="preserve">
+    <value>Downloading the stop directory...</value>
+  </data>
+  <data name="SettingsDirectoryUpdatedFormat" xml:space="preserve">
+    <value>{0:N0} stops, updated {1:d}.</value>
+  </data>
+  <data name="SettingsDirectoryNotDownloaded" xml:space="preserve">
+    <value>Stop directory not downloaded yet.</value>
+  </data>
+  <data name="SettingsApiKeyNeeded" xml:space="preserve">
+    <value>API key needed</value>
+  </data>
+  <data name="SettingsRoutesUnavailable" xml:space="preserve">
+    <value>Couldn't load routes</value>
+  </data>
+  <data name="SettingsReopenToRetryFormat" xml:space="preserve">
+    <value>Couldn't reach {0}. Close and reopen this window to try again.</value>
+  </data>
+  <data name="SettingsChooseRoute" xml:space="preserve">
+    <value>Choose a route</value>
+  </data>
+  <data name="SettingsPickerLoading" xml:space="preserve">
+    <value>Loading...</value>
+  </data>
+  <data name="SettingsNoDirections" xml:space="preserve">
+    <value>No directions</value>
+  </data>
+  <data name="SettingsChooseDirection" xml:space="preserve">
+    <value>Choose a direction</value>
+  </data>
+  <data name="SettingsNoStops" xml:space="preserve">
+    <value>No stops</value>
+  </data>
+  <data name="SettingsChooseStop" xml:space="preserve">
+    <value>Choose a stop</value>
+  </data>
+  <data name="SettingsStopLimitFormat" xml:space="preserve">
+    <value>You can follow up to {0} stops. Remove one first.</value>
+  </data>
+  <data name="SettingsStopAddedFormat" xml:space="preserve">
+    <value>Added {0}.</value>
+  </data>
+  <data name="SettingsTransitUnavailableFormat" xml:space="preserve">
+    <value>Couldn't reach {0}. Try again.</value>
+  </data>
+  <data name="SettingsOffline" xml:space="preserve">
+    <value>No internet connection.</value>
+  </data>
+  <data name="SettingsStartupPackageRequired" xml:space="preserve">
+    <value>Start with Windows is only available when Tray Times is installed as a package.</value>
+  </data>
+  <data name="SettingsStartupDisabledByUser" xml:space="preserve">
+    <value>Startup was turned off in Task Manager or Windows Settings &gt; Apps &gt; Startup. Turn it back on there.</value>
+  </data>
+  <data name="SettingsStartupManaged" xml:space="preserve">
+    <value>This setting is managed by your organization.</value>
+  </data>
+</root>
