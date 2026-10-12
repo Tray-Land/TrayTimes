@@ -20,7 +20,7 @@ internal sealed partial class StopIndexJsonContext : JsonSerializerContext;
 
 /// <summary>
 /// Every stop in the system, for "stops near me" lookups. BusTime has no geographic stop search,
-/// so this crawls routes → directions → stops (about a hundred requests for MCTS), caches the
+/// so this crawls routes → directions → stops (1 + routes + directions requests: 148 for MCTS), caches the
 /// result in LocalState, and rebuilds it weekly.
 /// </summary>
 internal sealed class StopIndexService

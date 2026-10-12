@@ -30,12 +30,14 @@ Allowed statuses: `pending`, `in_progress`, `blocked`, `done`, `deferred`.
 | 06 | Add coordinated cancellation, failure cooldowns, and backoff | done | 353/353 full tests (45 new cooldown/backoff/classification/directory/cancellation cases); ARM64 Debug/Release 0 warnings/errors; packaged smoke 9/9; validation app stopped; Settings picker cancellation verified by build/review only |
 | 07 | Share metadata caches and unblock the Settings picker | done | 152/152 targeted, 421/421 full (48 new cases); ARM64 Debug/Release 0 warnings/errors; user confirmed all manual runtime checks passed; verified app stopped |
 | 08 | Evaluate and safely reduce passed-bus polling | done | Approved two-miss/30-second recovery policy; 30 -> 11 immediate-absence grace requests; 144 targeted / 451 full; ARM64 builds clean; manual tracking smoke passed; app stopped |
-| 09 | Evaluate replacing the BusTime stop crawl with GTFS | pending | Compatibility and user-approval gate |
-| 10 | Verify cumulative savings and finalize documentation | pending | |
+| 09 | Evaluate replacing the BusTime stop crawl with GTFS | deferred | User chose defer after offline evidence: GTFS lacks BusTime direction labels/names/26 stops; residual 148 BusTime requests per weekly rebuild |
+| 10 | Verify cumulative savings and finalize documentation | in_progress | Cumulative evidence tables, README/`StopIndexService` crawl count and API-budget summary written; 451/451 full tests; ARM64 Debug/Release 0 warnings/errors; awaiting developer packaged checks |
 
 ### Current checkpoint
 
-- **Step 08 done (2026-10-08).** Last completed step: 08; next step: 09 (pending, not started). User-approved two-distinct-successful-miss confirmation and 30-second recovery checks are implemented; returning matches clear the passed marker/restore normal polling. Original DueSince, due display, five-minute grace, alert thresholds, lookahead and keep-awake are preserved. The approved slower/brief-event detection tradeoff is explicit in README/log. Existing dirty/untracked work is preserved; no commits.
+- **Step 10 in_progress (2026-10-12).** Preconditions hold (01-08 done, 09 deferred by user). Documentation and cumulative evidence are written (see the 2026-10-12 step 10 log entry): baseline vs final request tables, scenario coverage matrix, README crawl count corrected from "around 100" to 148, and a README budget summary. Per the developer's standing preference, the agent did not build, test or launch. Full suite **451/451** and ARM64 Debug/Release builds (**0 warnings/errors**) passed. **Remaining:** the developer launches the app and runs the packaged checklist in the log entry, then records the results. Mark `done` only after those pass; on failure, record the failure here and keep `in_progress`.
+- **Step 09 deferred (2026-10-12) by user decision.** Evidence, options and residual cost are in the 2026-10-12 execution-log entry. No production/test/README changes. Next step: 10 (pending, not started). Step 10 should note that README/`StopIndexService` say "about a hundred" crawl requests while the measured count is 148.
+- **Step 08 done (2026-10-08).** Last completed step: 08; next step: 09. User-approved two-distinct-successful-miss confirmation and 30-second recovery checks are implemented; returning matches clear the passed marker/restore normal polling. Original DueSince, due display, five-minute grace, alert thresholds, lookahead and keep-awake are preserved. The approved slower/brief-event detection tradeoff is explicit in README/log. Existing dirty/untracked work is preserved; no commits.
 - Verification for 08: baseline related suite **114/114**, pre-policy characterization **124/124**, final targeted **144/144**, full **451/451** (30 added cases); detected ARM64 Debug/Release **0 warnings/errors (17.68 s / 17.79 s)**. Deterministic physical requests per immediate-absence grace are **30 -> 11** (12 timer checks; the final local check reuses t=290 data). Late disappearance: 18; sustained return: 28; errors-only: 30. Detailed bounds/tradeoff evidence below.
 - Runtime: packaged **PID 13512** matched the exact registered Debug layout and responded. User reported **`runtimeResult=all-checks-passed, details=none`** for start tracking/ETA badge, hidden/reopened tracking and stop tracking/normal icon/manual refresh. Then PID 13512 was re-verified, stopped and confirmed absent; attached launcher completed following deliberate termination. All three cache fingerprints stayed unchanged.
 - Blockers/remaining work for 08: **none**. Next action: in a fresh request read this entire plan and select only **09**. Document representative GTFS/BusTime directory compatibility evidence and the smallest viable dependency-safe approach, then obtain user approval before replacing directory construction or deferring. Step 09's separate gate remains untouched; no later-step implementation is authorized by the step 08 decision.
@@ -251,6 +253,95 @@ Every implementation session must append a concise execution-log entry containin
 - Remaining work, blockers, and exact next action. Set the table and checkpoint consistently before ending the session.
 
 ## Execution log
+
+### 2026-10-12 - Step 10 (in_progress)
+
+- Selected only 10; no in_progress/blocked row existed. Precondition holds: 01-08 `done`, 09 `deferred` by documented user decision. Read the full plan, `AGENTS.md`, README, `RequestBaselineTests` and the relevant count-asserting tests. Per the developer's standing preference (the agent does not build, test or launch tray-times), all commands below are handed to the developer. No measurements here are new agent runs; each figure cites the deterministic assertion that the developer's full-suite run re-verifies.
+- **Method:** "Baseline" is the step 01 recorded run or, where marked, a code-derived count from the step 01 audit. "Final" is the value currently asserted by the named test against the actual BusTime HTTP/JSON path, diagnostics and saved tally, with fake HTTP and a controllable clock. Unless noted: warm caches/discovery, one stable live vehicle, successful fast responses, no metadata/startup/manual traffic, half-open window [0,60) starting at coincident due ticks, setup requests excluded. None of these figures are live production rates or billing.
+
+#### Cumulative physical requests by scenario
+
+| Scenario | Baseline (step 01) | Final | Change | Evidence (test) / kind |
+|----------|--------------------|-------|--------|------------------------|
+| Warm Favorites, 1 stop | 2 pred + 8 veh = **10/min** | 2 pred + 4 veh = **6/min** | -40% | `RefreshAsync_WarmFavoritesTimerAndDisplayEventBursts_CountsTwoPredictionsAndFourVehicles`; deterministic |
+| Warm Commute + foreground Favorites, 2-stop union (1 overlap), fits one batch | 4 pred + 8 veh = **12/min** | 2 shared pred + 4 veh = **6/min** | -50% | `GetArrivalsAsync_PlaceBoundaryReplayWithForegroundFavorites_CountsTwoPredictionsAndFourVehicles(Commute)`; deterministic, place stage is a replayed boundary |
+| Warm Nearby + foreground Favorites, same fixture | **12/min** | **6/min** | -50% | Same test, `Nearby` row |
+| Commute/Nearby + Favorites, 10 + 8 disjoint stops (union beyond 10) | 4 pred + 8 veh = **12/min** (code-derived: each consumer's set already fit one batch) | 4 pred (batches 10/8/10/8) + 4 veh = **8/min** | -33%, vehicles only | `GetAsync_MultiBatchPlaceReplayWithFavorites_CountsFourPredictionsAndFourVehicles`; no prediction saving is claimed beyond 10 stops |
+| Vehicle bound, four overlapping triggers per due tick | Uncoordinated duplicates | **4** routine requests, 12 in-flight reuses | Bound met | `RefreshAsync_SteadyStateOverlappingBursts_ProducesFourRoutineRequestsInHalfOpenMinute` (response delays 0, 2, 14.999 s) |
+| Quick reopen, Favorites (fresh <=15 s / stale) | 0 / 1 pred | 0 / 1 pred | Unchanged by design | `IsForeground_ReopenTimetableAndHiddenEvents_RecordsActualRefreshWiring` |
+| Quick reopen, Commute/Nearby, warm minute with four reopens | Rediscovery on every routine load (location + walking + route selection) | **2 pred, 0 rediscovery stages** | Discovery removed from routine path | `RefreshAsync_WarmHalfOpenMinuteAndReopen_CountsZeroRediscoveryAndTwoPredictions`; walking/location are fixture boundaries, not Azure counts |
+| Timetable Loaded with applicable live snapshot | 1 pred per consumer (+2 veh, code-derived) | **0** | Removed | `Loaded_FirstFeedAndReloadWithStaleLiveSnapshot_AddsScheduleWithoutHttpOrChangingFreshness`, `RefreshTimetableAsync_FirstFeedAndReload_EnrichesRawRowsAndDestinationEtasImmediately` |
+| Slow overlapping timetable event + reopen | 2 pred | **1** | -1 | `RefreshAsync_SlowOverlappingTimetableAndReopen_SharesOneAttempt` |
+| Manual refresh / F5 on fresh data | 1 forced | **1** forced, shares in-flight | Preserved | `RefreshAsync_ManualForceAndHiddenCalls_PreservesIntentionalRefreshAndHiddenInactivity` |
+| Hidden idle (no tracking) | 0 timer requests, but started work kept issuing later stages | **0**; hidden discovery/route/picker work cancelled | Cancellation added | Same test (hidden call = 0); `IsForeground_HiddenDuringDiscovery_CancelsTheDiscoveryRequestsAndCompletesQuietly` |
+| Hidden tracking, first minute, >10 / (5,10] / <=5 min out | 1 / 2 / 6 | 1 / 2 / 6 | Cadence preserved (invariant) | `Start_TrackingTimerWithoutFlyout_ObservesExistingCadence` |
+| Tracking + browsing at same stop | Independent requests | Browsing reuses tracking snapshot; hiding browsing never cancels tracking | Shared | `Start_SharedBrowsingPredictionAndRepeatedTicks_EmitsOneAlertWithoutAnotherHttp`, `GetAsync_CanceledBrowsingWaiter_DoesNotCancelSharedHiddenTracking` |
+| Tracked bus immediately absent, 5-minute grace | **30** | **11** | -19 (approved tradeoff) | `Start_DueBusRemainsAbsent_CountsElevenAttemptsWithoutExtendingFiveMinuteGrace`; late disappearance 18, sustained return 28, errors only 30 (step 08) |
+| Route catalog: concurrent miss + cached consumer | 1 | 1 | Unchanged | `GetRouteCatalogAsync_ConcurrentAndCachedConsumers_CountsOneHttpAttemptAndLabelsReuse` |
+| Route catalog after flyout teardown/recreation | Refetched (teardown cleared cache) | **0** until intentional invalidation | Removed | `GetRouteCatalogAsync_FlyoutClearAndRecreatedConsumer_DoesNotDiscardAppMetadata` |
+| Settings picker recreated, same route/direction | Directions + stops + patterns refetched (code-derived) | **0** after initial stops + shape = 2 | Removed | `GetAsync_ConcurrentConsumersAndFreshWindowRecreation_CountsOnePhysicalAttempt`, step 07 evidence |
+| Stop directory: cold build / weekly update / "Update now" | 1 + routes + directions (**148** for MCTS, measured offline in step 09) | **148** | Unchanged (09 deferred) | Step 09 log; complete crawl now also persists picker metadata |
+| Stop directory: warm disk load | 0 | 0 | Unchanged | `StopIndexServiceTests` |
+| Stop directory: failed rebuild, repeated callers | Full crawl per caller | One shared build; automatic retry waits 5 min doubling to 1 h; early abort on rate limit/key/cooldown/>25% failures | Bounded | `BuildAsync_AutomaticAfterFailure_IsRefusedWithoutCrawling`, `RebuildAsync_FreshCachesAndConcurrentManualCalls_RefreshesOnceAndPersistsCompleteMetadata` |
+| GTFS feed | Conditional GET weekly, not a BusTime call | Unchanged | - | Not charged to the key |
+| Error recovery: automatic requests after a network failure | Every timer tick retried | Held 15 s, doubling to 5 min; success resets; 429 `Retry-After` honored for all | Bounded | `GetRoutesAsync_ConsecutiveFailures_DoubleTheHoldOffUpToTheCap`, `GetRoutesAsync_TooManyRequestsWithRetryAfter_HoldsEveryoneUntilTheWindowEnds` |
+
+- **Headline:** warm Favorites browsing uses 6 instead of 10 BusTime requests a minute (360 vs 600 an hour). Commute/Nearby with Favorites uses 6 instead of 12 when the stop union fits one batch of 10; beyond 10 stops, only the vehicle saving (12 to 8) applies. The 50% figure is conditional and is not promised for every configuration. The weekly directory crawl remains 148 requests (~21/day amortised) because step 09 was deferred.
+- **Not measured:** production request rates, latency or billing; live failure/429 injection; cold crawl or feed download; multi-hour soaks; other agencies. All failure, cancellation and slow-response cases above are deterministic fixtures by design (plan invariant: no live request storms).
+
+#### Documentation changes
+
+- `README.md` line 13: "around 100 requests" replaced with the actual formula and MCTS count (148). Added an "At a glance" summary to the API budget section with the measured per-minute figures above and their conditions.
+- `TrayTimes\Services\StopIndexService.cs` doc comment: "about a hundred requests" corrected to the formula and 148. Comment-only; no behavior change.
+- Reviewed the rest of the README API-budget section (metadata lifetimes, cadences, sharing/batching, vehicle reuse, passed-bus recovery, failures/cancellation, place discovery, GTFS re-merge) against the step 02-08 logs; no other inaccuracies found.
+
+#### Developer verification (pending)
+
+From the repository root, in one PowerShell session:
+
+```powershell
+$arch = $env:PROCESSOR_ARCHITECTURE
+$Platform = if ($arch -eq 'AMD64') { 'x64' } else { $arch }
+dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --verbosity quiet
+dotnet build .\TrayTimes\TrayTimes.csproj -c Debug -p:Platform=$Platform --verbosity quiet
+dotnet build .\TrayTimes\TrayTimes.csproj -c Release -p:Platform=$Platform --no-restore --verbosity quiet
+dotnet run --project .\TrayTimes\TrayTimes.csproj -c Debug -p:Platform=$Platform --no-build
+```
+
+Expected: full suite passes (451 at the end of step 08, with no tests added since); both builds have 0 warnings and 0 errors. Do not use "Update now" (it triggers a 148-request crawl). Packaged checks:
+
+1. **Favorites:** arrivals list; hovering the tray icon shows the tooltip with next arrivals.
+2. **Map:** click an arrival with a live bus; it is framed with the yellow highlight and heading arrow, and the highlight follows position updates.
+3. **Commute and Nearby:** rows with walking minutes and destination ETAs; switching "Going to" clears the old trip.
+4. **Quick reopen and manual refresh:** dismiss, reopen within a few seconds (rows appear immediately), then press F5 or Refresh.
+5. **Hidden over 60 s:** reopen; arrivals and scheduled rows return.
+6. **Tracking:** start the bell on a live arrival, dismiss, confirm the ETA badge keeps updating, then stop tracking and confirm the normal icon.
+7. **Settings picker:** Route → Direction → Stop populates promptly and map dots appear; close and reopen Settings with the same selection, and it repopulates without a visible wait.
+
+- **Tests and builds (run by the agent at the developer's request, 2026-10-12):** detected ARM64. No TrayTimes process was running. Full `dotnet test` passed **451/451**, with 0 failures and 0 skips (316 ms). Debug build: **0 warnings/errors (19.66 s)**. Release `--no-restore` build: **0 warnings/errors (16.66 s)**. `git diff --check` is clean. The app was not launched.
+- Next action: the developer runs `dotnet run ... --no-build` and the 7-item packaged checklist above, then records the outcome here and sets step 10 `done` (or records failures and keeps `in_progress`). No commits.
+
+### 2026-10-12 - Step 09 (deferred)
+
+- Selected only 09; no in_progress/blocked row existed. Read the full plan, `AGENTS.md`, and the directory/timetable sources (`StopIndexService`, `StopDirectoryBuilder`, `StopDirectoryMetadata`, `ScheduleService`, `GtfsTimetable`). No code changes; per the developer's standing preference, no build/run was started by the agent.
+- **Evidence method (no API calls):** copied the app's cached `LocalState` files to a session scratch folder and compared them offline: `stop-index.json` (legacy, no ordered metadata, built 2026-10-07, 3,714 stops) against `schedule.zip` (MCTS feed, Last-Modified 2026-07-22, checked 2026-10-07). One-off analysis script lives only in the session scratchpad (Python was used because it is a JSON-to-1M-row CSV join). Representative single-agency snapshot, not a multi-week or multi-agency study.
+- **Feed shape:** `agency, calendar_dates, fare_*, routes, shapes, stop_times (1.0M rows), stops (3,696), trips (19,275)`. No `calendar.txt`. All stops `location_type=0`; `stop_code == stop_id` for all 3,696.
+- **Current crawl cost:** 49 routes, 98 route-directions -> **1 + 49 + 98 = 148 BusTime requests** per cold build/weekly update/manual "Update now"/fallback; warm load 0. (README's "about a hundred" understates it.) GTFS is a separate conditional GET (9.26 MB ZIP on change, usually 304), not charged to the BusTime key.
+- **Stop IDs:** 3,688 shared. **26 BusTime-only** (e.g. `00000252`, `000025`, `1000011`, `100006`), absent from `stops.txt` entirely; **8 GTFS-only** (e.g. `0001`, `0481`, `2622`). A GTFS directory would drop 26 stops BusTime predicts for and add 8 it may not.
+- **Coordinates:** median 9.1 m, p95 28.3 m, p99 70.8 m, max 200.3 m; 229 stops differ by >25 m (the Nearby movement threshold), 12 by >100 m. Nearby ranking/walking estimates would shift for those stops.
+- **Stop names:** identical for only **19 / 3,688**. GTFS uses abbreviated forms (`N91 & ROCHELLE`) vs BusTime (`91ST STREET + ROCHELLE`). Every Nearby/picker label would change.
+- **Routes:** every BusTime route exists in GTFS. GTFS adds seasonal `40S/43S/49S` (Summerfest flyers, short names 40/43/49), which the existing `ReadRoutes` already folds into 40U/43/49 via short name only when the directory lacks the suffixed ID. 17 / 49 route colors differ (e.g. RR2 `#0000cc` vs `EA0029`), so map/picker colors would change if taken from GTFS.
+- **Directions:** BusTime IDs are compass labels (`NORTH/SOUTH/EAST/WEST`, ID == name for all 98); GTFS has only `0/1` and headsigns. Mapping by stop-set overlap is unambiguous on this snapshot (best-vs-second Jaccard margin about 0.7 or more for all 96 mappable GTFS directions; 75 / 102 are perfect matches), **but that mapping needs BusTime's per-direction stop sets** — the very crawl being replaced. HF1/HF2 `NORTH` have no GTFS direction. Without BusTime data the only labels available are a geometry/headsign guess, which the plan forbids.
+- **Membership:** with the inferred mapping, route+direction membership still differs at **127 / 3,688** shared stops (e.g. 22/EAST has 23 BusTime stops GTFS lacks; RR2/NORTH 10; 60/NORTH 13), affecting Commute direct-route filtering and Nearby route lists.
+- **Dependency:** `ScheduleService.LoadAsync` awaits the directory before `GtfsTimetable.Load`, which uses it for suffixed-route translation and the direction vote. A GTFS-built directory would make that vote circular; the timetable would have to use a BusTime-labelled mapping persisted from some BusTime source anyway.
+- **Conclusion:** GTFS can supply coordinates and approximate membership but cannot by itself supply BusTime direction IDs/labels, stop names, or exact stop/route membership. A safe replacement still needs BusTime data per direction, so the achievable saving is a fraction of 148 requests/week while changing user-visible names/colors and Nearby/Commute results. Smallest viable options, none implemented:
+  1. **Defer (recommended).** Residual cost: 148 BusTime requests per 7-day rebuild per install (~21/day amortised), plus failure backoff from step 06. Roughly equivalent to 25 minutes of warm Favorites browsing (6 calls/min).
+  2. **GTFS hybrid:** GTFS stops/coords/membership + `getroutes` + one `getstops` per route to label direction 0/1 (~50 requests, saves ~98/week). Still changes names/coordinates for stops seen only in the unlabelled direction, drops the 26 BusTime-only stops, and inherits the 127 membership differences. Not recommended.
+  3. **Outside 09's GTFS scope - `getpatterns` crawl:** `getroutes` + one single-route `getpatterns` per route (1 + 49 = 50, saves ~98/week) keeps BusTime IDs, labels (`rtdir`), names and coordinates, if pattern stop points (`typ=S`, `stpid`, `stpnm`) cover the same stops as `getstops`. Unverified: the current DTO doesn't parse those fields, provider docs weren't checked, and ordered picker metadata would need lazy `getstops`. Would require a plan amendment and a minimal live sample of a few routes.
+- Requests table for the record: cold build 148 BusTime + one GTFS GET; warm load 0 + 0; weekly update 148 + one conditional GET (usually 304); fallback (missing/expired/failed) 148 with step 06 backoff. Unchanged by this session.
+- **User decision:** asked to choose between defer, the out-of-scope `getpatterns` amendment, and the GTFS hybrid; the user selected **"Defer (Recommended)"**. Step 09 is `deferred`: the weekly BusTime crawl stays as is, with a residual cost of 148 requests per rebuild, and the directory -> timetable dependency is unchanged. The `getpatterns` idea is recorded above only as an unverified possibility. It is not approved or scheduled.
+- Not run: builds/tests/app launch (no code changed), live API samples, provider documentation lookup for `getpatterns` point fields, other agencies/feed versions.
+- Blockers/remaining work for 09: **none**. Next action: in a fresh request, read the entire plan and select only **10**. Steps 08 and 09 are both resolved (done/deferred), so step 10's precondition holds. No commits.
 
 ### 2026-10-08 - Step 08 (done)
 
