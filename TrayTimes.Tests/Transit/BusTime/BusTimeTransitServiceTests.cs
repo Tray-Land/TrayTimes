@@ -51,7 +51,7 @@ public sealed class BusTimeTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetArrivalsAsync_MoreThanTenStops_RequestsOnlyTheFirstTen()
+    public async Task GetArrivalsAsync_MoreThanTenStops_RejectsBeforeCallingServer()
     {
         // Arrange
         StubHandler handler = new("""{"bustime-response":{"prd":[]}}""");
@@ -59,12 +59,10 @@ public sealed class BusTimeTransitServiceTests
         string[] stopIds = Enumerable.Range(1, 12).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
 
         // Act
-        await service.GetArrivalsAsync(stopIds);
+        await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.GetArrivalsAsync(stopIds));
 
         // Assert
-        string query = Uri.UnescapeDataString(handler.Requests.Single().Query);
-        StringAssert.Contains(query, "key=secret");
-        StringAssert.EndsWith(query, "stpid=1,2,3,4,5,6,7,8,9,10");
+        Assert.IsEmpty(handler.Requests);
     }
 
     [TestMethod]

@@ -212,7 +212,7 @@ public sealed class TransitRequestDiagnosticsTests
     [DataRow(10)]
     [DataRow(11)]
     [DataRow(25)]
-    public async Task GetRequests_IdBoundaries_ObservesCurrentPhysicalBatchSizeWithoutChangingTruncation(int count)
+    public async Task GetRequests_IdBoundaries_ObservesValidBatchesAndRejectsOversizedSets(int count)
     {
         // Arrange
         RequestTestHandler handler = new();
@@ -220,11 +220,19 @@ public sealed class TransitRequestDiagnosticsTests
         string[] ids = Enumerable.Range(1, count).Select(i => i.ToString(System.Globalization.CultureInfo.InvariantCulture)).ToArray();
 
         // Act
-        await service.GetArrivalsAsync(ids);
-        await service.GetVehiclesAsync(ids);
+        if (count > service.MaxStopsPerRequest)
+        {
+            await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.GetArrivalsAsync(ids));
+            await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => service.GetVehiclesAsync(ids));
+        }
+        else
+        {
+            await service.GetArrivalsAsync(ids);
+            await service.GetVehiclesAsync(ids);
+        }
 
         // Assert
-        Assert.AreEqual(count == 0 ? 0 : 2, handler.Attempts);
+        Assert.AreEqual(count is > 0 and <= 10 ? 2 : 0, handler.Attempts);
         TransitRequestObservation[] completed = [.. service.Diagnostics.Snapshot.Where(o => o.Phase == TransitRequestPhase.Completed)];
         Assert.IsTrue(completed.All(o => o.BatchSize == Math.Min(count, 10)));
         Assert.IsTrue(completed.All(o => o.Outcome == TransitRequestOutcome.Success));

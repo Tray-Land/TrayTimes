@@ -87,12 +87,13 @@ public sealed class BusTimeTransitService : ITransitService
 
     public async Task<IReadOnlyList<Arrival>> GetArrivalsAsync(IReadOnlyCollection<string> stopIds, CancellationToken cancellationToken = default)
     {
-        if (stopIds.Count == 0)
+        string[] ids = ValidateIds(stopIds);
+        if (ids.Length == 0)
         {
             return [];
         }
 
-        BusTimeResponse response = await GetAsync("getpredictions", TransitEndpoint.Predictions, Math.Min(stopIds.Count, MaxIdsPerRequest), [("stpid", JoinIds(stopIds))], cancellationToken);
+        BusTimeResponse response = await GetAsync("getpredictions", TransitEndpoint.Predictions, ids.Length, [("stpid", string.Join(',', ids))], cancellationToken);
         DateTimeOffset now = DateTimeOffset.Now;
         List<Arrival> arrivals = [];
         foreach (BusTimePrediction p in response.Predictions ?? [])
@@ -133,12 +134,13 @@ public sealed class BusTimeTransitService : ITransitService
 
     public async Task<IReadOnlyList<Vehicle>> GetVehiclesAsync(IReadOnlyCollection<string> vehicleIds, CancellationToken cancellationToken = default)
     {
-        if (vehicleIds.Count == 0)
+        string[] ids = ValidateIds(vehicleIds);
+        if (ids.Length == 0)
         {
             return [];
         }
 
-        BusTimeResponse response = await GetAsync("getvehicles", TransitEndpoint.Vehicles, Math.Min(vehicleIds.Count, MaxIdsPerRequest), [("vid", JoinIds(vehicleIds))], cancellationToken);
+        BusTimeResponse response = await GetAsync("getvehicles", TransitEndpoint.Vehicles, ids.Length, [("vid", string.Join(',', ids))], cancellationToken);
         return (response.Vehicles ?? [])
             .Where(v => !string.IsNullOrEmpty(v.VehicleId) && double.IsFinite(v.Lat) && double.IsFinite(v.Lon))
             .Select(v => new Vehicle(v.VehicleId!, v.Route ?? string.Empty, v.Destination ?? string.Empty, new GeoPoint(v.Lat, v.Lon), v.Heading, v.Delayed))
@@ -162,7 +164,7 @@ public sealed class BusTimeTransitService : ITransitService
     {
         if (_apiKey is null)
         {
-            throw new TransitApiException($"No {AgencyName} API key. Add one to OAuth.resw and rebuild.");
+            throw new TransitApiException($"No {AgencyName} API key. Add one to OAuth.resw and rebuild.", TransitApiFailureKind.Authentication);
         }
 
         StringBuilder query = new($"{endpoint}?format=json&key={Uri.EscapeDataString(_apiKey)}");
@@ -180,6 +182,7 @@ public sealed class BusTimeTransitService : ITransitService
             EndpointCalled?.Invoke(this, endpoint);
             using HttpResponseMessage http = await _http.GetAsync(uri, cancellationToken);
             httpStatus = (int)http.StatusCode;
+            ThrowIfRateLimited(http);
             http.EnsureSuccessStatusCode();
             await using Stream stream = await http.Content.ReadAsStreamAsync(cancellationToken);
 
@@ -194,14 +197,14 @@ public sealed class BusTimeTransitService : ITransitService
                 throw new TransitApiException($"{AgencyName} returned data this app couldn't read ({ex.Message}).");
             }
 
-            // Errors can be per-ID alongside good data (e.g. one of several stops has no service).
-            // Only fail when every error is a real one and there's no data at all.
+            // Benign per-stop "no service" messages are valid empty predictions. A real error
+            // alongside other stops' data must not make a failed tracked stop look like a passed bus.
             string? failure = response.Errors?
                 .Select(e => e.Message)
                 .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m) && !EmptyResultMessages.Any(benign => m.Contains(benign, StringComparison.OrdinalIgnoreCase)));
-            if (failure is not null && !HasData(response))
+            if (failure is not null && (diagnosticEndpoint == TransitEndpoint.Predictions || !HasData(response)))
             {
-                throw new TransitApiException(failure);
+                throw new TransitApiException(failure, ClassifyFailure(failure));
             }
 
             outcome = TransitRequestOutcome.Success;
@@ -229,6 +232,30 @@ public sealed class BusTimeTransitService : ITransitService
         }
     }
 
+    private static void ThrowIfRateLimited(HttpResponseMessage http)
+    {
+        System.Net.Http.Headers.RetryConditionHeaderValue? retryAfter = http.Headers.RetryAfter;
+        TimeSpan? wait = retryAfter?.Delta ?? (retryAfter?.Date is { } date ? date - DateTimeOffset.UtcNow : null);
+        if (http.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+            || (http.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable && wait is not null))
+        {
+            throw new TransitRateLimitException(http.StatusCode, wait);
+        }
+    }
+
+    // BusTime reports key and quota problems as ordinary error messages in a 200 response.
+    private static TransitApiFailureKind ClassifyFailure(string message)
+    {
+        if (message.Contains("access key", StringComparison.OrdinalIgnoreCase) || message.Contains("api key", StringComparison.OrdinalIgnoreCase))
+        {
+            return TransitApiFailureKind.Authentication;
+        }
+
+        return message.Contains("exceeded", StringComparison.OrdinalIgnoreCase) || message.Contains("rate limit", StringComparison.OrdinalIgnoreCase)
+            ? TransitApiFailureKind.RateLimit
+            : TransitApiFailureKind.Other;
+    }
+
     private static bool HasData(BusTimeResponse r) =>
         r.Routes is { Count: > 0 } || r.Directions is { Count: > 0 } || r.Stops is { Count: > 0 }
         || r.Predictions is { Count: > 0 } || r.Vehicles is { Count: > 0 } || r.Patterns is { Count: > 0 };
@@ -245,7 +272,22 @@ public sealed class BusTimeTransitService : ITransitService
         return new DateTimeOffset(local, _agencyTimeZone.GetUtcOffset(local));
     }
 
-    private static string JoinIds(IReadOnlyCollection<string> ids) => string.Join(',', ids.Take(MaxIdsPerRequest));
+    private static string[] ValidateIds(IReadOnlyCollection<string> ids)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        if (ids.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new ArgumentException("IDs must not be empty.", nameof(ids));
+        }
+
+        string[] distinct = [.. ids.Distinct(StringComparer.Ordinal)];
+        if (distinct.Length > MaxIdsPerRequest)
+        {
+            throw new ArgumentOutOfRangeException(nameof(ids), "Split IDs into batches within the provider's request limit.");
+        }
+
+        return distinct;
+    }
 
     private static string? NonEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

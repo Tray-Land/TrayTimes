@@ -13,9 +13,9 @@ public enum TransitTrigger
     PlaceResult, PlaceCompleted, Metadata, PickerSelection, DirectoryBuild,
 }
 
-public enum TransitRequestPhase { Started, Completed, CacheReuse, InFlightReuse }
+public enum TransitRequestPhase { Started, Completed, CacheReuse, InFlightReuse, Suppressed }
 
-public enum TransitRequestOutcome { Pending, Success, HttpFailure, TransportFailure, ApiFailure, Canceled, Timeout, Failure }
+public enum TransitRequestOutcome { Pending, Success, HttpFailure, TransportFailure, ApiFailure, Canceled, Timeout, Failure, Suppressed }
 
 /// <summary>Credential-safe observation: no URLs, IDs, location data, or exception messages.</summary>
 public sealed record TransitRequestObservation(
@@ -66,6 +66,17 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
     }
 
     public static IDisposable BeginScope(TransitConsumer consumer, TransitTrigger trigger) => new Scope(consumer, trigger);
+
+    /// <summary>The consumer and trigger labelling requests made from the current async flow.</summary>
+    public static (TransitConsumer Consumer, TransitTrigger Trigger) CurrentScope => Context.Value;
+
+    /// <summary>Observe a request that was held back by a failure cooldown; this never raises EndpointCalled.</summary>
+    public void RecordSuppressed(TransitEndpoint endpoint, int batchSize = 0)
+    {
+        DateTimeOffset now = _time.GetUtcNow();
+        Publish(new TransitRequestObservation(0, endpoint, Context.Value.Consumer, Context.Value.Trigger,
+            TransitRequestPhase.Suppressed, now, now, TimeSpan.Zero, TransitRequestOutcome.Suppressed, batchSize, null));
+    }
 
     /// <summary>Observe existing cache/task reuse; this never raises EndpointCalled.</summary>
     public void RecordReuse(TransitEndpoint endpoint, bool inFlight, int batchSize = 0)

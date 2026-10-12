@@ -34,6 +34,8 @@ internal sealed class RequestTestHandler : HttpMessageHandler
 
     public int Attempts => _attempts;
 
+    public Action<string[]>? CaptureIds { get; set; }
+
     public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> RespondAsync { get; set; } =
         (_, _) => Task.FromResult(Response(EmptyBody));
 
@@ -43,6 +45,16 @@ internal sealed class RequestTestHandler : HttpMessageHandler
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         Interlocked.Increment(ref _attempts);
+        if (CaptureIds is not null)
+        {
+            string query = Uri.UnescapeDataString(request.RequestUri!.Query);
+            string? parameter = query.TrimStart('?').Split('&').FirstOrDefault(p => p.StartsWith("stpid=", StringComparison.Ordinal));
+            if (parameter is not null)
+            {
+                CaptureIds(parameter["stpid=".Length..].Split(','));
+            }
+        }
+
         return RespondAsync(request, cancellationToken);
     }
 

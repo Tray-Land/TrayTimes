@@ -61,4 +61,20 @@ public sealed record Vehicle(string Id, string RouteId, string Destination, GeoP
 public sealed record RoutePattern(string Id, string RouteId, string DirectionId, IReadOnlyList<GeoPoint> Points);
 
 /// <summary>Raised when the transit service rejects a request (bad key, rate limit, and so on).</summary>
-public sealed class TransitApiException(string message) : Exception(message);
+public sealed class TransitApiException(string message, TransitApiFailureKind kind = TransitApiFailureKind.Other) : Exception(message)
+{
+    public TransitApiFailureKind Kind { get; } = kind;
+}
+
+/// <summary>How the app should treat a service-reported failure when deciding whether to retry.</summary>
+public enum TransitApiFailureKind
+{
+    /// <summary>A problem with this one query (unknown stop, unreadable data); says nothing about the service's health.</summary>
+    Other,
+
+    /// <summary>The key is missing or rejected; retrying cannot help until the configuration changes.</summary>
+    Authentication,
+
+    /// <summary>The key's request quota is used up.</summary>
+    RateLimit,
+}

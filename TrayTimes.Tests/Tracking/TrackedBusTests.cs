@@ -181,7 +181,7 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
-    public void Advance_DueBusLeavesArrivals_MarksPassed()
+    public void Advance_DueBusLeavesArrivals_RequiresTwoDistinctSuccessfulPollsToMarkPassed()
     {
         // Arrange
         TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
@@ -190,8 +190,155 @@ public sealed class TrackedBusTests
         TrackingStep step = bus.Advance([], Lead, Now.AddMinutes(1));
 
         // Assert
+        Assert.IsFalse(step.Bus.HasPassed);
+        Assert.AreEqual(TimeSpan.FromSeconds(10), step.Bus.RefreshInterval(Now.AddMinutes(1)));
+        step = step.Bus.Advance([], Lead, Now.AddMinutes(1).AddSeconds(10));
         Assert.IsTrue(step.Bus.HasPassed);
+        Assert.AreEqual(TimeSpan.FromSeconds(30), step.Bus.RefreshInterval(Now.AddMinutes(1).AddSeconds(10)));
         Assert.IsFalse(step.Ended);
+    }
+
+    [TestMethod]
+    public void Advance_RepeatedCachedMissingSnapshot_DoesNotConfirmPassageTwice()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        DateTimeOffset fetchedAt = Now.AddSeconds(10);
+        bus = bus.Advance([], Lead, fetchedAt, fetchedAt).Bus;
+
+        // Act
+        bus = bus.Advance([], Lead, Now.AddSeconds(20), fetchedAt).Bus;
+        bus = bus.Advance([], Lead, Now.AddSeconds(30), fetchedAt).Bus;
+
+        // Assert
+        Assert.IsFalse(bus.HasPassed);
+        Assert.AreEqual(TimeSpan.FromSeconds(10), bus.RefreshInterval(Now.AddSeconds(30)));
+        Assert.IsTrue(bus.Advance([], Lead, Now.AddSeconds(40), Now.AddSeconds(40)).Bus.HasPassed);
+    }
+
+    [TestMethod]
+    public void Advance_CachedMatchingPredictionBecomesDue_StillUpdatesTimeBasedLifecycle()
+    {
+        // Arrange
+        Arrival arrival = CreateArrival(Now.AddSeconds(75));
+        TrackedBus bus = TrackedBus.Start(arrival, "Stop", Lead, Now);
+        DateTimeOffset fetchedAt = Now.AddSeconds(10);
+        bus = bus.Advance([arrival], Lead, fetchedAt, fetchedAt).Bus;
+        Assert.IsNull(bus.DueSince);
+
+        // Act
+        TrackingStep step = bus.Advance([arrival], Lead, Now.AddSeconds(20), fetchedAt);
+
+        // Assert
+        Assert.AreEqual(Now.AddSeconds(20), step.Bus.DueSince);
+        Assert.IsFalse(step.Bus.HasPassed);
+        Assert.IsFalse(step.Ended);
+        Assert.AreEqual(0, step.Bus.MinutesAway(Now.AddSeconds(20)));
+    }
+
+    [TestMethod]
+    public void Advance_FailedPollBetweenMissingSnapshots_ResetsUnconfirmedEvidence()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
+
+        // Act
+        bus = bus.Advance(null, Lead, Now.AddSeconds(20)).Bus;
+        bus = bus.Advance([], Lead, Now.AddSeconds(30)).Bus;
+
+        // Assert
+        Assert.IsFalse(bus.HasPassed);
+        Assert.AreEqual(Now, bus.DueSince);
+        Assert.IsTrue(bus.Advance([], Lead, Now.AddSeconds(40)).Bus.HasPassed);
+    }
+
+    [TestMethod]
+    public void Advance_ReappearanceBetweenMissingSnapshots_RestartsConfirmation()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
+
+        // Act
+        bus = bus.Advance([CreateArrival(Now, isDue: true)], Lead, Now.AddSeconds(20)).Bus;
+        bus = bus.Advance([], Lead, Now.AddSeconds(30)).Bus;
+
+        // Assert
+        Assert.IsFalse(bus.HasPassed);
+        Assert.IsTrue(bus.Advance([], Lead, Now.AddSeconds(40)).Bus.HasPassed);
+    }
+
+    [TestMethod]
+    public void Advance_ConfirmedBusReappears_ClearsPassageWithoutRestartingGraceOrAlerts()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
+        bus = bus.Advance([], Lead, Now.AddSeconds(20)).Bus;
+
+        // Act
+        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(4))], Lead, Now.AddSeconds(50));
+
+        // Assert
+        Assert.IsFalse(step.Bus.HasPassed);
+        Assert.AreEqual(Now, step.Bus.DueSince);
+        Assert.AreEqual(0, step.Bus.MinutesAway(Now.AddSeconds(50)));
+        Assert.AreEqual(TimeSpan.FromSeconds(10), step.Bus.RefreshInterval(Now.AddSeconds(50)));
+        Assert.IsNull(step.Alert);
+        Assert.IsFalse(step.Ended);
+        Assert.IsTrue(step.Bus.Advance([CreateArrival(Now.AddMinutes(4))], Lead, Now + TrackedBus.PassedGrace).Ended);
+    }
+
+    [TestMethod]
+    public void Advance_FailedPollAfterConfirmation_KeepsPassedDisplayAndGrace()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
+        bus = bus.Advance([], Lead, Now.AddSeconds(20)).Bus;
+
+        // Act
+        TrackingStep step = bus.Advance(null, Lead, Now.AddSeconds(50));
+
+        // Assert
+        Assert.IsTrue(step.Bus.HasPassed);
+        Assert.AreEqual(TimeSpan.FromSeconds(30), step.Bus.RefreshInterval(Now.AddSeconds(50)));
+        Assert.AreEqual(Now, step.Bus.DueSince);
+        Assert.IsFalse(step.Ended);
+        Assert.IsNull(step.Alert);
+        Assert.IsTrue(step.Bus.Advance(null, Lead, Now + TrackedBus.PassedGrace).Ended);
+    }
+
+    [TestMethod]
+    public void Advance_MatchingCancellationAfterConfirmation_EndsAndAlerts()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
+        bus = bus.Advance([], Lead, Now.AddSeconds(20)).Bus;
+
+        // Act
+        TrackingStep step = bus.Advance([CreateArrival(Now, status: ArrivalStatus.Canceled)], Lead, Now.AddSeconds(50));
+
+        // Assert
+        Assert.AreEqual(TrackingAlert.Canceled, step.Alert);
+        Assert.IsTrue(step.Ended);
+    }
+
+    [TestMethod]
+    public void Advance_OlderSnapshotAfterFirstMiss_CannotConfirmPassage()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        bus = bus.Advance([], Lead, Now.AddSeconds(20), Now.AddSeconds(20)).Bus;
+
+        // Act
+        TrackingStep step = bus.Advance([], Lead, Now.AddSeconds(30), Now.AddSeconds(10));
+
+        // Assert
+        Assert.IsFalse(step.Bus.HasPassed);
+        Assert.IsTrue(step.Bus.Advance([], Lead, Now.AddSeconds(40), Now.AddSeconds(40)).Bus.HasPassed);
     }
 
     [TestMethod]

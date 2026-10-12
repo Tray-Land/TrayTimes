@@ -180,7 +180,7 @@ public sealed class CommutePlannerTests
     }
 
     [TestMethod]
-    public void DirectRoutes_ShapeUnknown_KeepsSharedRoute()
+    public void DirectRoutes_ShapeUnknown_DoesNotConfirmSharedRoute()
     {
         // Arrange
         IndexedStop[] origin = [Stop("o", 43.010, ("10", "NB"))];
@@ -190,7 +190,7 @@ public sealed class CommutePlannerTests
         IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(origin, destination, new Dictionary<string, IReadOnlyList<RoutePattern>>());
 
         // Assert
-        Assert.HasCount(1, direct);
+        Assert.HasCount(0, direct);
     }
 
     [TestMethod]

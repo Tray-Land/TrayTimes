@@ -112,7 +112,7 @@ public static class CommutePlanner
 
     /// <summary>
     /// The shared route directions that reach a destination stop after passing an origin stop, so one
-    /// ride gets there. A route whose shape is unknown is kept rather than hidden.
+    /// ride gets there. A route whose shape is unknown cannot confirm a direct ride.
     /// </summary>
     public static IReadOnlySet<RouteDirection> DirectRoutes(
         IReadOnlyList<IndexedStop> originStops,
@@ -127,7 +127,7 @@ public static class CommutePlanner
                 .ToList();
             List<GeoPoint> boardAt = StopsServedBy(originStops, route);
             List<GeoPoint> alightAt = StopsServedBy(destinationStops, route);
-            if (shapes.Count == 0 || shapes.Any(p => RunsFromTo(p, boardAt, alightAt)))
+            if (shapes.Any(p => RunsFromTo(p, boardAt, alightAt)))
             {
                 direct.Add(route);
             }

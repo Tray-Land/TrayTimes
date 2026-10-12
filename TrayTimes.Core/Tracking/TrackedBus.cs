@@ -37,6 +37,8 @@ public sealed record TrackedBus(
     DateTimeOffset? DueSince,
     DateTimeOffset? AlertedTime)
 {
+    private const int PassedConfirmationCount = 2;
+
     /// <summary>How long after the bus is due tracking keeps going.</summary>
     public static readonly TimeSpan PassedGrace = TimeSpan.FromMinutes(5);
 
@@ -55,8 +57,12 @@ public sealed record TrackedBus(
     /// <summary>True while only the timetable knows this bus: no real-time prediction has matched it yet.</summary>
     public bool IsScheduled { get; init; }
 
-    /// <summary>True once the bus was due and has since dropped out of the stop's arrivals: it has gone by.</summary>
+    /// <summary>True after two distinct successful polls omit a due bus; cleared if it reappears.</summary>
     public bool HasPassed { get; init; }
+
+    private int MissingPredictionCount { get; init; }
+
+    private DateTimeOffset? LastPredictionFetchedAt { get; init; }
 
     public static TrackedBus Start(Arrival arrival, string stopName, int leadMinutes, DateTimeOffset now)
     {
@@ -91,9 +97,14 @@ public sealed record TrackedBus(
     public bool IsAwaitingRealTime(int leadMinutes, DateTimeOffset now) =>
         IsScheduled && now < PredictedTime - TimeSpan.FromMinutes(Math.Max(RealTimeLookahead.TotalMinutes, leadMinutes));
 
-    /// <summary>Polls less often while the bus is far away; a scheduled bus is checked every minute.</summary>
+    /// <summary>Polls less often far away or after confirmed passage; scheduled buses are checked every minute.</summary>
     public TimeSpan RefreshInterval(DateTimeOffset now)
     {
+        if (HasPassed)
+        {
+            return TimeSpan.FromSeconds(30);
+        }
+
         if (IsScheduled)
         {
             return TimeSpan.FromMinutes(1);
@@ -138,28 +149,46 @@ public sealed record TrackedBus(
             : null);
 
     /// <param name="arrivals">The stop's latest arrivals, or null if the poll failed.</param>
-    public TrackingStep Advance(IReadOnlyList<Arrival>? arrivals, int leadMinutes, DateTimeOffset now)
+    /// <param name="predictionFetchedAt">Original snapshot time, so reused predictions cannot confirm passage twice.</param>
+    public TrackingStep Advance(IReadOnlyList<Arrival>? arrivals, int leadMinutes, DateTimeOffset now, DateTimeOffset? predictionFetchedAt = null)
     {
         TrackedBus bus = this;
-        if (arrivals is not null && DueSince is not null && FindIn(arrivals) is null)
+        DateTimeOffset fetchedAt = predictionFetchedAt ?? now;
+        if (arrivals is null)
         {
-            bus = this with { HasPassed = true };
+            bus = this with { MissingPredictionCount = 0 };
         }
-        else if (arrivals is not null && FindIn(arrivals) is { } match)
+        else if (LastPredictionFetchedAt is null || fetchedAt >= LastPredictionFetchedAt)
         {
-            if (match.Status == ArrivalStatus.Canceled)
+            if (FindIn(arrivals) is { } match)
             {
-                return new TrackingStep(this, TrackingAlert.Canceled, Ended: true);
-            }
+                if (match.Status == ArrivalStatus.Canceled)
+                {
+                    return new TrackingStep(this, TrackingAlert.Canceled, Ended: true);
+                }
 
-            bus = this with
+                bus = this with
+                {
+                    IsScheduled = false,
+                    HasPassed = false,
+                    MissingPredictionCount = 0,
+                    LastPredictionFetchedAt = fetchedAt,
+                    VehicleId = match.VehicleId ?? VehicleId,
+                    Destination = match.Destination,
+                    PredictedTime = match.PredictedTime,
+                    DueSince = DueSince ?? (match.MinutesAway(now) == 0 ? now : null),
+                };
+            }
+            else if (fetchedAt != LastPredictionFetchedAt)
             {
-                IsScheduled = false,
-                VehicleId = match.VehicleId ?? VehicleId,
-                Destination = match.Destination,
-                PredictedTime = match.PredictedTime,
-                DueSince = DueSince ?? (match.MinutesAway(now) == 0 ? now : null),
-            };
+                int misses = DueSince is null ? 0 : Math.Min(PassedConfirmationCount, MissingPredictionCount + 1);
+                bus = this with
+                {
+                    MissingPredictionCount = misses,
+                    LastPredictionFetchedAt = fetchedAt,
+                    HasPassed = HasPassed || misses == PassedConfirmationCount,
+                };
+            }
         }
 
         TrackingAlert? alert = null;
