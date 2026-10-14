@@ -22,7 +22,8 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="230" />
+            <RowDefinition x:Name="MapRow" Height="230" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -338,7 +339,7 @@
         </Grid>
 
         <!--  Arrivals  -->
-        <Grid Grid.Row="4">
+        <Grid x:Name="ArrivalsPane" Grid.Row="5">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -391,6 +392,37 @@
 
             <InfoBar
                 x:Name="StatusBar"
+        <!--  Drag (or focus and press Up/Down) to trade map space for list space  -->
+        <views:ResizeCursorGrid Grid.Row="4">
+            <Thumb
+                x:Name="Splitter"
+                AutomationProperties.AutomationId="MapSplitter"
+                AutomationProperties.Name="Resize the map"
+                DoubleTapped="Splitter_DoubleTapped"
+                DragCompleted="Splitter_DragCompleted"
+                DragDelta="Splitter_DragDelta"
+                IsTabStop="True"
+                KeyDown="Splitter_KeyDown"
+                ToolTipService.ToolTip="Drag to resize the map. Double-click to reset."
+                UseSystemFocusVisuals="True">
+                <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                        <!--  A transparent band keeps the grab area bigger than the grip it shows  -->
+                        <Grid Height="12" Background="Transparent">
+                            <Rectangle
+                                Width="36"
+                                Height="4"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Fill="{ThemeResource ControlStrongFillColorDefaultBrush}"
+                                RadiusX="2"
+                                RadiusY="2" />
+                        </Grid>
+                    </ControlTemplate>
+                </Thumb.Template>
+            </Thumb>
+        </views:ResizeCursorGrid>
+
                 Grid.Row="1"
                 Margin="8,8,8,0"
                 IsClosable="False"

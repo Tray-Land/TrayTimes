@@ -5,6 +5,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.Windows.ApplicationModel.Resources;
 using TrayTimes.Commute;
@@ -39,6 +40,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const int PopupWidth = 400;
     private const int PopupHeight = 680;
     private const int ArrivalsPerStop = 4;
+    private const double DefaultMapHeight = 230;
+    private const double MinMapHeight = 100;
+    private const double MinListHeight = 140;
+    private const double SplitterKeyStep = 20;
     private const int ArrivalsPerNearbyStop = 3;
     private const int MaxNearbyStops = 8;
     private const int MaxRoutedStops = 12; // walking routes looked up per discovery
@@ -181,6 +186,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _tracker.Changed += OnTrackingChanged;
         _stopIndex.Changed += OnStopIndexChanged;
         _monitor.Schedule.Loaded += OnScheduleLoaded;
+        MapRow.Height = new GridLength(Math.Max(MinMapHeight, SettingsService.FlyoutMapHeight ?? DefaultMapHeight));
         SettingsService.StopsChanged += OnStopsChanged;
         SettingsService.PlacesChanged += OnPlacesChanged;
 
@@ -1743,6 +1749,41 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         StartTracking(item);
+    // ---- Map/list splitter ----
+
+    private void Splitter_DragDelta(object sender, DragDeltaEventArgs e) => ResizeMap(MapRow.Height.Value + e.VerticalChange);
+
+    private void Splitter_DragCompleted(object sender, DragCompletedEventArgs e) => SettingsService.FlyoutMapHeight = MapRow.Height.Value;
+
+    private void Splitter_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        ResizeMap(DefaultMapHeight);
+        SettingsService.FlyoutMapHeight = null;
+    }
+
+    private void Splitter_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        double step = e.Key switch
+        {
+            Windows.System.VirtualKey.Up => -SplitterKeyStep,
+            Windows.System.VirtualKey.Down => SplitterKeyStep,
+            _ => 0,
+        };
+        if (step != 0)
+        {
+            e.Handled = true;
+            ResizeMap(MapRow.Height.Value + step);
+            SettingsService.FlyoutMapHeight = MapRow.Height.Value;
+        }
+    }
+
+    /// <summary>Gives the map <paramref name="height"/>, short of squeezing it or the list below their minimums.</summary>
+    private void ResizeMap(double height)
+    {
+        double max = Math.Max(MinMapHeight, MapRow.ActualHeight + ArrivalsPane.ActualHeight - MinListHeight);
+        MapRow.Height = new GridLength(Math.Clamp(height, MinMapHeight, max));
+    }
+
     }
 
     private void StartTracking(ArrivalItem item)

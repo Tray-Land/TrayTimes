@@ -92,6 +92,13 @@ internal static class SettingsService
         set => Set(nameof(FlyoutMapView), value is null ? null : JsonSerializer.Serialize(value, SettingsJsonContext.Default.MapView));
     }
 
+    /// <summary>How tall the user dragged the flyout's map, in DIPs; null keeps the default.</summary>
+    public static double? FlyoutMapHeight
+    {
+        get => Get<double?>(nameof(FlyoutMapHeight), null);
+        set => Set(nameof(FlyoutMapHeight), value);
+    }
+
     /// <summary>How many minutes before a tracked bus arrives to tell the rider to head out.</summary>
     public static int HeadOutMinutes
     {
