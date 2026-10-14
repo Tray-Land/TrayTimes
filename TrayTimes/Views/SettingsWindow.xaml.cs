@@ -574,7 +574,7 @@ public sealed partial class SettingsWindow : WindowEx
             {
                 Path = new Geopath(p.Points.Select(pt => new BasicGeoposition { Latitude = pt.Lat, Longitude = pt.Lon })),
                 StrokeColor = color,
-                StrokeThickness = 4,
+                StrokeThickness = 8,
             }));
     }
 

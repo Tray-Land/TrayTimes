@@ -61,7 +61,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     // Draw order: route lines, then stops, then the place markers, then buses on top
     // (each bus is a white disc with the bus emoji over it, or a larger yellow disc when selected).
+    private const double SelectedRouteThickness = 8;
+    private const double UnselectedRouteThickness = 4;
+
+    private readonly List<(MapPolyline Line, string RouteId)> _placeRouteLines = [];
+    private HashSet<RouteDirection>? _drawnNearbyRoutes;
+    private CancellationTokenSource? _nearbyRoutesCancellation;
+
     private readonly MapElementsLayer _routeLayer = new();
+    private readonly List<(MapPolyline Line, string RouteId)> _routeLines = [];
     private readonly MapElementsLayer _commuteRouteLayer = new();
     private readonly MapElementsLayer _stopLayer = new();
     private readonly MapElementsLayer _placeLayer = new();
@@ -157,6 +165,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _vehicleLayer.Tapped += VehicleLayer_Tapped;
         _vehicleBackdropLayer.Tapped += VehicleLayer_Tapped; // The disc's rim is part of the bus too.
         _stopLayer.Tapped += StopLayer_Tapped;
+        Map.Tapped += Map_Tapped;
 
         TitleText.Text = $"{_monitor.Service.AgencyName} arrivals";
         Root.ActualThemeChanged += (_, _) =>
@@ -422,6 +431,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         ClearVehicles();
         _routeLayer.IsVisible = _mode == FlyoutMode.Favorites;
         _commuteRouteLayer.MapElements.Clear();
+        ResetNearbyRoutes();
         _placeLayer.MapElements.Clear();
 
         if (_mode == FlyoutMode.Favorites)
@@ -645,6 +655,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _stopPins.Clear();
             _placeLayer.MapElements.Clear();
             _commuteRouteLayer.MapElements.Clear();
+            ResetNearbyRoutes();
             Render();
             return;
         }
@@ -681,6 +692,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         Render();
+        _ = DrawNearbyRoutesAsync();
         _ = RefreshVehiclesAsync(TransitTrigger.PlaceResult);
     }
 
@@ -897,17 +909,102 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// <summary>Draws the commute's direct routes, in their direction of travel.</summary>
     private void DrawCommuteRoutes()
     {
+        if (_mode != FlyoutMode.Commute)
+        {
+            return;
+        }
+
         _commuteRouteLayer.MapElements.Clear();
+        _placeRouteLines.Clear();
         foreach (RouteDirection route in _directRoutes)
         {
             if (_monitor.Metadata.TryGetPatterns(route.RouteId, out IReadOnlyList<RoutePattern> patterns))
             {
                 Color color = RouteColor(route.RouteId, null, null);
-                _commuteRouteLayer.MapElements.AddRange(patterns
-                    .Where(p => string.Equals(p.DirectionId, route.DirectionId, StringComparison.OrdinalIgnoreCase))
-                    .Select(p => CreateRouteLine(p, color)));
+                foreach (RoutePattern pattern in patterns.Where(p => string.Equals(p.DirectionId, route.DirectionId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    MapPolyline line = CreateRouteLine(pattern, color);
+                    _commuteRouteLayer.MapElements.Add(line);
+                    _placeRouteLines.Add((line, route.RouteId));
+                }
             }
         }
+
+        UpdateRouteThickness();
+    }
+
+    /// <summary>Draws the route and direction of every arrival listed in Nearby mode, redrawing only when that set changes.</summary>
+    private async Task DrawNearbyRoutesAsync()
+    {
+        HashSet<RouteDirection> wanted = [.. _placeArrivals
+            .Where(a => a.Status != ArrivalStatus.Canceled)
+            .Select(a => new RouteDirection(a.RouteId, a.DirectionId))];
+        if (_mode != FlyoutMode.Nearby || (_drawnNearbyRoutes?.SetEquals(wanted) ?? false))
+        {
+            return;
+        }
+
+        _nearbyRoutesCancellation?.Cancel();
+        CancellationTokenSource cancellation = new();
+        _nearbyRoutesCancellation = cancellation;
+        try
+        {
+            if (_routes.Count == 0)
+            {
+                // Colors come from the catalog; without it every line would fall back to the default blue.
+                try
+                {
+                    _routes = await _monitor.GetRouteCatalogAsync(RequestConsumer);
+                }
+                catch (Exception ex) when (!cancellation.IsCancellationRequested && ex is (HttpRequestException or TaskCanceledException or TransitApiException))
+                {
+                    System.Diagnostics.Debug.WriteLine($"Route catalog load failed: {ex.GetType().Name}. Drawing routes in the default color.");
+                }
+            }
+
+            List<(MapPolyline Line, string RouteId)> lines = [];
+            foreach (IGrouping<string, RouteDirection> byRoute in wanted.GroupBy(r => r.RouteId, StringComparer.OrdinalIgnoreCase))
+            {
+                IReadOnlyList<RoutePattern> patterns = await GetPatternsAsync(byRoute.Key, cancellationToken: cancellation.Token);
+                Color color = RouteColor(byRoute.Key, null, null);
+                foreach (RoutePattern pattern in patterns.Where(p => byRoute.Any(r => string.Equals(r.DirectionId, p.DirectionId, StringComparison.OrdinalIgnoreCase))))
+                {
+                    lines.Add((CreateRouteLine(pattern, color), byRoute.Key));
+                }
+            }
+
+            if (_mode != FlyoutMode.Nearby || _allowClose)
+            {
+                return;
+            }
+
+            _commuteRouteLayer.MapElements.Clear();
+            _placeRouteLines.Clear();
+            _placeRouteLines.AddRange(lines);
+            _commuteRouteLayer.MapElements.AddRange(lines.Select(l => l.Line));
+            _drawnNearbyRoutes = wanted;
+            UpdateRouteThickness();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A newer set of arrivals (or leaving Nearby) owns the layer now.
+        }
+        finally
+        {
+            if (ReferenceEquals(_nearbyRoutesCancellation, cancellation))
+            {
+                _nearbyRoutesCancellation = null;
+            }
+
+            cancellation.Dispose();
+        }
+    }
+
+    private void ResetNearbyRoutes()
+    {
+        _nearbyRoutesCancellation?.Cancel();
+        _drawnNearbyRoutes = null;
+        _placeRouteLines.Clear();
     }
 
     // ---- Rendering ----
@@ -1290,14 +1387,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private async Task DrawRoutesAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<SavedStop> stops = SettingsService.Stops;
-        List<MapPolyline> lines = [];
+        List<(MapPolyline Line, string RouteId)> lines = [];
         foreach (IGrouping<string, SavedStop> byRoute in stops.GroupBy(s => s.RouteId, StringComparer.OrdinalIgnoreCase))
         {
             IReadOnlyList<RoutePattern> patterns = await GetPatternsAsync(byRoute.Key, cancellationToken: cancellationToken);
             Color color = MapHelpers.ParseRouteColor(byRoute.First().RouteColor);
             foreach (RoutePattern pattern in patterns.Where(p => byRoute.Any(s => s.AllRoutes || string.Equals(s.DirectionId, p.DirectionId, StringComparison.OrdinalIgnoreCase))))
             {
-                lines.Add(CreateRouteLine(pattern, color));
+                lines.Add((CreateRouteLine(pattern, color), byRoute.Key));
             }
         }
 
@@ -1307,15 +1404,32 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _routeLayer.MapElements.Clear();
-        _routeLayer.MapElements.AddRange(lines);
+        _routeLines.Clear();
+        _routeLines.AddRange(lines);
+        _routeLayer.MapElements.AddRange(lines.Select(l => l.Line));
+        UpdateRouteThickness();
     }
 
     private static MapPolyline CreateRouteLine(RoutePattern pattern, Color color) => new()
     {
         Path = new Geopath(pattern.Points.Select(p => new BasicGeoposition { Latitude = p.Lat, Longitude = p.Lon })),
         StrokeColor = Color.FromArgb(200, color.R, color.G, color.B),
-        StrokeThickness = 4,
+        StrokeThickness = SelectedRouteThickness,
     };
+
+    /// <summary>Keeps the selected bus's route thick and thins the rest; with no selection every route is thick.</summary>
+    private void UpdateRouteThickness()
+    {
+        string? selectedRouteId = _selectedVehicleId is not null && _vehicles.TryGetValue(_selectedVehicleId, out Vehicle? vehicle)
+            ? vehicle.RouteId
+            : null;
+        foreach ((MapPolyline line, string routeId) in _routeLines.Concat(_placeRouteLines))
+        {
+            line.StrokeThickness = selectedRouteId is null || string.Equals(routeId, selectedRouteId, StringComparison.OrdinalIgnoreCase)
+                ? SelectedRouteThickness
+                : UnselectedRouteThickness;
+        }
+    }
 
     private async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId, bool required = false, CancellationToken cancellationToken = default)
     {
@@ -1418,6 +1532,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             arrow.ZIndex = selected ? 1 : 0;
         }
 
+        UpdateRouteThickness();
         UpdateVehicleArrows();
     }
 
@@ -1468,6 +1583,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             args.Handled = true;
             SelectVehicle(null);
             ShowMapCaption(name);
+        }
+    }
+
+    /// <summary>A tap on empty map deselects the bus. Taps on a bus or stop are marked handled by their layer and never get here.</summary>
+    private void Map_Tapped(object sender, Microsoft.UI.Xaml.Input.TappedRoutedEventArgs args)
+    {
+        if (!args.Handled && _selectedVehicleId is not null)
+        {
+            SelectVehicle(null);
+            HideMapCaption(animate: true);
         }
     }
 
