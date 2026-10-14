@@ -39,12 +39,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 {
     private const int PopupWidth = 400;
     private const int PopupHeight = 680;
-    private const int ArrivalsPerStop = 4;
+    private const int RoutesPerStop = 4;
+    private const int RoutesPerNearbyStop = 3;
+    private const int TimesPerRoute = 6; // the next bus, then the ones after it in the row's scrolling strip
     private const double DefaultMapHeight = 230;
     private const double MinMapHeight = 100;
     private const double MinListHeight = 140;
     private const double SplitterKeyStep = 20;
-    private const int ArrivalsPerNearbyStop = 3;
     private const int MaxNearbyStops = 8;
     private const int MaxRoutedStops = 12; // walking routes looked up per discovery
     private const double WalkingMetersPerMinute = 80; // about 3 mph
@@ -127,6 +128,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly HashSet<string> _shownRows = [];
     private readonly Dictionary<string, string> _lastMinutes = [];
     private string? _listSignature;
+
+    // Scroll state that outlives list rebuilds, so tracking a bus or a refresh doesn't jump the list.
+    private readonly Dictionary<string, double> _stripOffsets = []; // each route row's time strip, by row key
+    private bool _keepListScroll;
     private int _entranceStep;
     private (string Key, DateTime Until)? _pendingPop; // A bell or star just clicked, to animate once its row is rebuilt.
     private DateTimeOffset? _lastFetchedAt;
@@ -181,12 +186,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         };
         MapHelpers.ApplyBasemap(Map, Root, MapCover);
         RestoreMapView();
+        MapRow.Height = new GridLength(Math.Max(MinMapHeight, SettingsService.FlyoutMapHeight ?? DefaultMapHeight));
 
         _monitor.Updated += OnArrivalsUpdated;
         _tracker.Changed += OnTrackingChanged;
         _stopIndex.Changed += OnStopIndexChanged;
         _monitor.Schedule.Loaded += OnScheduleLoaded;
-        MapRow.Height = new GridLength(Math.Max(MinMapHeight, SettingsService.FlyoutMapHeight ?? DefaultMapHeight));
         SettingsService.StopsChanged += OnStopsChanged;
         SettingsService.PlacesChanged += OnPlacesChanged;
 
@@ -430,10 +435,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         _vehiclePositions.Invalidate();
         ClearPlacePredictionDemand();
-        // A fresh list: every row rises in again rather than silently swapping.
+        // A fresh list: every row rises in again rather than silently swapping, scrolled back to the start.
         _listSignature = null;
         _shownRows.Clear();
         _lastMinutes.Clear();
+        _stripOffsets.Clear();
+        _keepListScroll = false;
         ClearVehicles();
         _routeLayer.IsVisible = _mode == FlyoutMode.Favorites;
         _commuteRouteLayer.MapElements.Clear();
@@ -836,7 +843,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IEnumerable<Arrival> shown = arrivals
             .Where(a => a.Status == ArrivalStatus.Scheduled && direct.Contains(new RouteDirection(a.RouteId, a.DirectionId)))
             .GroupBy(a => a.StopId)
-            .SelectMany(g => g.Take(ArrivalsPerNearbyStop));
+            .SelectMany(g => g.Take(RoutesPerNearbyStop * TimesPerRoute)); // enough to reach every bus that might lead a row
         foreach (Arrival arrival in shown)
         {
             if (CommutePlanner.ArrivalAtDestination(timetable.GetDownstreamArrivals(arrival, alightAt), walks) is { } eta)
@@ -1040,13 +1047,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                     stop.StopName,
                     stop.AllRoutes ? "All routes" : stop.Description,
                     new GeoPoint(stop.Lat, stop.Lon),
-                    [.. snapshot.For(stop).Take(ArrivalsPerStop)
-                        .Select(a => new ArrivalItem(
-                            a,
+                    [.. RouteArrivals.ByRoute(snapshot.For(stop), tracked, a => a.Status != ArrivalStatus.Canceled, RoutesPerStop, TimesPerRoute)
+                        .Select(r => new ArrivalItem(
+                            r.Next,
                             new GeoPoint(stop.Lat, stop.Lon),
-                            RouteColor(a.RouteId, stop.RouteId, stop.RouteColor),
+                            RouteColor(r.Next.RouteId, stop.RouteId, stop.RouteColor),
                             now,
-                            tracking: TrackingFor(a, tracked)))],
+                            r.Later,
+                            tracked))],
                     emptyText))];
             if (saved.Count == 0)
             {
@@ -1149,8 +1157,35 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _lastMinutes.Remove(gone);
         }
 
+        foreach (string gone in _stripOffsets.Keys.Where(k => !listed.Contains(k)).ToList())
+        {
+            _stripOffsets.Remove(gone);
+        }
+
+        // New items empty the list for a moment, which scrolls it to the top; put it back where the rider left it.
+        double offset = _keepListScroll ? ListScroller.VerticalOffset : 0;
+        _keepListScroll = true;
         _entranceStep = 0;
         StopsList.ItemsSource = groups;
+        ListScroller.UpdateLayout();
+        ListScroller.ChangeView(null, offset, null, disableAnimation: true);
+    }
+
+    /// <summary>A rebuilt row's time strip picks up where the old one was scrolled to.</summary>
+    private void TimeStrip_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ScrollViewer { DataContext: ArrivalItem item } strip && _stripOffsets.TryGetValue(item.Key, out double offset))
+        {
+            strip.ChangeView(offset, null, null, disableAnimation: true);
+        }
+    }
+
+    private void TimeStrip_ViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (sender is ScrollViewer { DataContext: ArrivalItem item } strip && !e.IsIntermediate)
+        {
+            _stripOffsets[item.Key] = strip.HorizontalOffset;
+        }
     }
 
     /// <summary>Says where the Commute tab thinks the rider is going, and from where.</summary>
@@ -1200,19 +1235,25 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         // Only a list from the rider's real location can flag buses they can't walk to in time.
         bool checkWalk = _mode == FlyoutMode.Nearby || (commute && _commuteLeg is { IsGuess: false });
-        List<ArrivalItem> arrivals = [.. _placeArrivals
-            .Where(a => a.StopId == stop.Id && Listed(a.RouteId, a.DirectionId))
-            .Take(ArrivalsPerNearbyStop)
-            .Select(a =>
+        bool TooSoon(Arrival a) => checkWalk && a.Status != ArrivalStatus.Canceled && a.MinutesAway(now) < walkMinutes;
+        List<ArrivalItem> arrivals = [.. RouteArrivals.ByRoute(
+                _placeArrivals.Where(a => a.StopId == stop.Id && Listed(a.RouteId, a.DirectionId)),
+                tracked,
+                a => a.Status != ArrivalStatus.Canceled && !TooSoon(a),
+                RoutesPerNearbyStop,
+                TimesPerRoute)
+            .Select(row =>
             {
-                bool tooSoon = checkWalk && a.Status != ArrivalStatus.Canceled && a.MinutesAway(now) < walkMinutes;
+                Arrival a = row.Next;
+                bool tooSoon = TooSoon(a);
                 return new ArrivalItem(
                     a,
                     stop.Location,
                     RouteColor(a.RouteId, null, stop.Routes.FirstOrDefault(r => string.Equals(r.RouteId, a.RouteId, StringComparison.OrdinalIgnoreCase))?.RouteColor),
                     now,
+                    row.Later,
+                    tracked,
                     tooSoonToWalk: tooSoon,
-                    tracking: TrackingFor(a, tracked),
                     destinationName: commute ? _commuteLeg?.To.Name : null,
                     destinationEta: !tooSoon && _destinationEtas.TryGetValue(a, out DateTimeOffset eta) ? eta : null);
             })];
@@ -1223,11 +1264,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// <summary>BusTime's "NORTH" as "North".</summary>
     private static string FormatDirection(string direction) =>
         CultureInfo.CurrentCulture.TextInfo.ToTitleCase(direction.Trim().ToLower(CultureInfo.CurrentCulture));
-
-    private static ArrivalTracking TrackingFor(Arrival arrival, Arrival? tracked) =>
-        arrival == tracked ? ArrivalTracking.Tracked
-        : arrival.Status == ArrivalStatus.Canceled ? ArrivalTracking.Unavailable
-        : ArrivalTracking.Available;
 
     private static string FormatDistance(double meters)
     {
@@ -1676,7 +1712,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void Bell_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { DataContext: ArrivalItem item } bell || !ConsumePendingPop(item.Key))
+        if (sender is not FrameworkElement { DataContext: BusTimeItem item } bell || !ConsumePendingPop(item.Key))
         {
             return;
         }
@@ -1713,42 +1749,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         return true;
     }
 
-    // ---- List interactions ----
-
-    private void ArrivalButton_Click(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not ArrivalItem item)
-        {
-            return;
-        }
-
-        SelectVehicle(item.Arrival.VehicleId);
-        List<GeoPoint> points = [item.StopLocation];
-        if (item.Arrival.VehicleId is { } vid && _vehicles.TryGetValue(vid, out Vehicle? vehicle))
-        {
-            points.Add(vehicle.Location);
-        }
-
-        _ = MapHelpers.FrameAsync(Map, points, MapAnimationKind.Default);
-    }
-
-    /// <summary>The bell: starts tracking mode for this bus (replacing any other), or stops it.</summary>
-    private void TrackButton_Click(object sender, RoutedEventArgs e)
-    {
-        if ((sender as FrameworkElement)?.DataContext is not ArrivalItem item)
-        {
-            return;
-        }
-
-        if (item.IsTracked)
-        {
-            RequestPop(item.Key);
-            _tracker.Stop();
-            ShowMapCaption($"Stopped tracking route {item.RouteLabel}.");
-            return;
-        }
-
-        StartTracking(item);
     // ---- Map/list splitter ----
 
     private void Splitter_DragDelta(object sender, DragDeltaEventArgs e) => ResizeMap(MapRow.Height.Value + e.VerticalChange);
@@ -1784,30 +1784,67 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         MapRow.Height = new GridLength(Math.Clamp(height, MinMapHeight, max));
     }
 
+    // ---- List interactions ----
+
+    private void ArrivalButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ArrivalItem item)
+        {
+            return;
+        }
+
+        SelectVehicle(item.Arrival.VehicleId);
+        List<GeoPoint> points = [item.StopLocation];
+        if (item.Arrival.VehicleId is { } vid && _vehicles.TryGetValue(vid, out Vehicle? vehicle))
+        {
+            points.Add(vehicle.Location);
+        }
+
+        _ = MapHelpers.FrameAsync(Map, points, MapAnimationKind.Default);
     }
 
-    private void StartTracking(ArrivalItem item)
+    /// <summary>A time chip: starts tracking mode for that bus (replacing any other), or stops it.</summary>
+    private void TrackButton_Click(object sender, RoutedEventArgs e)
     {
-        string stopName = _groups.FirstOrDefault(g => g.Arrivals.Contains(item))?.Title ?? string.Empty;
+        if ((sender as FrameworkElement)?.DataContext is not BusTimeItem item)
+        {
+            return;
+        }
+
+        if (item.IsTracked)
+        {
+            RequestPop(item.Key);
+            _tracker.Stop();
+            ShowMapCaption($"Stopped tracking the {item.ClockText} route {item.RouteLabel} bus.");
+            return;
+        }
+
+        StartTracking(item);
+    }
+
+    private void StartTracking(BusTimeItem item)
+    {
+        string stopName = _groups.FirstOrDefault(g => g.Arrivals.Any(a => a.Times.Contains(item)))?.Title ?? string.Empty;
         RequestPop(item.Key);
         _tracker.Start(item.Arrival, stopName);
         int lead = SettingsService.HeadOutMinutes;
+        string bus = $"the {item.ClockText} route {item.RouteLabel} bus";
         ShowMapCaption(item.Arrival.MinutesAway(DateTimeOffset.Now) <= lead
-            ? $"Tracking route {item.RouteLabel}. It's under {lead} min away, so head out now."
+            ? $"Tracking {bus}. It's under {lead} min away, so head out now."
             : item.Arrival.IsRealTime
-                ? $"Tracking route {item.RouteLabel}. You'll be notified {lead} min before it arrives."
-                : $"Tracking route {item.RouteLabel}. It's scheduled, so we'll look for live data as it gets close and notify you {lead} min before it arrives.");
+                ? $"Tracking {bus}. You'll be notified {lead} min before it arrives."
+                : $"Tracking {bus}. It's scheduled, so we'll look for live data as it gets close and notify you {lead} min before it arrives.");
     }
 
     private static readonly int[] LeadChoices = [1, 2, 3, 5, 10, 15, 20, 30];
 
-    /// <summary>Right-click on the bell: lists how far ahead to notify, with the current choice checked.</summary>
+    /// <summary>Right-click on a time chip: lists how far ahead to notify, with the current choice checked.</summary>
     private void TrackButton_ContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
         args.Handled = true;
         MenuFlyout menu = new();
         int current = SettingsService.HeadOutMinutes;
-        ArrivalItem? arrival = (sender as FrameworkElement)?.DataContext as ArrivalItem;
+        BusTimeItem? arrival = (sender as FrameworkElement)?.DataContext as BusTimeItem;
         foreach (int minutes in LeadChoices)
         {
             RadioMenuFlyoutItem item = new()

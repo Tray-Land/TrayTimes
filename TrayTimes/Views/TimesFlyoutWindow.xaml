@@ -36,15 +36,52 @@
                     Duration="0:0:0.3" />
             </Storyboard>
 
+            <!--  One bus in a route's strip of times: its minutes and clock time, with a bell to track it  -->
+            <DataTemplate
+                x:Key="BusTimeTemplate"
+                x:DataType="views:BusTimeItem"
+                x:DefaultBindMode="OneTime">
+                <Button
+                    MinHeight="30"
+                    Padding="10,3"
+                    AutomationProperties.Name="{x:Bind TrackLabel}"
+                    Click="TrackButton_Click"
+                    ContextRequested="TrackButton_ContextRequested"
+                    CornerRadius="15"
+                    IsEnabled="{x:Bind CanTrack}"
+                    Opacity="{x:Bind ChipOpacity}"
+                    ToolTipService.ToolTip="{x:Bind TrackLabel}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Grid VerticalAlignment="Center" Loaded="Bell_Loaded">
+                            <FontIcon
+                                FontSize="12"
+                                Glyph="&#xEA8F;"
+                                Visibility="{x:Bind TrackOutlineVisibility}" />
+                            <!--  Tracked: solid gold bell emoji  -->
+                            <FontIcon
+                                FontFamily="Segoe UI Emoji"
+                                FontSize="12"
+                                Glyph="&#x1F514;"
+                                Visibility="{x:Bind TrackedBellVisibility}" />
+                        </Grid>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="{x:Bind MinutesText}" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ClockText}" />
+                    </StackPanel>
+                </Button>
+            </DataTemplate>
+
             <DataTemplate
                 x:Key="ArrivalTemplate"
                 x:DataType="views:ArrivalItem"
                 x:DefaultBindMode="OneTime">
-                <Grid ColumnSpacing="2" Loaded="ArrivalRow_Loaded">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
+                <StackPanel Loaded="ArrivalRow_Loaded">
                     <Button
                         AutomationProperties.Name="{x:Bind AutomationName}"
                         Click="ArrivalButton_Click"
@@ -78,17 +115,34 @@
                                     Text="{x:Bind Destination}"
                                     TextTrimming="CharacterEllipsis"
                                     TextWrapping="NoWrap" />
-                                <TextBlock
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind DetailText}"
-                                    TextTrimming="CharacterEllipsis" />
-                                <TextBlock
-                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                    Style="{StaticResource CaptionTextBlockStyle}"
-                                    Text="{x:Bind TripEtaText}"
-                                    TextTrimming="CharacterEllipsis"
-                                    Visibility="{x:Bind TripEtaVisibility}" />
+                                <!--  When the bus comes | when it gets the rider where they're going  -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind DetailText}"
+                                        TextTrimming="CharacterEllipsis" />
+                                    <TextBlock
+                                        Grid.Column="1"
+                                        Margin="8,0"
+                                        AutomationProperties.AccessibilityView="Raw"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="|"
+                                        Visibility="{x:Bind TripEtaVisibility}" />
+                                    <TextBlock
+                                        Grid.Column="2"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Text="{x:Bind TripEtaText}"
+                                        TextTrimming="CharacterEllipsis"
+                                        Visibility="{x:Bind TripEtaVisibility}" />
+                                </Grid>
                             </StackPanel>
 
                             <StackPanel
@@ -111,30 +165,30 @@
                             </StackPanel>
                         </Grid>
                     </Button>
-                    <!--  Tracking mode: follow this bus and alert when it's time to head out  -->
-                    <Button
-                        Grid.Column="1"
-                        VerticalAlignment="Center"
-                        AutomationProperties.Name="{x:Bind TrackLabel}"
-                        Click="TrackButton_Click"
-                        ContextRequested="TrackButton_ContextRequested"
-                        Style="{StaticResource ToolbarButtonStyle}"
-                        ToolTipService.ToolTip="{x:Bind TrackLabel}"
-                        Visibility="{x:Bind TrackVisibility}">
-                        <Grid Loaded="Bell_Loaded">
-                            <FontIcon
-                                FontSize="16"
-                                Glyph="{x:Bind TrackGlyph}"
-                                Visibility="{x:Bind TrackOutlineVisibility}" />
-                            <!--  Tracked: solid gold bell emoji  -->
-                            <FontIcon
-                                FontFamily="Segoe UI Emoji"
-                                FontSize="16"
-                                Glyph="&#x1F514;"
-                                Visibility="{x:Bind TrackedBellVisibility}" />
-                        </Grid>
-                    </Button>
-                </Grid>
+
+                    <!--  This route's upcoming buses; each chip's bell tracks that bus and alerts when it's time to head out  -->
+                    <ScrollViewer
+                        Margin="64,0,8,2"
+                        AutomationProperties.Name="{x:Bind TimesAutomationName}"
+                        HorizontalScrollBarVisibility="Auto"
+                        HorizontalScrollMode="Enabled"
+                        Loaded="TimeStrip_Loaded"
+                        VerticalScrollBarVisibility="Disabled"
+                        VerticalScrollMode="Disabled"
+                        ViewChanged="TimeStrip_ViewChanged">
+                        <!--  Bottom margin leaves room for the overlay scroll bar under the chips  -->
+                        <ItemsControl
+                            Margin="0,0,0,6"
+                            ItemTemplate="{StaticResource BusTimeTemplate}"
+                            ItemsSource="{x:Bind Times}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="6" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </StackPanel>
             </DataTemplate>
 
             <DataTemplate
@@ -338,6 +392,37 @@
             </Border>
         </Grid>
 
+        <!--  Drag (or focus and press Up/Down) to trade map space for list space  -->
+        <views:ResizeCursorGrid Grid.Row="4">
+            <Thumb
+                x:Name="Splitter"
+                AutomationProperties.AutomationId="MapSplitter"
+                AutomationProperties.Name="Resize the map"
+                DoubleTapped="Splitter_DoubleTapped"
+                DragCompleted="Splitter_DragCompleted"
+                DragDelta="Splitter_DragDelta"
+                IsTabStop="True"
+                KeyDown="Splitter_KeyDown"
+                ToolTipService.ToolTip="Drag to resize the map. Double-click to reset."
+                UseSystemFocusVisuals="True">
+                <Thumb.Template>
+                    <ControlTemplate TargetType="Thumb">
+                        <!--  A transparent band keeps the grab area bigger than the grip it shows  -->
+                        <Grid Height="12" Background="Transparent">
+                            <Rectangle
+                                Width="36"
+                                Height="4"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Fill="{ThemeResource ControlStrongFillColorDefaultBrush}"
+                                RadiusX="2"
+                                RadiusY="2" />
+                        </Grid>
+                    </ControlTemplate>
+                </Thumb.Template>
+            </Thumb>
+        </views:ResizeCursorGrid>
+
         <!--  Arrivals  -->
         <Grid x:Name="ArrivalsPane" Grid.Row="5">
             <Grid.RowDefinitions>
@@ -392,44 +477,16 @@
 
             <InfoBar
                 x:Name="StatusBar"
-        <!--  Drag (or focus and press Up/Down) to trade map space for list space  -->
-        <views:ResizeCursorGrid Grid.Row="4">
-            <Thumb
-                x:Name="Splitter"
-                AutomationProperties.AutomationId="MapSplitter"
-                AutomationProperties.Name="Resize the map"
-                DoubleTapped="Splitter_DoubleTapped"
-                DragCompleted="Splitter_DragCompleted"
-                DragDelta="Splitter_DragDelta"
-                IsTabStop="True"
-                KeyDown="Splitter_KeyDown"
-                ToolTipService.ToolTip="Drag to resize the map. Double-click to reset."
-                UseSystemFocusVisuals="True">
-                <Thumb.Template>
-                    <ControlTemplate TargetType="Thumb">
-                        <!--  A transparent band keeps the grab area bigger than the grip it shows  -->
-                        <Grid Height="12" Background="Transparent">
-                            <Rectangle
-                                Width="36"
-                                Height="4"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                Fill="{ThemeResource ControlStrongFillColorDefaultBrush}"
-                                RadiusX="2"
-                                RadiusY="2" />
-                        </Grid>
-                    </ControlTemplate>
-                </Thumb.Template>
-            </Thumb>
-        </views:ResizeCursorGrid>
-
                 Grid.Row="1"
                 Margin="8,8,8,0"
                 IsClosable="False"
                 IsOpen="False"
                 Severity="Warning" />
 
-            <ScrollViewer Grid.Row="2" Padding="6,8,6,4">
+            <ScrollViewer
+                x:Name="ListScroller"
+                Grid.Row="2"
+                Padding="6,8,6,4">
                 <ItemsControl x:Name="StopsList" ItemTemplate="{StaticResource StopGroupTemplate}" />
             </ScrollViewer>
 

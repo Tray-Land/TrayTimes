@@ -57,30 +57,74 @@ public sealed class StopGroupItem(
     public string Signature => $"{GroupKey}|{Title}|{Subtitle}|{IsSaved}|{EmptyText}|{string.Join(';', Arrivals.Select(a => a.Signature))}";
 }
 
-/// <summary>Whether an arrival row offers the bell that starts tracking mode.</summary>
-public enum ArrivalTracking
+/// <summary>
+/// One bus in a route row's strip of times: a chip with its own bell, so any upcoming bus (not
+/// just the next one) can be tracked.
+/// </summary>
+public sealed class BusTimeItem
 {
-    Unavailable,
-    Available,
-    Tracked,
+    public BusTimeItem(Arrival arrival, DateTimeOffset now, Arrival? tracked)
+    {
+        Arrival = arrival;
+        IsTracked = arrival == tracked;
+        int minutes = arrival.MinutesAway(now);
+        MinutesText = minutes == 0 ? "Due" : $"{minutes} min";
+        ClockText = arrival.PredictedTime.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
+        string kind = arrival.IsRealTime ? string.Empty : ", scheduled";
+        TrackLabel = !CanTrack ? $"Route {RouteLabel} at {ClockText}{kind}, canceled"
+            : IsTracked ? $"Stop tracking the {ClockText} route {RouteLabel} bus"
+            : $"Track the {ClockText} route {RouteLabel} bus{kind}, in {MinutesText}, and notify me when it's time to leave";
+    }
+
+    public Arrival Arrival { get; }
+
+    public string RouteLabel => Arrival.RouteDisplayId;
+
+    /// <summary>"12 min", or "Due".</summary>
+    public string MinutesText { get; }
+
+    public string ClockText { get; }
+
+    public bool IsTracked { get; }
+
+    public bool CanTrack => Arrival.Status != ArrivalStatus.Canceled;
+
+    /// <summary>Scheduled-only times are dimmed a little to set them apart from predictions.</summary>
+    public double ChipOpacity => Arrival.IsRealTime ? 1 : 0.8;
+
+    public string TrackLabel { get; }
+
+    public Visibility TrackOutlineVisibility => IsTracked ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility TrackedBellVisibility => IsTracked ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Identifies this bus at this stop across list rebuilds (a trip keeps its vehicle; a scheduled time has none yet).</summary>
+    public string Key => $"{Arrival.StopId}|{Arrival.RouteId}|{Arrival.DirectionId}|{Arrival.VehicleId ?? $"t{Arrival.PredictedTime.ToUnixTimeSeconds() / 60}"}";
+
+    public string Signature => $"{Key}|{MinutesText}|{ClockText}|{IsTracked}|{CanTrack}|{ChipOpacity}";
 }
 
-/// <summary>One arrival row: a prediction, or a scheduled time with no prediction yet.</summary>
+/// <summary>One route's row: its next bus (a prediction, or a scheduled time with no prediction yet), then a strip of its upcoming times.</summary>
 public sealed class ArrivalItem
 {
+    /// <param name="later">The same route's buses after <paramref name="arrival"/>, soonest first.</param>
+    /// <param name="tracked">The bus in tracking mode, if any, whose chip shows a gold bell.</param>
     /// <param name="destinationName">Where the rider is headed, with <paramref name="destinationEta"/> when they'd get there on this bus.</param>
     public ArrivalItem(
         Arrival arrival,
         GeoPoint stopLocation,
         Color routeColor,
         DateTimeOffset now,
+        IReadOnlyList<Arrival>? later = null,
+        Arrival? tracked = null,
         bool tooSoonToWalk = false,
-        ArrivalTracking tracking = ArrivalTracking.Unavailable,
         string? destinationName = null,
         DateTimeOffset? destinationEta = null)
     {
         Arrival = arrival;
-        Tracking = tracking;
+
+        // Canceled buses after the next one aren't coming, so they're left out of the strip.
+        Times = [new BusTimeItem(arrival, now, tracked), .. (later ?? []).Where(a => a.Status != ArrivalStatus.Canceled).Select(a => new BusTimeItem(a, now, tracked))];
         StopLocation = stopLocation;
         RouteBackground = new SolidColorBrush(routeColor);
         RouteForeground = new SolidColorBrush(MapHelpers.ContrastingText(routeColor));
@@ -115,8 +159,14 @@ public sealed class ArrivalItem
 
         string when = minutes == 0 ? "due now" : $"in {minutes} minutes";
         string trip = TripEtaText.Length > 0 ? $" {TripEtaText}." : string.Empty;
-        AutomationName = $"Route {RouteLabel} to {Destination}, {when}. {DetailText}.{trip}";
+        AutomationName = $"Route {RouteLabel} to {Destination}, {when}. {DetailText}.{trip} Show on map";
+        TimesAutomationName = $"Upcoming route {RouteLabel} buses";
     }
+
+    /// <summary>The chips under the row: this bus, then the route's later ones at the same stop.</summary>
+    public IReadOnlyList<BusTimeItem> Times { get; }
+
+    public string TimesAutomationName { get; }
 
     /// <summary>When the rider would reach where they're headed on this bus, e.g. "Home by 5:42 PM"; empty if unknown.</summary>
     public string TripEtaText { get; } = string.Empty;
@@ -148,25 +198,12 @@ public sealed class ArrivalItem
 
     public string AutomationName { get; }
 
-    /// <summary>Identifies this bus at this stop across list rebuilds (a trip keeps its vehicle; a scheduled time has none yet).</summary>
-    public string Key => $"{Arrival.StopId}|{Arrival.RouteId}|{Arrival.DirectionId}|{Arrival.VehicleId ?? $"t{Arrival.PredictedTime.ToUnixTimeSeconds() / 60}"}";
+    /// <summary>
+    /// Identifies this route's row at this stop across list rebuilds; it lists one row per route and
+    /// direction, so the row stays put (and its minutes pop) as one bus leaves and the next takes the lead.
+    /// </summary>
+    public string Key => $"{Arrival.StopId}|{Arrival.RouteId.ToUpperInvariant()}|{Arrival.DirectionId.ToUpperInvariant()}";
 
     /// <summary>Everything the row shows; equal signatures mean the row needn't be rebuilt.</summary>
-    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{TripEtaText}|{Tracking}|{RowOpacity}";
-
-    public ArrivalTracking Tracking { get; }
-
-    public bool IsTracked => Tracking == ArrivalTracking.Tracked;
-
-    public Visibility TrackVisibility => Tracking == ArrivalTracking.Unavailable ? Visibility.Collapsed : Visibility.Visible;
-
-    public string TrackGlyph => ""; // Ringer (outline bell), shown while not tracked
-
-    public Visibility TrackOutlineVisibility => IsTracked ? Visibility.Collapsed : Visibility.Visible;
-
-    public Visibility TrackedBellVisibility => IsTracked ? Visibility.Visible : Visibility.Collapsed;
-
-    public string TrackLabel => IsTracked
-        ? $"Stop tracking route {RouteLabel}"
-        : $"Track route {RouteLabel} and notify me when it's time to leave";
+    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{TripEtaText}|{RowOpacity}|{string.Join(';', Times.Select(t => t.Signature))}";
 }
