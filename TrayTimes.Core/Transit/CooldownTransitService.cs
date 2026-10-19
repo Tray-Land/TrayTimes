@@ -72,7 +72,13 @@ public sealed class CooldownTransitService : ITransitService
         RunAsync(TransitEndpoint.NearbyRoutes, 1, () => _inner.GetNearbyLinesAsync(point, radiusMeters, cancellationToken), cancellationToken);
 
     public Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Plan, 1, () => _inner.PlanTripAsync(from, to, cancellationToken), cancellationToken);
+        PlanTripAsync(from, new TripDestination(to), cancellationToken);
+
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default) =>
+        PlanTripAsync(from, to, default, cancellationToken);
+
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, TripTime time, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.Plan, 1, () => _inner.PlanTripAsync(from, to, time, cancellationToken), cancellationToken);
 
     public Task<IReadOnlyList<TransitStop>> SearchStopsAsync(GeoPoint near, string query, CancellationToken cancellationToken = default) =>
         RunAsync(TransitEndpoint.SearchStops, 1, () => _inner.SearchStopsAsync(near, query, cancellationToken), cancellationToken);

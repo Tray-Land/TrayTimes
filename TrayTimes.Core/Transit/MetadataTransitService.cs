@@ -41,7 +41,7 @@ public sealed class MetadataTransitService : ITransitService
     private readonly MetadataCache<GeoPoint, IReadOnlyList<TransitRoute>> _areaRoutes;
     private readonly MetadataCache<string, RouteDetails> _routeDetails;
     private readonly MetadataCache<(GeoPoint Point, int Radius), NearbyLines> _nearby;
-    private readonly MetadataCache<(GeoPoint From, GeoPoint To), TripPlan> _plans;
+    private readonly MetadataCache<(GeoPoint From, TripDestination To, TripTime Time), TripPlan> _plans;
     private readonly MetadataCache<(GeoPoint Near, string Query), IReadOnlyList<TransitStop>> _searches;
     private readonly ReplanGuard _replans;
     private readonly Lock _shapeGate = new();
@@ -117,7 +117,13 @@ public sealed class MetadataTransitService : ITransitService
     }
 
     public Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default) =>
-        _plans.GetAsync(PlanKey(from, to), LoadPlan(from, to), cancellationToken);
+        PlanTripAsync(from, new TripDestination(to), cancellationToken);
+
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default) =>
+        PlanTripAsync(from, to, default, cancellationToken);
+
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, TripTime time, CancellationToken cancellationToken = default) =>
+        _plans.GetAsync(PlanKey(from, to, time), LoadPlan(from, to, time), cancellationToken);
 
     /// <summary>
     /// Plans a trip again in place of its cached plan, for when that plan's trips can no longer be made
@@ -126,9 +132,12 @@ public sealed class MetadataTransitService : ITransitService
     /// doesn't need this: <see cref="PlanTripAsync"/> plans it again.
     /// </summary>
     public Task<TripPlan> ReplanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default)
+        => ReplanTripAsync(from, new TripDestination(to), cancellationToken);
+
+    public Task<TripPlan> ReplanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default)
     {
-        (GeoPoint, GeoPoint) key = PlanKey(from, to);
-        if (_replans.TryAcquire(from, to))
+        var key = PlanKey(from, to);
+        if (_replans.TryAcquire(from, to.Location))
         {
             _plans.Forget(key);
         }
@@ -142,7 +151,23 @@ public sealed class MetadataTransitService : ITransitService
     /// or the trip was planned again). Never starts a request.
     /// </summary>
     public bool IsCurrentPlan(GeoPoint from, GeoPoint to, TripPlan plan) =>
-        _plans.TryGetFresh(PlanKey(from, to), out TripPlan? cached) && ReferenceEquals(cached, plan);
+        IsCurrentPlan(from, new TripDestination(to), plan);
+
+    public bool IsCurrentPlan(GeoPoint from, TripDestination to, TripPlan plan) =>
+        IsCurrentPlan(from, to, default, plan);
+
+    public bool IsCurrentPlan(GeoPoint from, TripDestination to, TripTime time, TripPlan plan) =>
+        _plans.TryGetFresh(PlanKey(from, to, time), out TripPlan? cached) && ReferenceEquals(cached, plan);
+
+    /// <summary>Retains a searched destination's fresh plan after explicit Save as place, without a new request.</summary>
+    public void SaveDestinationPlan(GeoPoint from, TripDestination to)
+    {
+        foreach (var entry in _plans.Completed().Where(e => e.Key == PlanKey(from, to with { Persist = false }, e.Key.Time)))
+        {
+            _plans.Seed((entry.Key.From, entry.Key.To with { Persist = true }, entry.Key.Time), entry.Value, _time.GetUtcNow() - entry.FetchedAt);
+            Changed?.Invoke(this, EventArgs.Empty);
+        }
+    }
 
     public Task<IReadOnlyList<TransitStop>> SearchStopsAsync(GeoPoint near, string query, CancellationToken cancellationToken = default)
     {
@@ -197,7 +222,8 @@ public sealed class MetadataTransitService : ITransitService
             [.. _areaRoutes.Completed().Select(e => new CachedAreaRoutes(e.Key, e.FetchedAt, e.Value))],
             [.. _routeDetails.Completed().Select(e => new CachedRouteDetails(e.FetchedAt, e.Value.Route, e.Value.Itineraries))],
             [.. _nearby.Completed().Select(e => new CachedNearbyLines(e.Key.Point, e.Key.Radius, e.FetchedAt, e.Value.Lines))],
-            [.. _plans.Completed().Select(e => new CachedTripPlan(e.Key.From, e.Key.To, e.FetchedAt, e.Value.Itineraries))],
+            [.. _plans.Completed().Where(e => e.Key.To.Persist)
+                .Select(e => new CachedTripPlan(e.Key.From, e.Key.To.Location, e.FetchedAt, e.Value.Itineraries, e.Key.To.StopId, e.Key.Time))],
             shapes,
             coverage);
     }
@@ -239,7 +265,7 @@ public sealed class MetadataTransitService : ITransitService
         {
             if (entry?.Itineraries is { } itineraries && itineraries.All(IsValid))
             {
-                _plans.Seed((entry.From, entry.To), new TripPlan(itineraries, []), now - entry.FetchedAt);
+                _plans.Seed((entry.From, new TripDestination(entry.To, entry.DestinationStopId), entry.Time), new TripPlan(itineraries, []), now - entry.FetchedAt);
             }
         }
 
@@ -310,11 +336,13 @@ public sealed class MetadataTransitService : ITransitService
         && line.Departures is { Count: > 0 } departures && departures.All(d => d is not null && d.Alights >= d.Departs);
 
     /// <summary>The cached or pending plan's key for about the same origin and destination, else this trip's own.</summary>
-    private (GeoPoint From, GeoPoint To) PlanKey(GeoPoint from, GeoPoint to) =>
-        _plans.Nearest(k => Within(k.To, to, SameDestinationMeters) is not null ? Within(k.From, from, SamePlaceMeters) : null, (from, to));
+    private (GeoPoint From, TripDestination To, TripTime Time) PlanKey(GeoPoint from, TripDestination to, TripTime time = default) =>
+        _plans.Nearest(k => k.Time == time && k.To.StopId == to.StopId && k.To.Persist == to.Persist
+            && Within(k.To.Location, to.Location, SameDestinationMeters) is not null
+                ? Within(k.From, from, SamePlaceMeters) : null, (from, to, time));
 
-    private Func<CancellationToken, Task<TripPlan>> LoadPlan(GeoPoint from, GeoPoint to) =>
-        token => WithShapesAsync(_inner.PlanTripAsync(from, to, token), r => r.Shapes);
+    private Func<CancellationToken, Task<TripPlan>> LoadPlan(GeoPoint from, TripDestination to, TripTime time = default) =>
+        token => WithShapesAsync(_inner.PlanTripAsync(from, to, time, token), r => r.Shapes);
 
     private bool IsCovered(string stopId)
     {

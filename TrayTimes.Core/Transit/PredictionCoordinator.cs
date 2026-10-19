@@ -46,7 +46,7 @@ public sealed class PredictionCoordinator
     /// <summary>Register known visible stops, or an empty set on hide/invalidation. Does no HTTP work.</summary>
     public void SetBrowsingStops(TransitConsumer consumer, IReadOnlyCollection<string> stopIds)
     {
-        if (consumer is not (TransitConsumer.Favorites or TransitConsumer.Commute or TransitConsumer.Nearby))
+        if (consumer is not (TransitConsumer.Favorites or TransitConsumer.Commute or TransitConsumer.Nearby or TransitConsumer.Trip))
         {
             throw new ArgumentOutOfRangeException(nameof(consumer));
         }

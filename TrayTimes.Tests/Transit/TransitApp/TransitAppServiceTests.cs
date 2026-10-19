@@ -182,6 +182,45 @@ public sealed class TransitAppServiceTests
     }
 
     [TestMethod]
+    public async Task PlanTripAsync_StopDestination_UsesTheStopIdInsteadOfDestinationCoordinates()
+    {
+        // Arrange
+        RequestTestHandler handler = new();
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        await service.PlanTripAsync(new GeoPoint(43, -88), new TripDestination(new GeoPoint(43.1, -88), "S:42&test", Persist: false));
+
+        // Assert
+        HttpRequestMessage request = handler.Requests.Single();
+        Assert.AreEqual("S%3A42%26test", request.RequestUri!.Query.Split("to_global_stop_ids=")[1].Split('&')[0]);
+        Assert.IsNull(RequestTestHandler.Query(request, "to_lat"));
+        Assert.IsNull(RequestTestHandler.Query(request, "to_lon"));
+        Assert.AreEqual("43", RequestTestHandler.Query(request, "from_lat"));
+    }
+
+    [TestMethod]
+    [DataRow(TripTimeMode.LeaveAt, "leave_time", "arrival_time")]
+    [DataRow(TripTimeMode.ArriveBy, "arrival_time", "leave_time")]
+    public async Task PlanTripAsync_TimedStopTrip_SendsOnlyItsRoundedConstraint(TripTimeMode mode, string expected, string absent)
+    {
+        // Arrange
+        RequestTestHandler handler = new();
+        TransitAppService service = handler.CreateService();
+        TripTime time = new(mode, new DateTimeOffset(2026, 10, 20, 9, 2, 0, TimeSpan.FromHours(-4)));
+
+        // Act
+        await service.PlanTripAsync(new GeoPoint(43, -88), new TripDestination(new GeoPoint(43.1, -88), "S:42"), time);
+
+        // Assert
+        HttpRequestMessage request = handler.Requests.Single();
+        Assert.AreEqual(time.At.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture), RequestTestHandler.Query(request, expected));
+        Assert.IsNull(RequestTestHandler.Query(request, absent));
+        Assert.AreEqual("S:42", RequestTestHandler.Query(request, "to_global_stop_ids"));
+        Assert.IsNull(RequestTestHandler.Query(request, "to_lat"));
+    }
+
+    [TestMethod]
     public async Task PlanTripAsync_Request_AsksForAWalkOnlyOptionAndRoutesAroundOutages()
     {
         // Arrange
@@ -199,6 +238,8 @@ public sealed class TransitAppServiceTests
         Assert.AreEqual("true", RequestTestHandler.Query(request, "should_update_realtime"));
         Assert.AreEqual("true", RequestTestHandler.Query(request, "walk_fallback"));
         Assert.AreEqual("true", RequestTestHandler.Query(request, "consider_downtimes"));
+        Assert.IsNull(RequestTestHandler.Query(request, "leave_time"));
+        Assert.IsNull(RequestTestHandler.Query(request, "arrival_time"));
     }
 
     [TestMethod]

@@ -4,13 +4,13 @@ namespace TrayTimes.Transit;
 
 public enum TransitEndpoint { Departures, NearbyRoutes, Plan, SearchStops, Networks, Routes, RouteDetails, Vehicles }
 
-public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings }
+public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings, Trip }
 
 public enum TransitTrigger
 {
     Unspecified, Timer, FlyoutOpened, CenterChanged, ManualRefresh, StopsChanged, PlacesChanged,
     DestinationChanged, RefinedLocation, Retry, FavoritesLoading, FavoritesResult,
-    PlaceResult, PlaceCompleted, Metadata, PickerSelection, VehicleSelected,
+    PlaceResult, PlaceCompleted, Metadata, PickerSelection, VehicleSelected, TripTimeChanged,
 }
 
 public enum TransitRequestPhase { Started, Completed, CacheReuse, InFlightReuse, Suppressed }
@@ -76,7 +76,8 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
         (TransitConsumer.Tracking, _) => TransitPriority.Urgent,
         (_, TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
             or TransitTrigger.CenterChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
-            or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection or TransitTrigger.VehicleSelected) => TransitPriority.Manual,
+            or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection or TransitTrigger.VehicleSelected
+            or TransitTrigger.TripTimeChanged) => TransitPriority.Manual,
         _ => TransitPriority.Automatic,
     };
 

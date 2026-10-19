@@ -143,14 +143,25 @@ public sealed class TransitAppService : ITransitService
         return new NearbyLines(lines, shapes);
     }
 
-    public async Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default)
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default) =>
+        PlanTripAsync(from, new TripDestination(to), cancellationToken);
+
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default) =>
+        PlanTripAsync(from, to, default, cancellationToken);
+
+    public async Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, TripTime time, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(to);
         PlanResponse response = await GetAsync(
             "public/plan", "plan", TransitEndpoint.Plan, 1, TransitAppJsonContext.Default.PlanResponse,
             [
                 ("from_lat", Format(from.Lat)), ("from_lon", Format(from.Lon)),
-                ("to_lat", Format(to.Lat)), ("to_lon", Format(to.Lon)),
+                .. to.StopId is { Length: > 0 } stopId
+                    ? new (string, string)[] { ("to_global_stop_ids", stopId) }
+                    : [("to_lat", Format(to.Location.Lat)), ("to_lon", Format(to.Location.Lon))],
                 ("mode", "transit"),
+                .. time.Mode == TripTimeMode.Now ? Array.Empty<(string, string)>()
+                    : [(time.Mode == TripTimeMode.LeaveAt ? "leave_time" : "arrival_time", time.At.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture))],
                 ("num_result", TripOptions.ToString(CultureInfo.InvariantCulture)),
                 ("max_num_departures", "3"),
                 ("should_update_realtime", "true"),

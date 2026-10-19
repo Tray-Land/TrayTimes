@@ -14,7 +14,8 @@ public sealed record CachedRouteDetails(DateTimeOffset FetchedAt, TransitRoute R
 public sealed record CachedNearbyLines(GeoPoint Point, int RadiusMeters, DateTimeOffset FetchedAt, IReadOnlyList<NearbyLine> Lines);
 
 /// <param name="Itineraries">Null in a plan saved by a build that kept only each trip's first ride; such plans aren't reused.</param>
-public sealed record CachedTripPlan(GeoPoint From, GeoPoint To, DateTimeOffset FetchedAt, IReadOnlyList<TripItinerary>? Itineraries);
+public sealed record CachedTripPlan(GeoPoint From, GeoPoint To, DateTimeOffset FetchedAt, IReadOnlyList<TripItinerary>? Itineraries,
+    string? DestinationStopId = null, TripTime Time = default);
 
 public sealed record CachedShape(string Id, string RouteId, string DirectionId, string Polyline, DateTimeOffset FetchedAt);
 

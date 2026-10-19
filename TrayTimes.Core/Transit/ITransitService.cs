@@ -27,6 +27,11 @@ public interface ITransitService
     /// <summary>Ways to get from one point to another by transit, transfers included, leaving now.</summary>
     Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default);
 
+    Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default);
+
+    /// <summary>Ways to reach a destination leaving at, or arriving by, a specified time.</summary>
+    Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, TripTime time, CancellationToken cancellationToken = default);
+
     /// <summary>Stops near a point whose name or stop code matches <paramref name="query"/>, best match first.</summary>
     Task<IReadOnlyList<TransitStop>> SearchStopsAsync(GeoPoint near, string query, CancellationToken cancellationToken = default);
 

@@ -15,7 +15,7 @@ public enum PlaceKind
 /// A place the user goes, such as home or work. Home, Work, and School are single slots whose
 /// <see cref="Id"/> is the kind's name; custom places get a generated ID and a user-chosen name.
 /// </summary>
-public sealed record FavoritePlace(string Id, PlaceKind Kind, string Name, Place Place)
+public sealed record FavoritePlace(string Id, PlaceKind Kind, string Name, Place Place, string? StopId = null)
 {
     [JsonIgnore]
     public GeoPoint Location => new(Place.Lat, Place.Lon);

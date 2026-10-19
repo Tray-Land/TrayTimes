@@ -12,6 +12,177 @@ public sealed class MetadataTransitServiceTests
     private static readonly GeoPoint Work = new(43.1, -88.0);
 
     [TestMethod]
+    public async Task PlanTripAsync_RoundedTimesAndModes_ReuseOnlyTheSameTimeAndKeepLeaveNowCached()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripDestination destination = new(Work);
+        TripPlan live = await scenario.Metadata.PlanTripAsync(Home, destination);
+        DateTimeOffset at = RequestTestClock.Start.AddDays(1);
+        TripTime leave = new(TripTimeMode.LeaveAt, at.AddMinutes(1));
+
+        // Act
+        TripPlan future = await scenario.Metadata.PlanTripAsync(Home, destination, leave);
+        TripPlan rounded = await scenario.Metadata.PlanTripAsync(Home, destination, new TripTime(TripTimeMode.LeaveAt, at.AddMinutes(4)));
+        await scenario.Metadata.PlanTripAsync(Home, destination, new TripTime(TripTimeMode.LeaveAt, at.AddMinutes(6)));
+        await scenario.Metadata.PlanTripAsync(Home, destination, new TripTime(TripTimeMode.ArriveBy, leave.At));
+        TripPlan now = await scenario.Metadata.PlanTripAsync(Home, destination);
+
+        // Assert
+        Assert.AreSame(future, rounded);
+        Assert.AreSame(live, now);
+        Assert.AreEqual(4, scenario.Handler.Attempts);
+        Assert.IsTrue(scenario.Metadata.IsCurrentPlan(Home, destination, leave, future));
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, destination, future));
+    }
+
+    [TestMethod]
+    public async Task Import_TimedPlans_RoundTripsTimeWithoutCollidingWithLeaveNow()
+    {
+        // Arrange
+        Scenario first = new(), second = new();
+        TripDestination destination = new(Work, "S:42");
+        TripTime time = new(TripTimeMode.ArriveBy, RequestTestClock.Start.AddDays(1));
+        await first.Metadata.PlanTripAsync(Home, destination, time);
+        string json = JsonSerializer.Serialize(first.Metadata.Export(), TransitCacheJsonContext.Default.TransitCacheSnapshot);
+        second.Metadata.Import(JsonSerializer.Deserialize(json, TransitCacheJsonContext.Default.TransitCacheSnapshot));
+
+        // Act
+        TripPlan reused = await second.Metadata.PlanTripAsync(Home, destination, time);
+        int afterImport = second.Handler.Attempts;
+        await second.Metadata.PlanTripAsync(Home, destination);
+
+        // Assert
+        Assert.AreEqual(0, afterImport);
+        Assert.AreEqual(1, second.Handler.Attempts);
+        Assert.AreEqual(time, second.Metadata.Export().TripPlans.Single(p => p.Time.Mode == TripTimeMode.ArriveBy).Time);
+        Assert.IsTrue(second.Metadata.IsCurrentPlan(Home, destination, time, reused));
+    }
+
+    [TestMethod]
+    public async Task SaveDestinationPlan_TemporaryTimedPlans_PromotesEveryTimeWithoutExtendingAge()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripDestination temporary = new(Work, "S:searched", Persist: false);
+        TripTime time = new(TripTimeMode.LeaveAt, RequestTestClock.Start.AddDays(1));
+        TripPlan live = await scenario.Metadata.PlanTripAsync(Home, temporary);
+        TripPlan future = await scenario.Metadata.PlanTripAsync(Home, temporary, time);
+        Assert.IsEmpty(scenario.Metadata.Export().TripPlans);
+        scenario.Clock.Advance(TimeSpan.FromHours(2));
+
+        // Act
+        scenario.Metadata.SaveDestinationPlan(Home, temporary);
+        TripPlan saved = await scenario.Metadata.PlanTripAsync(Home, temporary with { Persist = true }, time);
+
+        // Assert
+        Assert.AreSame(future, saved);
+        Assert.AreEqual(2, scenario.Handler.Attempts);
+        Assert.HasCount(2, scenario.Metadata.Export().TripPlans);
+        Assert.IsTrue(scenario.Metadata.Export().TripPlans.All(p => p.FetchedAt == RequestTestClock.Start));
+        scenario.Clock.Advance(TimeSpan.FromHours(1));
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, temporary with { Persist = true }, time, future));
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, temporary with { Persist = true }, live));
+    }
+
+    [TestMethod]
+    public async Task Export_TemporaryDestination_ReusesInMemoryButNeverExportsItsPlan()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripDestination destination = new(Work, "S:searched", Persist: false);
+        TripPlan first = await scenario.Metadata.PlanTripAsync(Home, destination);
+
+        // Act
+        TripPlan reused = await scenario.Metadata.PlanTripAsync(Home, destination);
+        TransitCacheSnapshot snapshot = scenario.Metadata.Export();
+
+        // Assert
+        Assert.AreSame(first, reused);
+        Assert.IsTrue(scenario.Metadata.IsCurrentPlan(Home, destination, first));
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+        Assert.IsEmpty(snapshot.TripPlans);
+    }
+
+    [TestMethod]
+    public async Task PlanTripAsync_NearbyStopsAndCoordinates_DoNotShareDifferentDestinationKinds()
+    {
+        // Arrange
+        Scenario scenario = new();
+
+        // Act
+        await scenario.Metadata.PlanTripAsync(Home, Work);
+        await scenario.Metadata.PlanTripAsync(Home, new TripDestination(Work, "S:1"));
+        await scenario.Metadata.PlanTripAsync(Home, new TripDestination(Work, "S:2"));
+        await scenario.Metadata.PlanTripAsync(Home, new TripDestination(Work, "S:1"));
+
+        // Assert
+        Assert.AreEqual(3, scenario.Handler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task SaveDestinationPlan_ExplicitSave_PersistsSamePlanWithoutARequestOrExtendingLifetime()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripDestination temporary = new(Work, "S:searched", Persist: false);
+        TripPlan plan = await scenario.Metadata.PlanTripAsync(Home, temporary);
+        scenario.Clock.Advance(TimeSpan.FromHours(2));
+
+        // Act
+        scenario.Metadata.SaveDestinationPlan(Home, temporary);
+        TripPlan saved = await scenario.Metadata.PlanTripAsync(Home, temporary with { Persist = true });
+        TransitCacheSnapshot snapshot = scenario.Metadata.Export();
+        scenario.Clock.Advance(TimeSpan.FromHours(1));
+
+        // Assert
+        Assert.AreSame(plan, saved);
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+        Assert.AreEqual("S:searched", snapshot.TripPlans.Single().DestinationStopId);
+        Assert.AreEqual(RequestTestClock.Start, snapshot.TripPlans.Single().FetchedAt);
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, temporary with { Persist = true }, saved));
+    }
+
+    [TestMethod]
+    public async Task Import_SavedStopDestination_RoundTripsIdentityWithoutReusingItForCoordinates()
+    {
+        // Arrange
+        Scenario first = new();
+        TripDestination destination = new(Work, "S:42");
+        await first.Metadata.PlanTripAsync(Home, destination);
+        string json = JsonSerializer.Serialize(first.Metadata.Export(), TransitCacheJsonContext.Default.TransitCacheSnapshot);
+        Scenario second = new();
+        second.Metadata.Import(JsonSerializer.Deserialize(json, TransitCacheJsonContext.Default.TransitCacheSnapshot));
+
+        // Act
+        await second.Metadata.PlanTripAsync(Home, destination);
+        int stopRequests = second.Handler.Attempts;
+        await second.Metadata.PlanTripAsync(Home, Work);
+
+        // Assert
+        Assert.AreEqual(0, stopRequests);
+        Assert.AreEqual(1, second.Handler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task ReplanTripAsync_TemporaryStopDestination_StaysMemoryOnlyAndUsesTheGuard()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripDestination destination = new(Work, "S:42", Persist: false);
+        await scenario.Metadata.PlanTripAsync(Home, destination);
+
+        // Act
+        TripPlan replanned = await scenario.Metadata.ReplanTripAsync(Home, destination);
+        TripPlan held = await scenario.Metadata.ReplanTripAsync(Home, destination);
+
+        // Assert
+        Assert.AreSame(replanned, held);
+        Assert.AreEqual(2, scenario.Handler.Attempts);
+        Assert.IsEmpty(scenario.Metadata.Export().TripPlans);
+    }
+
+    [TestMethod]
     public async Task GetRouteDetailsAsync_ConcurrentAndLaterCallers_ShareOneRequest()
     {
         // Arrange
