@@ -202,7 +202,8 @@ public sealed partial class SettingsWindow : WindowEx
         {
             if (picker.Place is { } place)
             {
-                SettingsService.SavePlace(new FavoritePlace(id, PlaceKind.Custom, PlaceName(), place));
+                SettingsService.SavePlace(new FavoritePlace(id, PlaceKind.Custom, PlaceName(), place,
+                    StopId: place == existing?.Place ? existing?.StopId : null));
             }
             else
             {

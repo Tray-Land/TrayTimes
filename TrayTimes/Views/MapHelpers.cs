@@ -83,6 +83,15 @@ internal static class MapHelpers
         FontFamily = new FontFamily("Segoe UI Emoji"),
     };
 
+    public static FontIcon CreatePlaceIcon(PlaceKind? kind, double size) => CreateEmoji(kind switch
+    {
+        PlaceKind.Home => "🏠",
+        PlaceKind.Work => "💼",
+        PlaceKind.School => "🎓",
+        PlaceKind.Custom => "📌",
+        _ => "📍",
+    }, size);
+
     public static void UpdateVehicleArrow(MapIcon arrow, int heading, double mapHeading, bool selected, bool darkMap)
     {
         arrow.IsVisible = heading is >= 0 and < 360;

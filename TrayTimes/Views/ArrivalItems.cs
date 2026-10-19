@@ -63,24 +63,27 @@ public sealed class StopGroupItem(
 /// </summary>
 public sealed class BusTimeItem
 {
-    public BusTimeItem(Arrival arrival, GeoPoint stopLocation, DateTimeOffset now, Arrival? tracked)
+    public BusTimeItem(Arrival arrival, GeoPoint stopLocation, DateTimeOffset now, Arrival? tracked, string? stopName = null)
     {
         Arrival = arrival;
         StopLocation = stopLocation;
+        StopName = stopName;
         IsTracked = arrival == tracked;
         int minutes = arrival.MinutesAway(now);
-        MinutesText = minutes == 0 ? "Due" : $"{minutes} min";
+        MinutesText = minutes == 0 ? AppStrings.Get("TooltipDue") : AppStrings.Format("TooltipMinutesFormat", minutes);
         ClockText = arrival.PredictedTime.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
-        string kind = arrival.IsRealTime ? string.Empty : ", scheduled";
-        TrackLabel = !CanTrack ? $"Route {RouteLabel} at {ClockText}{kind}, canceled"
-            : IsTracked ? $"Stop tracking the {ClockText} route {RouteLabel} departure"
-            : $"Track the {ClockText} route {RouteLabel} departure{kind}, in {MinutesText}, and notify me when it's time to leave";
+        string kind = arrival.IsRealTime ? AppStrings.Get("TripLive") : AppStrings.Get("TripScheduled");
+        TrackLabel = !CanTrack ? AppStrings.Format("TrackCanceledFormat", RouteLabel, ClockText, kind)
+            : IsTracked ? AppStrings.Format("TrackStopFormat", ClockText, RouteLabel)
+            : AppStrings.Format("TrackDepartureFormat", ClockText, RouteLabel, kind, MinutesText);
     }
 
     public Arrival Arrival { get; }
 
     /// <summary>Where the departure is from, so tracking it can frame the stop with its bus.</summary>
     public GeoPoint StopLocation { get; }
+
+    public string? StopName { get; }
 
     public string RouteLabel => Arrival.RouteDisplayId;
 

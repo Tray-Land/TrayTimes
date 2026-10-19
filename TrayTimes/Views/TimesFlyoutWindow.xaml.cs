@@ -130,8 +130,22 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     // Suggestion state.
     private string? _destinationId; // The place picked from Going to, or null to guess.
+    private FavoritePlace? _temporaryDestination;
+    private DestinationSearchView? _destinationSearch;
+    private SuggestionContext SuggestionContext => new(SettingsService.Places, _destinationId, _temporaryDestination);
+    private bool IsSearchOpen => SearchHost.Visibility == Visibility.Visible;
     private string? _suggestionError;
     private SuggestionCardItem? _suggestion;
+    private bool _isReplanning;
+    private readonly TripSelection _tripSelection = new();
+    private readonly PlaceArrivalsMonitor<TimedTripContext> _timedTripMonitor;
+    private TimedTripContext? _timedTripContext;
+    private TripTime _tripTime;
+    private string? _timedTripError;
+    private readonly TripMapRenderer _tripMap;
+    private TripView? _tripView;
+    private CommuteLeg? _tripLeg;
+    private bool IsTripOpen => _tripLeg is not null;
 
     // Motion state: which rows have already animated in, so a refresh only animates what's new or changed.
     private readonly HashSet<string> _shownRows = [];
@@ -161,9 +175,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _suggestionMonitor = new PlaceArrivalsMonitor<SuggestionContext>(_monitor.Predictions, TransitConsumer.Commute, _location.LocateAsync,
             FindSuggestionAsync,
             holds: (context, found, here) => found.Leg == context.Leg(here, DateTimeOffset.Now),
-            isOutdated: found => found is { Leg: { } leg, Plan: { } plan } && !_monitor.Metadata.IsCurrentPlan(leg.Origin, leg.To.Location, plan));
+            isOutdated: found => found is { Leg: { } leg, Plan: { } plan } && !_monitor.Metadata.IsCurrentPlan(leg.Origin, SuggestionContext.Target(leg.To), plan));
         _boardMonitor.Updated += OnBoardUpdated;
         _suggestionMonitor.Updated += OnSuggestionUpdated;
+        _timedTripMonitor = new PlaceArrivalsMonitor<TimedTripContext>(_monitor.Predictions, TransitConsumer.Trip,
+            _ => Task.FromResult(new PlaceLocation(null)), FindTimedTripAsync, isOutdated: IsTimedTripOutdated);
+        _timedTripMonitor.Updated += OnSuggestionUpdated;
         _hwnd = (HWND)WindowNative.GetWindowHandle(this);
         AppWindow.SetIcon("Assets/AppIcon.ico");
         ConfigurePresenter();
@@ -178,6 +195,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _clockTimer = CreateTimer(ClockInterval, repeating: true, Render);
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
+        _tripMap = new TripMapRenderer(_routeLayer, _stopLayer, _placeLayer, _stopGlyph, _stopPins);
         // Shared so every bus reuses one emoji raster.
         _busGlyph = MapHelpers.CreateEmoji(MapHelpers.BusEmoji, 19.5);
         _busBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.White, 28);
@@ -197,11 +215,18 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         TitleText.Text = AppStrings.Get("FlyoutTitle");
         SuggestionCard.TripInvoked += SuggestionCard_TripInvoked;
         SuggestionCard.DestinationChosen += SuggestionCard_DestinationChosen;
+        SuggestionCard.SearchRequested += SuggestionCard_SearchRequested;
+        SuggestionCard.SaveDestinationRequested += SuggestionCard_SaveDestinationRequested;
         Root.ActualThemeChanged += (_, _) =>
         {
             MapHelpers.ApplyBasemap(Map, Root, MapCover);
             MapHelpers.ApplyStopColor(_stopGlyph, Root);
             UpdateVehicleArrows();
+            if (IsTripOpen)
+            {
+                _tripMap.Invalidate();
+                RenderTrip(DateTimeOffset.Now);
+            }
         };
         MapHelpers.ApplyBasemap(Map, Root, MapCover);
         RestoreMapView();
@@ -265,6 +290,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _monitor.IsForeground = true; // The saved stops' times, for the jump menu and the tooltip.
         _center = new NearYou(); // Each open starts near you...
         _destinationId = null; // ...and guesses the next trip afresh.
+        _temporaryDestination = null;
+        CloseSearch(focusDestination: false);
+        CloseTrip(focusCard: false);
         // Open where the map was left; only frame the stops when there's no previous view.
         EnterBoard(reframe: SettingsService.FlyoutMapView is null, TransitTrigger.FlyoutOpened);
         _vehicleTimer.Start();
@@ -279,6 +307,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _isPopupVisible = false;
+        _destinationSearch?.Cancel();
         _locationPermissionPending = false;
         _vehiclePositions.IsForeground = false;
         _lastDismissedAtUtc = DateTime.UtcNow;
@@ -302,8 +331,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         HidePopup();
         _boardMonitor.Updated -= OnBoardUpdated;
         _suggestionMonitor.Updated -= OnSuggestionUpdated;
+        _timedTripMonitor.Updated -= OnSuggestionUpdated;
         SuggestionCard.TripInvoked -= SuggestionCard_TripInvoked;
         SuggestionCard.DestinationChosen -= SuggestionCard_DestinationChosen;
+        SuggestionCard.SearchRequested -= SuggestionCard_SearchRequested;
+        SuggestionCard.SaveDestinationRequested -= SuggestionCard_SaveDestinationRequested;
         _tracker.Changed -= OnTrackingChanged;
         _monitor.Metadata.PatternsChanged -= OnPatternsChanged;
         SettingsService.StopsChanged -= OnStopsChanged;
@@ -431,7 +463,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// </summary>
     private void SaveMapView()
     {
-        if (_shownPlace?.Center is not NearYou)
+        if (IsTripOpen || _shownPlace?.Center is not NearYou)
         {
             SettingsService.FlyoutMapView = null;
         }
@@ -475,12 +507,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void ConfigurePlaces()
     {
         _boardMonitor.Configure(_center);
-        _suggestionMonitor.Configure(new SuggestionContext(SettingsService.Places, _destinationId));
+        _suggestionMonitor.Configure(SuggestionContext);
     }
 
     /// <summary>Moves the board to <paramref name="center"/>, framing it on the map.</summary>
     private void JumpTo(BoardCenter center)
     {
+        CloseTrip(focusCard: false);
         _center = center;
         _locationPermissionPending = false;
         EnterBoard(reframe: true);
@@ -671,7 +704,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         ConfigurePlaces();
         int boardVersion = _boardMonitor.Version;
         int suggestionVersion = _suggestionMonitor.Version;
-        SuggestionContext context = new(SettingsService.Places, _destinationId);
+        SuggestionContext context = SuggestionContext;
         bool Hidden() => !_isPopupVisible || _allowClose;
         _placeReframe |= reframe;
         if (!_monitor.Service.IsConfigured)
@@ -686,14 +719,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _location.BeginRefresh();
         Task<string?> board = RefreshAsync(_boardMonitor, TransitConsumer.Nearby, trigger, force);
         Task<string?> suggestion = RefreshAsync(_suggestionMonitor, TransitConsumer.Commute, trigger, force);
+        Task timedTrip = RefreshTimedTripAsync(trigger, force);
         string? boardError = await board;
         string? suggestionError = await suggestion;
+        await timedTrip;
         if (Hidden())
         {
             return;
         }
 
-        if (suggestionVersion == _suggestionMonitor.Version && context.Equals(new SuggestionContext(SettingsService.Places, _destinationId)))
+        if (suggestionVersion == _suggestionMonitor.Version && context.Equals(SuggestionContext))
         {
             _suggestionError = suggestionError;
             if (suggestionError is null && _suggestionMonitor.Discovery is { Leg: { } leg, Plan: { } plan })
@@ -719,11 +754,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
+        if (_isReplanning)
+        {
+            return;
+        }
+
+        int version = _suggestionMonitor.Version;
+        _isReplanning = true;
+        Render();
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Commute, trigger);
         try
         {
-            TripPlan replanned = await _monitor.Metadata.ReplanTripAsync(leg.Origin, leg.To.Location);
-            if (!ReferenceEquals(replanned, plan) && _isPopupVisible && !_allowClose)
+            TripPlan replanned = await _monitor.Metadata.ReplanTripAsync(leg.Origin, SuggestionContext.Target(leg.To));
+            if (!ReferenceEquals(replanned, plan) && _isPopupVisible && !_allowClose && version == _suggestionMonitor.Version)
             {
                 await _suggestionMonitor.RefreshAsync(checkLocation: true);
             }
@@ -731,6 +774,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
             Debug.WriteLine($"Infeasible trip replan failed: {ex.GetType().Name}. Keeping the last plan.");
+            if (version == _suggestionMonitor.Version)
+            {
+                _suggestionError = ConnectivityService.IsInternetAvailable
+                    ? AppStrings.Get("SuggestionErrorTitle") : AppStrings.Get("Offline");
+            }
+        }
+        finally
+        {
+            _isReplanning = false;
+            if (_isPopupVisible && !_allowClose)
+            {
+                Render();
+            }
         }
     }
 
@@ -771,11 +827,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _placeNotice = null;
             _shownPlace = null;
             _shownPlaceSnapshot = null;
-            _stopLayer.MapElements.Clear();
-            _stopPins.Clear();
-            _placeLayer.MapElements.Clear();
-            _routeLayer.MapElements.Clear();
-            ResetRoutes();
+            if (!IsTripOpen)
+            {
+                _stopLayer.MapElements.Clear();
+                _stopPins.Clear();
+                _placeLayer.MapElements.Clear();
+                _routeLayer.MapElements.Clear();
+                ResetRoutes();
+            }
             Render();
             return;
         }
@@ -796,11 +855,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (changed)
         {
             _shownPlace = found;
-            RebuildStopPins();
-            ShowCenterMarker(found);
+            if (!IsTripOpen)
+            {
+                RebuildStopPins();
+                ShowCenterMarker(found);
+            }
         }
 
-        if (_placeReframe && changed)
+        if (_placeReframe && changed && !IsTripOpen)
         {
             _ = FrameListedStopsAsync(MapAnimationKind.None);
         }
@@ -822,6 +884,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         _boardMonitor.IsForeground = false;
         _suggestionMonitor.IsForeground = false;
+        _timedTripMonitor.IsForeground = false;
     }
 
     /// <summary>
@@ -855,7 +918,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IReadOnlyList<NearbyStop> stops = nearYou
             ? PlaceBoard.SavedFirst(await WalkingRouteService.RankByWalkAsync(point, board.Stops, cancellationToken), saved, MaxNearbyStops)
             : board.Stops;
-        string radius = FormatDistance(PlaceBoard.RadiusMeters);
+        string radius = AppStrings.Distance(PlaceBoard.RadiusMeters);
         Notice none = new(AppStrings.Get("NoStopsNearbyTitle"), nearYou
             ? AppStrings.Format("NoStopsNearYouFormat", radius)
             : AppStrings.Format("NoStopsNearFormat", radius, CenterName(center)));
@@ -877,7 +940,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// <param name="location">The device's location; without one (it's off, or the PC can't tell) the planner guesses from the time of day.</param>
     private async Task<PlaceStops> FindSuggestionAsync(SuggestionContext context, PlaceLocation location, CancellationToken cancellationToken)
     {
-        if (!context.Places.Any(p => p.Kind == PlaceKind.Home) || context.Leg(location.Point, DateTimeOffset.Now) is not { } leg)
+        if (context.Leg(location.Point, DateTimeOffset.Now) is not { } leg)
         {
             return PlaceStops.Unavailable(SetUpNotice());
         }
@@ -889,7 +952,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         // One plan call per trip (reused for three hours from about the same place); the stops'
         // live departures then come from the shared departures batch, like the board's.
-        TripPlan plan = await _monitor.Metadata.PlanTripAsync(leg.Origin, leg.To.Location, cancellationToken);
+        TripPlan plan = await _monitor.Metadata.PlanTripAsync(leg.Origin, context.Target(leg.To), cancellationToken);
         PlaceBoardResult board = PlaceBoard.Commute(plan, MaxNearbyStops);
         Notice noTrip = new(AppStrings.Format("SuggestionNoTripFormat", leg.To.Name), AppStrings.Get("SuggestionNoTripText"));
         return new PlaceStops(leg.Origin, board.Stops, noTrip, leg, board.Lines, board.Trips, plan);
@@ -905,12 +968,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _placeLayer.MapElements.Clear();
         if (found.Origin is { } origin && found.Center is NearYou or NearPlace)
         {
-            AddPlaceMarker(MapHelpers.PlaceGlyph((found.Center as NearPlace)?.Place.Kind), origin);
+            AddPlaceMarker((found.Center as NearPlace)?.Place.Kind, origin);
         }
     }
 
-    private void AddPlaceMarker(string glyph, GeoPoint point) =>
-        _placeLayer.MapElements.Add(new MapIcon(MapHelpers.CreateGlyph(glyph, Microsoft.UI.Colors.DeepSkyBlue, 24), MapHelpers.ToGeopoint(point))
+    private void AddPlaceMarker(PlaceKind? kind, GeoPoint point) =>
+        _placeLayer.MapElements.Add(new MapIcon(MapHelpers.CreatePlaceIcon(kind, 26), MapHelpers.ToGeopoint(point))
         {
             NormalizedAnchorPoint = new Point(0.5, 0.5),
         });
@@ -925,7 +988,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         HashSet<RouteDirection> wanted = [.. _placeArrivals
             .Where(a => a.Status != ArrivalStatus.Canceled && listed(StopLine.Of(a)))
             .Select(a => new RouteDirection(a.RouteId, a.DirectionId))];
-        if (_allowClose || (_drawnRoutes?.SetEquals(wanted) ?? false))
+        if (_allowClose || IsTripOpen || (_drawnRoutes?.SetEquals(wanted) ?? false))
         {
             return;
         }
@@ -1027,6 +1090,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         StatusBar.Title = AppStrings.Get(fetchedAt is null ? "CantLoadArrivals" : "ShowingEarlierTimes");
         RenderPlaceChip();
         RenderSuggestion(now);
+        RenderTrip(now);
         ShowList(groups);
         UpdateSummary(savedIds);
 
@@ -1109,6 +1173,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _suggestion = SuggestionItem(now);
         SuggestionCard.Visibility = _suggestion is null ? Visibility.Collapsed : Visibility.Visible;
         SuggestionCard.DestinationId = _destinationId;
+        SuggestionCard.ShowSaveDestination(_temporaryDestination is not null, _suggestionMonitor.IsLoading || _isReplanning);
         if (_suggestion is not null)
         {
             SuggestionCard.Show(_suggestion);
@@ -1124,9 +1189,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         IReadOnlyList<FavoritePlace> places = SettingsService.Places;
-        if (!places.Any(p => p.Kind == PlaceKind.Home))
+        if (!places.Any(p => p.Kind == PlaceKind.Home) && _temporaryDestination is null && _destinationId is null)
         {
-            return SuggestionCardItem.ForNotice(SetUpNotice(), MapHelpers.PlaceGlyph(PlaceKind.Home), canChooseDestination: places.Count > 0);
+            return SuggestionCardItem.ForNotice(SetUpNotice(), MapHelpers.PlaceGlyph(PlaceKind.Home));
         }
 
         if (_suggestionMonitor.Discovery is not { } found)
@@ -1135,6 +1200,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return _suggestionError is { } error
                 ? SuggestionCardItem.ForNotice(new Notice(AppStrings.Get("SuggestionErrorTitle"), error), glyph)
                 : SuggestionCardItem.ForNotice(new Notice(AppStrings.Get("SuggestionPlanning"), string.Empty), glyph, isBusy: true);
+        }
+
+        if (_isReplanning)
+        {
+            return SuggestionCardItem.ForNotice(new Notice(AppStrings.Get("TripFindingRoute"), string.Empty), MapHelpers.PlaceGlyph(found.Leg?.To.Kind), isBusy: true);
         }
 
         return found is { Leg: { } leg, Plan: { } plan } && LiveTrip.Best(plan, _suggestionMonitor.Snapshot?.Arrivals ?? [], now) is { } trip
@@ -1169,7 +1239,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         List<string> details = [];
         if (nearby.DistanceMeters > 0) // Every saved stop has no center to be a distance from.
         {
-            string distance = FormatDistance(nearby.DistanceMeters);
+            string distance = AppStrings.Distance(nearby.DistanceMeters);
             details.Add(row.NearYou ? AppStrings.Format("StopWalkFormat", distance, walkMinutes) : distance);
         }
 
@@ -1222,22 +1292,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         return new StopGroupItem(stop.Id, title, string.Join(" · ", details), stop.Location, arrivals, row.EmptyText, stop, isSaved);
     }
 
-    /// <summary>Feet and miles where the region measures that way, else meters and kilometers.</summary>
-    private static string FormatDistance(double meters)
-    {
-        if (RegionInfo.CurrentRegion.IsMetric)
-        {
-            return meters < 1000
-                ? $"{Math.Max(50, Math.Round(meters / 50) * 50).ToString("N0", CultureInfo.CurrentCulture)} m"
-                : $"{(meters / 1000).ToString("0.0", CultureInfo.CurrentCulture)} km";
-        }
-
-        double miles = meters / 1609.344;
-        return miles < 0.1
-            ? $"{Math.Max(50, Math.Round(meters * 3.28084 / 50) * 50).ToString("N0", CultureInfo.CurrentCulture)} ft"
-            : $"{miles.ToString("0.0", CultureInfo.CurrentCulture)} mi";
-    }
-
     private static Color RouteColor(string? color) => MapHelpers.ParseRouteColor(color);
 
     // ---- Events ----
@@ -1283,6 +1337,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private Task FrameListedStopsAsync(MapAnimationKind animation)
     {
+        if (IsTripOpen)
+        {
+            return MapHelpers.FrameAsync(Map, _tripMap.Points, animation);
+        }
+
         List<GeoPoint> points = [.. _placeStops.Select(n => n.Stop.Location)];
         if (_placeOrigin is { } origin)
         {
@@ -1707,7 +1766,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             RequestPop(item.Key);
             _tracker.Stop();
-            ShowMapCaption($"Stopped tracking the {item.ClockText} {LineLabel(item.Arrival)}.");
+            ShowMapCaption(AppStrings.Format("TrackStoppedFormat", item.ClockText, LineLabel(item.Arrival)));
             return;
         }
 
@@ -1716,17 +1775,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void StartTracking(BusTimeItem item)
     {
-        string stopName = _groups.FirstOrDefault(g => g.Arrivals.Any(a => a.Times.Contains(item)))?.Title ?? string.Empty;
+        string stopName = item.StopName ?? _groups.FirstOrDefault(g => g.Arrivals.Any(a => a.Times.Contains(item)))?.Title ?? string.Empty;
         RequestPop(item.Key);
         _tracker.Start(item.Arrival, stopName);
         ShowLine(item.Arrival, item.StopLocation, onlyThisTrip: true); // Show just its bus and zoom to it.
         int lead = SettingsService.HeadOutMinutes;
-        string ride = $"the {item.ClockText} {LineLabel(item.Arrival)}";
+        string ride = AppStrings.Format("TrackRideFormat", item.ClockText, LineLabel(item.Arrival));
         ShowMapCaption(item.Arrival.MinutesAway(DateTimeOffset.Now) <= lead
-            ? $"Tracking {ride}. It's under {lead} min away, so head out now."
+            ? AppStrings.Format("TrackHeadOutFormat", ride, lead)
             : item.Arrival.IsRealTime
-                ? $"Tracking {ride}. You'll be notified {lead} min before it leaves."
-                : $"Tracking {ride}. It's scheduled, so we'll look for live data as it gets close and notify you {lead} min before it leaves.");
+                ? AppStrings.Format("TrackStartedFormat", ride, lead)
+                : AppStrings.Format("TrackScheduledFormat", ride, lead));
     }
 
     private static readonly int[] LeadChoices = [1, 2, 3, 5, 10, 15, 20, 30];
@@ -1742,7 +1801,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             RadioMenuFlyoutItem item = new()
             {
-                Text = minutes == 1 ? "Notify 1 minute before" : $"Notify {minutes} minutes before",
+                Text = minutes == 1 ? AppStrings.Get("TrackNotifyOneMinute") : AppStrings.Format("TrackNotifyMinutesFormat", minutes),
                 GroupName = "HeadOutLead",
                 IsChecked = minutes == current,
             };
@@ -1755,7 +1814,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                     return;
                 }
 
-                ShowMapCaption($"You'll be notified {minutes} min before your ride leaves.");
+                ShowMapCaption(AppStrings.Format("TrackLeadChangedFormat", minutes));
             };
             menu.Items.Add(item);
         }
@@ -1827,31 +1886,242 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _ = LoadPlaceAsync(reframe: false, TransitTrigger.ManualRefresh);
     }
 
-    /// <summary>Selecting the card shows its first ride's vehicles, as selecting a row does; a walk is framed instead.</summary>
+    /// <summary>Opens the trip using only the plan and departures already shown by the card.</summary>
     private void SuggestionCard_TripInvoked(object? sender, EventArgs e)
     {
-        if (_suggestion is not { Trip: { } trip, Leg: { } leg })
+        if (_suggestion is not { Trip: { } trip, Leg: { } leg } || _suggestionMonitor.Discovery?.Plan is not { } plan)
         {
             return;
         }
 
-        if (trip.Legs.OfType<LiveRide>().FirstOrDefault() is not { } ride)
+        if (_tripView is null)
         {
-            DeselectVehicle();
-            _ = MapHelpers.FrameAsync(Map, [leg.Origin, leg.To.Location], MapAnimationKind.Default);
-            return;
+            _tripView = new TripView();
+            _tripView.BackRequested += TripPanel_BackRequested;
+            _tripView.OptionChosen += TripPanel_OptionChosen;
+            _tripView.TimeRequested += TripPanel_TimeRequested;
+            TripHost.Content = _tripView;
         }
 
-        RideLine line = ride.Line;
-        Arrival departure = ride.Departure ?? new Arrival(line.BoardAt.Id, line.Route.Id, line.Route.DisplayId, line.Direction.Id,
-            line.Direction.Name, ride.Starts, IsRealTime: false, RouteColor: line.Route.Color, Mode: line.Route.Mode);
-        ShowLine(departure, line.BoardAt.Location);
+        _tripLeg = leg;
+        _tripMap.Invalidate();
+        _vehiclePositions.Invalidate();
+        ClearVehicles();
+        HideMapCaption(animate: false);
+        ResetRoutes();
+        _tripSelection.Update(plan, _suggestionMonitor.Snapshot?.Arrivals ?? [], DateTimeOffset.Now, trip.Itinerary);
+        ArrivalsPane.Visibility = Visibility.Collapsed;
+        PlaceChip.Visibility = Visibility.Collapsed;
+        TripHost.Visibility = Visibility.Visible;
+        SetFitLabel(isTrip: true);
+        RenderTrip(DateTimeOffset.Now);
+        _tripView.FocusBack();
     }
+
+    private void RenderTrip(DateTimeOffset now)
+    {
+        if (_tripLeg is not { } leg || _tripView is null)
+        {
+            return;
+        }
+
+        PlaceStops? found = _suggestionMonitor.Discovery;
+        if (found?.Leg is { } latest && latest.To.Id != leg.To.Id)
+        {
+            CloseTrip(focusCard: true);
+            return;
+        }
+
+        bool timed = _tripTime.Mode != TripTimeMode.Now;
+        IPlaceArrivalsMonitor monitor = timed ? _timedTripMonitor : _suggestionMonitor;
+        IReadOnlyList<Arrival> arrivals = monitor.Snapshot?.Arrivals ?? [];
+        PlaceStops? shown = monitor.Discovery;
+        if (shown is { Leg: { } current, Plan: { } plan })
+        {
+            _tripLeg = leg = current;
+            _tripSelection.Update(plan, arrivals, now, time: _tripTime);
+        }
+        else if (timed)
+        {
+            _tripSelection.Update(new TripPlan([], []), [], now, time: _tripTime);
+        }
+
+        _tripView.Show(leg, _tripSelection, arrivals, _tracker.Current, now, (DataTemplate)Root.Resources["BusTimeTemplate"],
+            timed ? _timedTripMonitor.IsLoading && shown?.Plan is null
+                : _isReplanning || (_suggestionMonitor.IsLoading && shown?.Plan is null),
+            timed ? _timedTripError : _suggestionError, _tripTime);
+        if (_tripSelection.Selected is { } selected && _tripMap.Draw(selected, leg))
+        {
+            _vehiclePositions.Invalidate();
+            ClearVehicles();
+            _ = FrameListedStopsAsync(MapAnimationKind.Default);
+        }
+    }
+
+    private void TripPanel_OptionChosen(object? sender, TripItinerary itinerary)
+    {
+        _tripSelection.Select(itinerary);
+        HideMapCaption(animate: false);
+        RenderTrip(DateTimeOffset.Now);
+    }
+
+    private void TripPanel_BackRequested(object? sender, EventArgs e) => CloseTrip(focusCard: true);
+
+    private void TripPanel_TimeRequested(object? sender, TripTime time)
+    {
+        if (_tripLeg is not { } leg)
+        {
+            return;
+        }
+
+        _timedTripMonitor.IsForeground = false;
+        _tripTime = time;
+        _timedTripError = null;
+        _timedTripContext = time.Mode == TripTimeMode.Now ? null : new TimedTripContext(leg, SuggestionContext.Target(leg.To), time);
+        if (_timedTripContext is { } context)
+        {
+            _timedTripMonitor.Configure(context);
+            _timedTripMonitor.IsForeground = true;
+            _ = RefreshTimedTripAsync(TransitTrigger.TripTimeChanged);
+        }
+
+        _tripMap.Invalidate();
+        RenderTrip(DateTimeOffset.Now);
+    }
+
+    private async Task RefreshTimedTripAsync(TransitTrigger trigger, bool force = false)
+    {
+        if (!_timedTripMonitor.IsForeground)
+        {
+            return;
+        }
+
+        int version = _timedTripMonitor.Version;
+        string? error = await RefreshAsync(_timedTripMonitor, TransitConsumer.Trip, trigger, force);
+        if (version == _timedTripMonitor.Version && _isPopupVisible && !_allowClose)
+        {
+            _timedTripError = error;
+            RenderTrip(DateTimeOffset.Now);
+        }
+    }
+
+    private async Task<PlaceStops> FindTimedTripAsync(TimedTripContext context, PlaceLocation location, CancellationToken cancellationToken)
+    {
+        TripPlan plan = await _monitor.Metadata.PlanTripAsync(context.Leg.Origin, context.Destination, context.Time, cancellationToken);
+        return new PlaceStops(context.Leg.Origin, [], new Notice(AppStrings.Format("SuggestionNoTripFormat", context.Leg.To.Name), string.Empty),
+            Leg: context.Leg, Plan: plan, WatchedStops: PlaceBoard.BoardingStopIds(plan, i => context.Time.UsesLiveTimes(i, DateTimeOffset.Now)));
+    }
+
+    private bool IsTimedTripOutdated(PlaceStops found) =>
+        _timedTripContext is { } context && found.Plan is { } plan
+        && (!_monitor.Metadata.IsCurrentPlan(context.Leg.Origin, context.Destination, context.Time, plan)
+            || !found.StopIds.SequenceEqual(PlaceBoard.BoardingStopIds(plan, i => context.Time.UsesLiveTimes(i, DateTimeOffset.Now))));
+
+    /// <summary>Restores the board and its map without discovery or a departures request.</summary>
+    private void CloseTrip(bool focusCard)
+    {
+        if (!IsTripOpen)
+        {
+            return;
+        }
+
+        _tripLeg = null;
+        _timedTripMonitor.IsForeground = false;
+        _timedTripContext = null;
+        _tripTime = default;
+        _timedTripError = null;
+        TripHost.Visibility = Visibility.Collapsed;
+        ArrivalsPane.Visibility = Visibility.Visible;
+        PlaceChip.Visibility = Visibility.Visible;
+        _vehiclePositions.Invalidate();
+        ClearVehicles();
+        HideMapCaption(animate: false);
+        _routeLayer.MapElements.Clear();
+        ResetRoutes();
+        RebuildStopPins();
+        _placeLayer.MapElements.Clear();
+        if (_shownPlace is { } found)
+        {
+            ShowCenterMarker(found);
+        }
+
+        DrawRoutes();
+        SetFitLabel(isTrip: false);
+        _ = FrameListedStopsAsync(MapAnimationKind.Default);
+        if (focusCard)
+        {
+            SuggestionCard.FocusTrip();
+        }
+    }
+
+    private void SetFitLabel(bool isTrip)
+    {
+        string label = AppStrings.Get(isTrip ? "TripFitLabel" : "BoardFitLabel");
+        AutomationProperties.SetName(FitButton, label);
+        ToolTipService.SetToolTip(FitButton, label);
+    }
+
+    private sealed record TimedTripContext(CommuteLeg Leg, TripDestination Destination, TripTime Time);
 
     private void SuggestionCard_DestinationChosen(object? sender, string? placeId)
     {
+        _temporaryDestination = null;
         _destinationId = placeId;
         _ = LoadPlaceAsync(reframe: false, TransitTrigger.DestinationChanged);
+    }
+
+    private void SuggestionCard_SearchRequested(object? sender, EventArgs e)
+    {
+        CloseTrip(focusCard: false);
+        if (_destinationSearch is null)
+        {
+            _destinationSearch = new DestinationSearchView();
+            _destinationSearch.BackRequested += (_, _) => CloseSearch(focusDestination: true);
+            _destinationSearch.DestinationChosen += DestinationSearch_DestinationChosen;
+            SearchHost.Content = _destinationSearch;
+        }
+
+        SearchHost.Visibility = Visibility.Visible;
+        ArrivalsPane.Visibility = Visibility.Collapsed;
+        GeoPoint? near = _placeOrigin ?? SettingsService.Places.FirstOrDefault(p => p.Kind == PlaceKind.Home)?.Location
+            ?? (Map.Center is { } center ? new GeoPoint(center.Position.Latitude, center.Position.Longitude) : null);
+        _destinationSearch.Open(_monitor.Service, near);
+    }
+
+    private void CloseSearch(bool focusDestination)
+    {
+        _destinationSearch?.Cancel();
+        SearchHost.Visibility = Visibility.Collapsed;
+        ArrivalsPane.Visibility = Visibility.Visible;
+        if (focusDestination)
+        {
+            SuggestionCard.FocusDestination();
+        }
+    }
+
+    private void DestinationSearch_DestinationChosen(object? sender, DestinationResult result)
+    {
+        _temporaryDestination = result.AsPlace();
+        _destinationId = _temporaryDestination.Id;
+        CloseSearch(focusDestination: true);
+        _ = LoadPlaceAsync(reframe: false, TransitTrigger.DestinationChanged);
+    }
+
+    private void SuggestionCard_SaveDestinationRequested(object? sender, EventArgs e)
+    {
+        if (_temporaryDestination is not { } place)
+        {
+            return;
+        }
+
+        if (_suggestionMonitor.Discovery?.Leg is { } leg)
+        {
+            _monitor.Metadata.SaveDestinationPlan(leg.Origin, SuggestionContext.Target(place));
+        }
+
+        _temporaryDestination = null;
+        SettingsService.SavePlace(place); // PlacesChanged refreshes both monitors and the destination menu.
+        SuggestionCard.FocusDestination();
     }
 
     private void FitButton_Click(object sender, RoutedEventArgs e)
@@ -1876,7 +2146,27 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void Escape_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        HidePopup();
+        if (IsSearchOpen)
+        {
+            CloseSearch(focusDestination: true);
+        }
+        else if (IsTripOpen)
+        {
+            CloseTrip(focusCard: true);
+        }
+        else
+        {
+            HidePopup();
+        }
+    }
+
+    private void Back_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (IsTripOpen)
+        {
+            args.Handled = true;
+            CloseTrip(focusCard: true);
+        }
     }
 
     /// <summary>What every board row is built from in one render.</summary>

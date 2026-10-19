@@ -16,6 +16,8 @@
     <Grid x:Name="Root" KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Escape" Invoked="Escape_Invoked" />
+            <KeyboardAccelerator Key="Back" Invoked="Back_Invoked" />
+            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="Back_Invoked" />
             <KeyboardAccelerator Key="F5" Invoked="Refresh_Invoked" />
         </Grid.KeyboardAccelerators>
 
@@ -26,6 +28,7 @@
             <RowDefinition x:Name="MapRow" Height="230" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid.Resources>
@@ -45,6 +48,7 @@
                 <Button
                     MinHeight="30"
                     Padding="10,3"
+                    AutomationProperties.AutomationId="{x:Bind Key}"
                     AutomationProperties.Name="{x:Bind TrackLabel}"
                     Click="TrackButton_Click"
                     ContextRequested="TrackButton_ContextRequested"
@@ -296,11 +300,12 @@
                     Glyph="&#xE72C;" />
             </Button>
             <Button
+                x:Name="FitButton"
+                x:Uid="BoardFitButton"
                 Grid.Column="2"
-                AutomationProperties.Name="Show all listed stops on the map"
+                AutomationProperties.AutomationId="FitButton"
                 Click="FitButton_Click"
-                Style="{StaticResource ToolbarButtonStyle}"
-                ToolTipService.ToolTip="Show all listed stops">
+                Style="{StaticResource ToolbarButtonStyle}">
                 <FontIcon
                     x:Name="FitIcon"
                     FontSize="16"
@@ -491,5 +496,48 @@
                     Style="{StaticResource AccentButtonStyle}" />
             </StackPanel>
         </Grid>
+
+        <ContentControl
+            x:Name="SearchHost"
+            Grid.Row="5"
+            HorizontalContentAlignment="Stretch"
+            VerticalContentAlignment="Stretch"
+            Visibility="Collapsed" />
+        <ContentControl
+            x:Name="TripHost"
+            Grid.Row="5"
+            HorizontalContentAlignment="Stretch"
+            VerticalContentAlignment="Stretch"
+            Visibility="Collapsed" />
+
+        <!--  Required by the Transit API terms: "Powered by Transit" stays visible in the main interface  -->
+        <HyperlinkButton
+            x:Name="PoweredByTransit"
+            x:Uid="PoweredByTransit"
+            Grid.Row="6"
+            Margin="0,0,8,4"
+            Padding="6,2"
+            HorizontalAlignment="Right"
+            AutomationProperties.AutomationId="PoweredByTransit"
+            NavigateUri="https://transitapp.com">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock
+                    VerticalAlignment="Center"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="Powered by" />
+                <Image
+                    Width="18"
+                    Height="18"
+                    AutomationProperties.AccessibilityView="Raw">
+                    <Image.Source>
+                        <SvgImageSource RasterizePixelWidth="72" RasterizePixelHeight="72" UriSource="ms-appx:///Assets/transit-icon-green.svg" />
+                    </Image.Source>
+                </Image>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="Transit" />
+            </StackPanel>
+        </HyperlinkButton>
     </Grid>
 </ex:WindowEx>

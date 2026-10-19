@@ -42,6 +42,10 @@
         Padding="6,8,8,0"
         x:DefaultBindMode="OneTime"
         ColumnSpacing="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
@@ -173,5 +177,15 @@
                     Placement="BottomEdgeAlignedRight" />
             </DropDownButton.Flyout>
         </DropDownButton>
+        <Button
+            x:Name="SaveDestinationButton"
+            x:Uid="SaveDestinationButton"
+            Grid.Row="1"
+            Grid.ColumnSpan="2"
+            Margin="8,4,0,0"
+            AutomationProperties.AutomationId="SaveDestinationButton"
+            HorizontalAlignment="Left"
+            Click="SaveDestinationButton_Click"
+            Visibility="Collapsed" />
     </Grid>
 </UserControl>

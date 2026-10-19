@@ -24,10 +24,24 @@ public sealed partial class SuggestionCard : UserControl
     /// <summary>Raised when the rider picks where they're going: a favorite place's ID, or null to let the card guess.</summary>
     public event EventHandler<string?>? DestinationChosen;
 
+    public event EventHandler? SearchRequested;
+
+    public event EventHandler? SaveDestinationRequested;
+
     public SuggestionCardItem Item { get; private set; } = SuggestionCardItem.Empty;
 
     /// <summary>The place picked from Going to, checked in its menu; null when the card guesses.</summary>
     public string? DestinationId { get; set; }
+
+    public void ShowSaveDestination(bool canSave, bool isPlanning)
+    {
+        SaveDestinationButton.Visibility = canSave ? Visibility.Visible : Visibility.Collapsed;
+        SaveDestinationButton.IsEnabled = !isPlanning;
+    }
+
+    public void FocusDestination() => DestinationButton.Focus(FocusState.Programmatic);
+
+    public void FocusTrip() => TripButton.Focus(FocusState.Programmatic);
 
     /// <summary>Shows <paramref name="item"/>, animating it in when it's a new trip or notice rather than new times.</summary>
     public void Show(SuggestionCardItem item)
@@ -51,6 +65,8 @@ public sealed partial class SuggestionCard : UserControl
 
     private void ActionButton_Click(object sender, RoutedEventArgs e) => Item.Action?.Invoke();
 
+    private void SaveDestinationButton_Click(object sender, RoutedEventArgs e) => SaveDestinationRequested?.Invoke(this, EventArgs.Empty);
+
     private void DestinationMenu_Opening(object sender, object e)
     {
         DestinationMenu.Items.Clear();
@@ -62,6 +78,10 @@ public sealed partial class SuggestionCard : UserControl
         }
 
         DestinationMenu.Items.Add(new MenuFlyoutSeparator());
+        MenuFlyoutItem search = new() { Text = AppStrings.Get("DestinationSearchMenu"), Icon = new SymbolIcon(Symbol.Find) };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(search, "DestinationSearchMenu");
+        search.Click += (_, _) => SearchRequested?.Invoke(this, EventArgs.Empty);
+        DestinationMenu.Items.Add(search);
         MenuFlyoutItem edit = new() { Text = AppStrings.Get("DestinationEditPlaces"), Icon = new FontIcon { Glyph = "" } }; // Edit
         edit.Click += (_, _) => App.Current.ShowSettings();
         DestinationMenu.Items.Add(edit);

@@ -25,6 +25,7 @@
     <!-- Source image for the generated assets; not shipped. -->
     <Content Remove="Assets\Source*.png" />
     <Content Include="Assets\*.ico" />
+    <Content Include="Assets\*.svg" />
   </ItemGroup>
 
   <ItemGroup>
