@@ -87,7 +87,7 @@
                         Click="ArrivalButton_Click"
                         Opacity="{x:Bind RowOpacity}"
                         Style="{StaticResource RowButtonStyle}"
-                        ToolTipService.ToolTip="Show this bus on the map">
+                        ToolTipService.ToolTip="Show this route's vehicles on the map">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -275,7 +275,7 @@
                     <TextBlock
                         x:Name="TitleText"
                         Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="Arrivals" />
+                        Text="Departures" />
                     <TextBlock
                         x:Name="UpdatedText"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -364,7 +364,7 @@
         <Grid Grid.Row="3">
             <map:MapControl
                 x:Name="Map"
-                AutomationProperties.Name="Map of your stops and approaching buses"
+                AutomationProperties.Name="Map of your stops and the selected route's vehicles"
                 MapStyle="Road" />
             <!--  Hides the map's light-gray clear color until the basemap's first tiles arrive  -->
             <Border

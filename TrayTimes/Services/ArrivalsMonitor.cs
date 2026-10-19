@@ -6,36 +6,38 @@ using TrayTimes.Transit;
 namespace TrayTimes.Services;
 
 /// <summary>
-/// Polls arrivals for the saved stops while the flyout is open (browsing mode) and not at all
-/// otherwise, filling in scheduled times beyond the predictions. Lives on the UI thread and raises
-/// <see cref="Updated"/> there.
+/// Polls departures for the saved stops while the flyout is open (browsing mode) and not at all
+/// otherwise. The provider merges scheduled and real-time times itself. How often it polls, and
+/// how old data may be when the flyout reopens, follow the call budget. Lives on the UI thread
+/// and raises <see cref="Updated"/> there.
 /// </summary>
 internal sealed class ArrivalsMonitor
 {
-    private static readonly TimeSpan RefreshInterval = PredictionCoordinator.BrowsingInterval;
-
     private readonly DispatcherQueueTimer _timer;
     private readonly TimeProvider _time;
-    private IReadOnlyList<Arrival> _live = [];
-    private IReadOnlySet<string>? _liveStopIds;
+    private readonly TransitBudget? _budget;
     private bool _isForeground;
     private bool _stopsChanged;
     private int _refreshGeneration;
     private CancellationTokenSource? _refreshCancellation;
 
-    public ArrivalsMonitor(ITransitService service, ScheduleService schedule, DispatcherQueue dispatcher, TimeProvider? timeProvider = null, PredictionCoordinator? predictions = null)
+    /// <param name="budget">Sets the refresh cadence; without one the coordinator's interval is used.</param>
+    public ArrivalsMonitor(ITransitService service, DispatcherQueue dispatcher, TimeProvider? timeProvider = null, PredictionCoordinator? predictions = null, TransitBudget? budget = null)
     {
         Metadata = service as MetadataTransitService ?? new MetadataTransitService(service, timeProvider);
         Service = Metadata;
-        Schedule = schedule;
         _time = timeProvider ?? TimeProvider.System;
+        _budget = budget;
         Predictions = predictions ?? new PredictionCoordinator(Service, _time);
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = true;
         _timer.Interval = RefreshInterval;
-        _timer.Tick += (_, _) => _ = RefreshAsync(TransitTrigger.Timer);
+        _timer.Tick += (_, _) =>
+        {
+            _timer.Interval = RefreshInterval; // The budget may have moved on since the last tick.
+            _ = RefreshAsync(TransitTrigger.Timer);
+        };
         SettingsService.StopsChanged += OnStopsChanged;
-        schedule.Loaded += (_, _) => dispatcher.TryEnqueue(OnScheduleLoaded);
     }
 
     public event EventHandler? Updated;
@@ -44,13 +46,14 @@ internal sealed class ArrivalsMonitor
 
     public MetadataTransitService Metadata { get; }
 
-    public ScheduleService Schedule { get; }
-
     public PredictionCoordinator Predictions { get; }
 
     public ArrivalsSnapshot Latest { get; private set; } = ArrivalsSnapshot.Empty;
 
     public bool IsLoading { get; private set; }
+
+    /// <summary>How often the open flyout refreshes on its own (when the budget pauses that, its timer refusals say why).</summary>
+    public TimeSpan RefreshInterval => _budget?.AutomaticRefreshInterval ?? Predictions.BrowsingInterval;
 
     /// <summary>True while the flyout is open: poll, and refresh now if the data is stale.</summary>
     public bool IsForeground
@@ -70,16 +73,16 @@ internal sealed class ArrivalsMonitor
             }
 
             Predictions.SetBrowsingStops(TransitConsumer.Favorites, [.. SettingsService.Stops.Select(s => s.StopId)]);
+            _timer.Interval = RefreshInterval;
             _timer.Start();
-            if (_stopsChanged || Latest.FetchedAt is not { } at || _time.GetLocalNow() - at > TimeSpan.FromSeconds(15))
+            if (_stopsChanged || Latest.FetchedAt is not { } at || _time.GetLocalNow() - at >= Predictions.BrowsingInterval)
             {
                 _ = RefreshAsync(TransitTrigger.FlyoutOpened);
             }
             else
             {
-                RemergeSchedule();
                 using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, TransitTrigger.FlyoutOpened);
-                Service.Diagnostics?.RecordReuse(TransitEndpoint.Predictions, inFlight: false,
+                Service.Diagnostics?.RecordReuse(TransitEndpoint.Departures, inFlight: false,
                     batchSize: Math.Min(SavedStop.DistinctStopCount(SettingsService.Stops), Service.MaxStopsPerRequest));
             }
         }
@@ -90,27 +93,7 @@ internal sealed class ArrivalsMonitor
     {
         IsForeground = false;
         ++_refreshGeneration; // Drop any in-flight refresh.
-        _live = [];
-        _liveStopIds = null;
         Publish(ArrivalsSnapshot.Empty);
-    }
-
-    /// <summary>Shared route metadata (display names and colors) keyed by route ID.</summary>
-    public async Task<IReadOnlyDictionary<string, TransitRoute>> GetRouteCatalogAsync(
-        TransitConsumer consumer = TransitConsumer.Favorites, CancellationToken cancellationToken = default)
-    {
-        using IDisposable scope = TransitRequestDiagnostics.BeginScope(consumer, TransitTrigger.Metadata);
-        try
-        {
-            IReadOnlyList<TransitRoute> routes = await Metadata.GetRoutesAsync(cancellationToken);
-            return routes.ToDictionary(r => r.Id, StringComparer.OrdinalIgnoreCase);
-        }
-        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
-            && ex is HttpRequestException or OperationCanceledException or TransitApiException)
-        {
-            System.Diagnostics.Debug.WriteLine($"Route catalog load failed: {ex.GetType().Name}. Metadata remains retryable.");
-            return new Dictionary<string, TransitRoute>();
-        }
     }
 
     public async Task RefreshAsync(TransitTrigger trigger = TransitTrigger.ManualRefresh)
@@ -128,7 +111,7 @@ internal sealed class ArrivalsMonitor
         if (!Service.IsConfigured)
         {
             _refreshCancellation?.Cancel();
-            Publish(new ArrivalsSnapshot(null, [], $"No {Service.AgencyName} API key. Add MctsApiKey to OAuth.resw and rebuild."));
+            Publish(new ArrivalsSnapshot(null, [], "No Transit API key. Add TransitApiKey to OAuth.resw and rebuild."));
             return;
         }
 
@@ -136,8 +119,6 @@ internal sealed class ArrivalsMonitor
         {
             _refreshCancellation?.Cancel();
             Predictions.SetBrowsingStops(TransitConsumer.Favorites, []);
-            _live = [];
-            _liveStopIds = null;
             Publish(ArrivalsSnapshot.Empty);
             return;
         }
@@ -152,20 +133,12 @@ internal sealed class ArrivalsMonitor
         _refreshCancellation = cancellation;
         try
         {
-            Task<PredictionSnapshot> pending = Predictions.GetAsync(stopIds,
-                trigger == TransitTrigger.FlyoutOpened ? TimeSpan.FromSeconds(15) : RefreshInterval,
+            Task<PredictionSnapshot> pending = Predictions.GetAsync(stopIds, Predictions.BrowsingInterval,
                 force: trigger is TransitTrigger.ManualRefresh or TransitTrigger.Retry,
                 combineBrowsing: true, cancellationToken: cancellation.Token);
             previous?.Cancel(); // Attach the replacement waiter before releasing its shared batch.
             PredictionSnapshot snapshot = await pending;
-            IReadOnlyList<Arrival> live = snapshot.Arrivals;
-            if (generation == _refreshGeneration)
-            {
-                _live = live;
-                _liveStopIds = stopIds.ToHashSet(StringComparer.Ordinal);
-            }
-
-            result = new ArrivalsSnapshot(snapshot.FetchedAt, Schedule.AddScheduled(live, stopIds), null);
+            result = new ArrivalsSnapshot(snapshot.FetchedAt, snapshot.Arrivals, null);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -177,11 +150,11 @@ internal sealed class ArrivalsMonitor
             {
                 TransitApiException api => api.Message,
                 _ when !ConnectivityService.IsInternetAvailable => "No internet connection. Times will update when you're back online.",
-                _ => $"Can't reach {Service.AgencyName} right now. Retrying shortly.",
+                _ => $"Can't reach {Service.ProviderName} right now. Retrying shortly.",
             };
 
-            // Keep showing the last good predictions, and the schedule, alongside the error.
-            result = new ArrivalsSnapshot(Latest.FetchedAt, Schedule.AddScheduled(_live, stopIds), message);
+            // Keep showing the last good departures alongside the error.
+            result = Latest with { Error = message };
         }
         finally
         {
@@ -209,33 +182,10 @@ internal sealed class ArrivalsMonitor
         }
     }
 
-    private void OnScheduleLoaded()
-    {
-        if (_isForeground && !RemergeSchedule() && !IsLoading)
-        {
-            _ = RefreshAsync(TransitTrigger.TimetableLoaded);
-        }
-    }
-
-    private bool RemergeSchedule()
-    {
-        string[] stopIds = [.. SettingsService.Stops.Select(s => s.StopId).Distinct()];
-        if (_stopsChanged || Latest.FetchedAt is null || _liveStopIds is null || !_liveStopIds.SetEquals(stopIds))
-        {
-            return false;
-        }
-
-        // Local enrichment must not reset a pending refresh, its error, or the HTTP timestamp.
-        Latest = Latest with { Arrivals = Schedule.AddScheduled(_live, stopIds) };
-        Updated?.Invoke(this, EventArgs.Empty);
-        return true;
-    }
-
     private void Publish(ArrivalsSnapshot snapshot)
     {
         IsLoading = false;
         Latest = snapshot;
         Updated?.Invoke(this, EventArgs.Empty);
     }
-
 }

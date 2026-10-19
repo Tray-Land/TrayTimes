@@ -7,8 +7,9 @@ using Microsoft.Windows.AppLifecycle;
 using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 using TrayTimes.Views;
+using Windows.Storage;
 using WinUIEx;
 
 namespace TrayTimes;
@@ -29,8 +30,12 @@ public partial class App : Application
     private static readonly TimeSpan FlyoutLifetimeAfterDismiss = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan IdleCollectDelay = TimeSpan.FromSeconds(5);
 
-    // MCTS's published GTFS timetable, for scheduled times where BusTime has no prediction.
-    private static readonly Uri MctsScheduleUri = new("https://kamino.mcts.org/gtfs/google_transit.zip");
+    // How long a new departures batch waits for other tabs' stops, so opening the flyout costs one call.
+    private static readonly TimeSpan DeparturesCoalesceWindow = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan ExitSaveTimeout = TimeSpan.FromSeconds(2);
+
+    // Files the MCTS BusTime build kept in LocalState.
+    private static readonly string[] LegacyFiles = ["stop-index.json", "schedule.zip", "schedule.json", "schedule.zip.download"];
 
     private readonly EtaTrayIcon _etaIcon = new();
     private Mutex? _singleInstanceMutex;
@@ -41,7 +46,8 @@ public partial class App : Application
     private DispatcherQueue? _dispatcher;
     private ArrivalsMonitor? _monitor;
     private BusTrackingService? _tracker;
-    private StopIndexService? _stopIndex;
+    private TransitBudget? _budget;
+    private TransitCacheService? _cache;
     private DispatcherQueueTimer? _flyoutCloseTimer;
 
     public App()
@@ -59,7 +65,7 @@ public partial class App : Application
 
     internal BusTrackingService Tracker => _tracker ?? throw new InvalidOperationException("The app hasn't launched yet.");
 
-    internal StopIndexService StopIndex => _stopIndex ?? throw new InvalidOperationException("The app hasn't launched yet.");
+    internal TransitBudget Budget => _budget ?? throw new InvalidOperationException("The app hasn't launched yet.");
 
     private static void LogCrash(Exception? ex)
     {
@@ -105,14 +111,20 @@ public partial class App : Application
         ThreadPool.RegisterWaitForSingleObject(_showEvent,
             (_, _) => _dispatcher.TryEnqueue(ShowLaunchWindow), null, Timeout.Infinite, executeOnlyOnce: false);
 
-        BusTimeTransitService mcts = BusTimeTransitService.CreateMcts(Secrets.MctsApiKey);
-        mcts.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
-        mcts.Diagnostics.Observed += (_, observation) => ApiUsageService.Observe(observation);
-        MetadataTransitService transit = new(new CooldownTransitService(mcts));
-        _stopIndex = new StopIndexService(transit);
-        _monitor = new ArrivalsMonitor(transit, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
+        MigrateSavedData();
+
+        // Every physical request goes client <- failure/budget gate <- shared caches; only cache misses cost a call.
+        TransitAppService client = new(Secrets.TransitApiKey, CultureInfo.CurrentUICulture.Name);
+        client.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
+        client.Diagnostics.Observed += (_, observation) => DiagnosticLogService.Observe(observation);
+        _budget = new TransitBudget(ApiUsageService.GetUsage, SettingsService.TransitBudget);
+        MetadataTransitService transit = new(new CooldownTransitService(client, budget: _budget));
+        _cache = new TransitCacheService(transit, _dispatcher);
+        _ = _cache.LoadAsync();
+        PredictionCoordinator departures = new(transit, browsingInterval: () => _budget.ReuseAge, coalesceWindow: DeparturesCoalesceWindow);
+        _monitor = new ArrivalsMonitor(transit, _dispatcher, predictions: departures, budget: _budget);
         _monitor.Updated += (_, _) => UpdateTooltip();
-        _tracker = new BusTrackingService(transit, _dispatcher, predictions: _monitor.Predictions);
+        _tracker = new BusTrackingService(transit, _dispatcher, predictions: departures, budget: _budget);
         _tracker.Changed += (_, _) => OnTrackingChanged();
 
         _flyoutCloseTimer = _dispatcher.CreateTimer();
@@ -125,29 +137,38 @@ public partial class App : Application
         NotificationService.Register();
 
         InitializeTrayIcon();
-        if (mcts.IsConfigured)
-        {
-            // Make sure the stop directory is on disk so Home/Work/Nearby are quick; failures retry
-            // on first use. Only the file is kept: the in-memory copy is dropped until needed.
-            _ = _stopIndex.GetAsync().ContinueWith(
-                t =>
-                {
-                    _ = t.Exception;
-                    _dispatcher.TryEnqueue(() =>
-                    {
-                        if (_flyout is null && _settings is null)
-                        {
-                            _stopIndex.Unload();
-                        }
-                    });
-                },
-                TaskScheduler.Default);
-        }
-
         if (!isStartupTask)
         {
             ShowLaunchWindow();
         }
+    }
+
+    /// <summary>
+    /// Clears what the MCTS BusTime build saved: its stop IDs and call tally mean nothing to Transit.
+    /// Favorite places are plain coordinates and carry over.
+    /// </summary>
+    private static void MigrateSavedData()
+    {
+        if (SettingsService.DataVersion >= SettingsService.CurrentDataVersion)
+        {
+            return;
+        }
+
+        SettingsService.SetStops([]);
+        ApiUsageService.StartOver();
+        foreach (string name in LegacyFiles)
+        {
+            try
+            {
+                File.Delete(Path.Combine(ApplicationData.Current.LocalFolder.Path, name));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Couldn't delete a legacy cache file: {ex.GetType().Name}.");
+            }
+        }
+
+        SettingsService.DataVersion = SettingsService.CurrentDataVersion;
     }
 
     private void ShowLaunchWindow()
@@ -170,7 +191,7 @@ public partial class App : Application
         _flyout?.HidePopup();
         if (_settings is null)
         {
-            _settings = new SettingsWindow(Monitor, StopIndex);
+            _settings = new SettingsWindow(Monitor, Budget);
             _settings.Closed += (_, _) =>
             {
                 _settings = null;
@@ -234,7 +255,7 @@ public partial class App : Application
         _flyoutCloseTimer?.Stop();
         if (_flyout is null)
         {
-            _flyout = new TimesFlyoutWindow(Monitor, Tracker, StopIndex);
+            _flyout = new TimesFlyoutWindow(Monitor, Tracker, Budget);
             _flyout.PopupHidden += (_, _) =>
             {
                 // Restart the countdown from this dismissal.
@@ -266,9 +287,6 @@ public partial class App : Application
     /// <summary>Called once no window is open.</summary>
     private void ReleaseIdleResources()
     {
-        StopIndex.Unload();
-        Monitor.Schedule.Unload();
-
         // An idle tray app allocates almost nothing, so the GC wouldn't run on its own to hand the
         // closed windows' memory back to Windows. Wait for WinUI to finish tearing the window down
         // first, or its objects are still referenced and just get promoted. Then run finalizers
@@ -358,6 +376,7 @@ public partial class App : Application
         _flyout?.CloseWindow();
         _settings?.Close();
         NotificationService.Unregister();
+        _cache?.SaveAsync().Wait(ExitSaveTimeout);
 
         if (_trayIcon is not null)
         {

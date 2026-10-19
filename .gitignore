@@ -53,5 +53,5 @@ _ReSharper*/
 Generated\ Files/
 *_wpftmp.csproj
 
-# Holds the MCTS and Azure Maps keys; copy OAuth.resw.sample to create it.
+# Holds the Transit and Azure Maps keys; copy OAuth.resw.sample to create it.
 OAuth.resw

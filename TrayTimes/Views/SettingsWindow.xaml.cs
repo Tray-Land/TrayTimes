@@ -1,10 +1,11 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Net.Http;
-using Microsoft.Windows.ApplicationModel.Resources;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.Windows.ApplicationModel.Resources;
 using TrayTimes.Controls;
 using TrayTimes.Models;
 using TrayTimes.Services;
@@ -21,14 +22,22 @@ using MapPolyline = WinUIEx.Maps.MapPolyline;
 
 namespace TrayTimes.Views;
 
-/// <summary>Manages favorite places, favorite stops (route → direction → stop picker with a map), and app settings.</summary>
+/// <summary>
+/// Manages favorite places, favorite stops (a stop search, or route → direction → stop, with a
+/// map), and app settings. Nothing is requested until the user asks: searching, loading the
+/// area's routes, and picking a route each cost one call (two for the area's routes), and are
+/// cached.
+/// </summary>
 public sealed partial class SettingsWindow : WindowEx
 {
+    private static readonly TimeSpan InitialLocationTimeout = TimeSpan.FromSeconds(3);
+    private static readonly GeoPoint WorldCenter = new(20, 0);
+    private const double WorldZoom = 2;
+
     private readonly ResourceLoader _resources = new();
     private readonly ArrivalsMonitor _monitor;
-    private readonly StopIndexService _stopIndex;
+    private readonly TransitBudget _budget;
     private readonly ITransitService _service;
-    private readonly StopPickerLoader _pickerLoader;
     private readonly CancellationTokenSource _windowCancellation = new();
     private readonly ObservableCollection<SavedStop> _savedStops = [];
     private readonly Dictionary<PlacePicker, PlaceKind> _fixedPickers;
@@ -38,21 +47,21 @@ public sealed partial class SettingsWindow : WindowEx
     private readonly FontIcon _selectedGlyph;
     private FontIcon? _stopGlyph;
     private MapIcon? _selectedPin;
+    private RouteDetails? _routeDetails;
     private bool _loading = true;
     private bool _savingOrder;
     private int _pickerVersion;
     private CancellationTokenSource? _pickerCancellation;
 
-    internal SettingsWindow(ArrivalsMonitor monitor, StopIndexService stopIndex)
+    internal SettingsWindow(ArrivalsMonitor monitor, TransitBudget budget)
     {
         InitializeComponent();
         Title = _resources.GetString("SettingsWindowTitle");
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(SettingsTitleBar);
         _monitor = monitor;
-        _stopIndex = stopIndex;
+        _budget = budget;
         _service = monitor.Service;
-        _pickerLoader = new StopPickerLoader(monitor.Metadata);
         AppWindow.SetIcon("Assets/AppIcon.ico");
         WindowPlacementService.CenterOnPrimary(this, 720, 800);
 
@@ -65,9 +74,6 @@ public sealed partial class SettingsWindow : WindowEx
 
         _fixedPickers = new() { [HomePicker] = PlaceKind.Home, [WorkPicker] = PlaceKind.Work, [SchoolPicker] = PlaceKind.School };
         LoadPlaces();
-        _stopIndex.Changed += OnStopIndexChanged;
-        Closed += (_, _) => _stopIndex.Changed -= OnStopIndexChanged;
-        UpdateStopIndexText();
 
         Closed += (_, _) =>
         {
@@ -81,6 +87,9 @@ public sealed partial class SettingsWindow : WindowEx
 
         ApiUsageService.Changed += OnApiUsageChanged;
         Closed += (_, _) => ApiUsageService.Changed -= OnApiUsageChanged;
+        TransitBudgetPolicy policy = _budget.Policy;
+        CallsPerMinuteBox.Value = policy.CallsPerMinute;
+        CallsPerMonthBox.Value = policy.CallsPerMonth;
         UpdateApiUsage();
         _selectedGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 20 };
         MapHelpers.ApplyStopColor(_selectedGlyph, Root);
@@ -93,7 +102,7 @@ public sealed partial class SettingsWindow : WindowEx
             MapHelpers.ApplyStopColor(_selectedGlyph, Root);
         };
         MapHelpers.ApplyBasemap(PickerMap, Root, null);
-        FrameInitialView();
+        _ = FrameInitialViewAsync();
 
         HeadOutBox.Minimum = SettingsService.MinHeadOutMinutes;
         HeadOutBox.Maximum = SettingsService.MaxHeadOutMinutes;
@@ -101,10 +110,17 @@ public sealed partial class SettingsWindow : WindowEx
         KeepAwakeToggle.IsOn = SettingsService.KeepAwakeWhileTracking;
 
         KeyBar.IsOpen = !_service.IsConfigured;
-        _ = LoadRoutesAsync();
+        StopSearchButton.IsEnabled = _service.IsConfigured;
+        LoadRoutesButton.IsEnabled = _service.IsConfigured;
+        RouteBox.PlaceholderText = _resources.GetString(_service.IsConfigured ? "SettingsLoadRoutesFirst" : "SettingsApiKeyNeeded");
         _ = LoadStartupStateAsync();
         _loading = false;
     }
+
+    /// <summary>Where the picker map is looking; searches and route lists are for this area.</summary>
+    private GeoPoint MapCenter => PickerMap.Center is { } center
+        ? new GeoPoint(center.Position.Latitude, center.Position.Longitude)
+        : WorldCenter;
 
     private void LoadPlaces()
     {
@@ -155,7 +171,7 @@ public sealed partial class SettingsWindow : WindowEx
         Button removeButton = new()
         {
             VerticalAlignment = VerticalAlignment.Bottom,
-            Content = new FontIcon { FontSize = 14, Glyph = "" }, // Delete
+            Content = new FontIcon { FontSize = 14, Glyph = "" }, // Delete
             Style = (Style)Application.Current.Resources["ToolbarButtonStyle"],
         };
         PlacePicker picker = new() { Place = existing?.Place };
@@ -242,6 +258,31 @@ public sealed partial class SettingsWindow : WindowEx
         App.Current.Tracker.ApplyKeepAwakeSetting();
     }
 
+    private void BudgetBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
+    {
+        if (_loading)
+        {
+            return;
+        }
+
+        TransitBudgetPolicy saved = _budget.Policy;
+        if (double.IsNaN(args.NewValue) || args.NewValue < 1)
+        {
+            // Cleared or invalid entry: put the saved value back.
+            sender.Value = sender == CallsPerMinuteBox ? saved.CallsPerMinute : saved.CallsPerMonth;
+            return;
+        }
+
+        TransitBudgetPolicy policy = saved with
+        {
+            CallsPerMinute = (int)Math.Round(CallsPerMinuteBox.Value),
+            CallsPerMonth = (int)Math.Round(CallsPerMonthBox.Value),
+        };
+        SettingsService.TransitBudget = policy;
+        _budget.Policy = SettingsService.TransitBudget; // The saved, range-checked values.
+        UpdateApiUsage();
+    }
+
     private void OnApiUsageChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(UpdateApiUsage);
 
     private void UpdateApiUsage()
@@ -251,41 +292,54 @@ public sealed partial class SettingsWindow : WindowEx
             .Concat(summary.ByEndpoint.Select(e => ToRow(e.Key, e.Value)))
             .ToList();
 
+        TransitBudgetLevel level = _budget.Level;
+        BudgetText.Text = string.Format(
+            CultureInfo.CurrentCulture,
+            _resources.GetString("SettingsBudgetFormat"),
+            summary.Total.ThisMonth,
+            _budget.Policy.CallsPerMonth,
+            summary.Total.Today,
+            _budget.DailyAllowance,
+            _resources.GetString($"SettingsBudgetLevel{level}"));
+
         static ApiUsageRow ToRow(string name, ApiCallCounts counts) =>
-            new(name, counts.Today.ToString("N0"), counts.Last7Days.ToString("N0"), counts.Last14Days.ToString("N0"));
+            new(name, counts.Today.ToString("N0"), counts.Last7Days.ToString("N0"), counts.ThisMonth.ToString("N0"));
     }
 
-    private void ResetApiUsageButton_Click(object sender, RoutedEventArgs e) => ApiUsageService.Reset();
-
-    private void OnStopIndexChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(UpdateStopIndexText);
-
-    private void UpdateStopIndexText()
+    /// <summary>
+    /// Opens on the saved stops, else the rider's places, else where the flyout's map was left,
+    /// else this device's location (without asking for permission), else the whole world.
+    /// </summary>
+    private async Task FrameInitialViewAsync()
     {
-        StopIndexText.Text = _stopIndex.IsBuilding
-            ? _resources.GetString("SettingsDirectoryDownloading")
-            : _stopIndex.BuiltAt is { } at
-                ? string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsDirectoryUpdatedFormat"), _stopIndex.Count, at.ToLocalTime())
-                : _resources.GetString("SettingsDirectoryNotDownloaded");
-        RebuildIndexButton.IsEnabled = !_stopIndex.IsBuilding && _service.IsConfigured;
-    }
-
-    private async void RebuildIndexButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
+        List<GeoPoint> points = [.. SettingsService.Stops.Select(s => new GeoPoint(s.Lat, s.Lon))];
+        if (points.Count == 0)
         {
-            await _stopIndex.RebuildAsync();
+            points = [.. SettingsService.Places.Select(p => p.Location)];
         }
-        catch (Exception ex) when (IsTransitFailure(ex))
-        {
-            StopIndexText.Text = Describe(ex);
-        }
-    }
 
-    private void FrameInitialView()
-    {
-        List<GeoPoint> saved = [.. SettingsService.Stops.Select(s => new GeoPoint(s.Lat, s.Lon))];
-        // Downtown Milwaukee until the user has stops of their own.
-        _ = MapHelpers.FrameAsync(PickerMap, saved.Count > 0 ? saved : [new GeoPoint(43.0389, -87.9065)], MapAnimationKind.None, singlePointZoom: 12);
+        if (points.Count == 0 && SettingsService.FlyoutMapView is { } view)
+        {
+            points = [new GeoPoint(view.Lat, view.Lon)];
+        }
+
+        if (points.Count == 0 && await LocationService.TryGetDeviceLocationAsync(InitialLocationTimeout) is { } here)
+        {
+            points = [here];
+        }
+
+        if (_windowCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        if (points.Count == 0)
+        {
+            _ = PickerMap.TrySetViewAsync(MapHelpers.ToGeopoint(WorldCenter), WorldZoom, 0, 0, MapAnimationKind.None);
+            return;
+        }
+
+        _ = MapHelpers.FrameAsync(PickerMap, points, MapAnimationKind.None, singlePointZoom: 14);
     }
 
     private void OnStopsChanged(object? sender, EventArgs e)
@@ -322,40 +376,6 @@ public sealed partial class SettingsWindow : WindowEx
         }
     }
 
-    private async Task LoadRoutesAsync()
-    {
-        if (!_service.IsConfigured)
-        {
-            RouteBox.PlaceholderText = _resources.GetString("SettingsApiKeyNeeded");
-            return;
-        }
-
-        IReadOnlyDictionary<string, TransitRoute> catalog;
-        try
-        {
-            catalog = await _monitor.GetRouteCatalogAsync(TransitConsumer.Settings, _windowCancellation.Token);
-        }
-        catch (OperationCanceledException) when (_windowCancellation.IsCancellationRequested)
-        {
-            return;
-        }
-
-        if (_windowCancellation.IsCancellationRequested)
-        {
-            return;
-        }
-        if (catalog.Count == 0)
-        {
-            RouteBox.PlaceholderText = _resources.GetString("SettingsRoutesUnavailable");
-            AddStatusText.Text = string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsReopenToRetryFormat"), _service.AgencyName);
-            return;
-        }
-
-        RouteBox.ItemsSource = catalog.Values.OrderBy(r => r, RouteOrder.Instance).ToList();
-        RouteBox.PlaceholderText = _resources.GetString("SettingsChooseRoute");
-        RouteBox.IsEnabled = true;
-    }
-
     /// <summary>Cancels the previous picker selection's requests and returns the token for the new one.</summary>
     private CancellationToken BeginPickerRequest()
     {
@@ -365,102 +385,46 @@ public sealed partial class SettingsWindow : WindowEx
         return _pickerCancellation.Token;
     }
 
-    private async void RouteBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void StopSearchBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            _ = SearchStopsAsync();
+        }
+    }
+
+    private void StopSearchButton_Click(object sender, RoutedEventArgs e) => _ = SearchStopsAsync();
+
+    /// <summary>Lists the stops near the map whose name or code matches the search. Runs only on Enter or the button, never per keystroke.</summary>
+    private async Task SearchStopsAsync()
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection);
-        if (RouteBox.SelectedItem is not TransitRoute route)
+        string query = StopSearchBox.Text.Trim();
+        if (!_service.IsConfigured || query.Length == 0)
         {
             return;
         }
 
         int version = ++_pickerVersion;
         CancellationToken cancellationToken = BeginPickerRequest();
+        RouteBox.SelectedIndex = -1;
         ResetDirectionAndStops();
-        DirectionBox.PlaceholderText = _resources.GetString("SettingsPickerLoading");
-
+        _routeDetails = null;
+        StopBox.PlaceholderText = _resources.GetString("SettingsPickerLoading");
+        PickerLoadingRing.IsActive = true;
         try
         {
-            IReadOnlyList<TransitDirection> directions = await _service.GetDirectionsAsync(route.Id, cancellationToken);
+            IReadOnlyList<TransitStop> stops = await _service.SearchStopsAsync(MapCenter, query, cancellationToken);
             if (version != _pickerVersion)
             {
                 return;
             }
 
-            DirectionBox.ItemsSource = directions;
-            DirectionBox.PlaceholderText = _resources.GetString(directions.Count == 0 ? "SettingsNoDirections" : "SettingsChooseDirection");
-            DirectionBox.IsEnabled = directions.Count > 0;
-            if (directions.Count > 0)
-            {
-                DirectionBox.SelectedIndex = 0;
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // A newer selection (or closing the window) replaced this one.
-        }
-        catch (Exception ex) when (IsTransitFailure(ex))
-        {
-            if (version == _pickerVersion)
-            {
-                DirectionBox.PlaceholderText = string.Empty;
-                AddStatusText.Text = Describe(ex);
-            }
-        }
-    }
-
-    private async void DirectionBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection);
-        if (RouteBox.SelectedItem is not TransitRoute route || DirectionBox.SelectedItem is not TransitDirection direction)
-        {
-            return;
-        }
-
-        int version = ++_pickerVersion;
-        CancellationToken cancellationToken = BeginPickerRequest();
-        StopBox.ItemsSource = null;
-        StopBox.IsEnabled = false;
-        StopBox.PlaceholderText = _resources.GetString("SettingsPickerLoading");
-        AddStopButton.IsEnabled = false;
-        AddStatusText.Text = string.Empty;
-        PickerLoadingRing.IsActive = true;
-        _routeLayer.MapElements.Clear();
-        _stopLayer.MapElements.Clear();
-        _stopPins.Clear();
-        _selectedPin = null;
-
-        try
-        {
-            await _pickerLoader.LoadAsync(route.Id, direction.Id,
-                stops =>
-                {
-                    if (version != _pickerVersion)
-                    {
-                        return;
-                    }
-
-                    StopBox.ItemsSource = stops;
-                    StopBox.PlaceholderText = _resources.GetString(stops.Count == 0 ? "SettingsNoStops" : "SettingsChooseStop");
-                    StopBox.IsEnabled = stops.Count > 0;
-                    PickerLoadingRing.IsActive = false;
-                    ShowStopsOnMap(route, stops);
-                },
-                patterns =>
-                {
-                    if (version == _pickerVersion)
-                    {
-                        ShowRouteOnMap(route, direction, patterns);
-                    }
-                },
-                ex =>
-                {
-                    System.Diagnostics.Debug.WriteLine($"Settings route shape load failed: {ex.GetType().Name}. Stop selection remains available.");
-                    if (version == _pickerVersion)
-                    {
-                        AddStatusText.Text = Describe(ex);
-                    }
-                },
-                cancellationToken);
+            // A searched stop has no route picked, so it follows every route there.
+            AllRoutesCheck.IsChecked = true;
+            AllRoutesCheck.IsEnabled = false;
+            ShowStopChoices(null, stops, _resources.GetString(stops.Count == 0 ? "SettingsNoMatchingStops" : "SettingsChooseStop"));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -481,6 +445,103 @@ public sealed partial class SettingsWindow : WindowEx
                 PickerLoadingRing.IsActive = false;
             }
         }
+    }
+
+    /// <summary>Loads the routes of the transit networks serving the map's area (two calls, kept for a week).</summary>
+    private async void LoadRoutesButton_Click(object sender, RoutedEventArgs e)
+    {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection);
+        LoadRoutesButton.IsEnabled = false;
+        RouteBox.PlaceholderText = _resources.GetString("SettingsPickerLoading");
+        try
+        {
+            IReadOnlyList<TransitRoute> routes = await _service.GetRoutesNearAsync(MapCenter, _windowCancellation.Token);
+            RouteBox.ItemsSource = routes.OrderBy(r => r, RouteOrder.Instance).ToList();
+            RouteBox.PlaceholderText = _resources.GetString(routes.Count == 0 ? "SettingsNoRoutesHere" : "SettingsChooseRoute");
+            RouteBox.IsEnabled = routes.Count > 0;
+        }
+        catch (OperationCanceledException) when (_windowCancellation.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex) when (IsTransitFailure(ex))
+        {
+            RouteBox.PlaceholderText = _resources.GetString("SettingsRoutesUnavailable");
+            AddStatusText.Text = Describe(ex);
+        }
+
+        LoadRoutesButton.IsEnabled = true;
+    }
+
+    private async void RouteBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection);
+        if (RouteBox.SelectedItem is not TransitRoute route)
+        {
+            return;
+        }
+
+        int version = ++_pickerVersion;
+        CancellationToken cancellationToken = BeginPickerRequest();
+        ResetDirectionAndStops();
+        AllRoutesCheck.IsEnabled = true;
+        AllRoutesCheck.IsChecked = false;
+        DirectionBox.PlaceholderText = _resources.GetString("SettingsPickerLoading");
+        PickerLoadingRing.IsActive = true;
+
+        try
+        {
+            RouteDetails details = await _service.GetRouteDetailsAsync(route.Id, cancellationToken);
+            if (version != _pickerVersion)
+            {
+                return;
+            }
+
+            _routeDetails = details;
+            TransitDirection[] directions = [.. details.Itineraries.Select(i => i.Direction)];
+            DirectionBox.ItemsSource = directions;
+            DirectionBox.PlaceholderText = _resources.GetString(directions.Length == 0 ? "SettingsNoDirections" : "SettingsChooseDirection");
+            DirectionBox.IsEnabled = directions.Length > 0;
+            if (directions.Length > 0)
+            {
+                DirectionBox.SelectedIndex = 0;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A newer selection (or closing the window) replaced this one.
+        }
+        catch (Exception ex) when (IsTransitFailure(ex))
+        {
+            if (version == _pickerVersion)
+            {
+                DirectionBox.PlaceholderText = string.Empty;
+                AddStatusText.Text = Describe(ex);
+            }
+        }
+        finally
+        {
+            if (version == _pickerVersion)
+            {
+                PickerLoadingRing.IsActive = false;
+            }
+        }
+    }
+
+    /// <summary>The route's details are already loaded, so picking a direction costs nothing.</summary>
+    private void DirectionBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (RouteBox.SelectedItem is not TransitRoute route
+            || DirectionBox.SelectedItem is not TransitDirection direction
+            || _routeDetails?.Itineraries.FirstOrDefault(i => i.Direction == direction) is not { } itinerary)
+        {
+            return;
+        }
+
+        ++_pickerVersion;
+        AddStatusText.Text = string.Empty;
+        ShowStopChoices(route, itinerary.Stops, _resources.GetString(itinerary.Stops.Count == 0 ? "SettingsNoStops" : "SettingsChooseStop"));
+        ShowRouteOnMap(route, _monitor.Metadata.GetCachedPatterns(route.Id, direction.Id));
     }
 
     private void StopBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -520,17 +581,17 @@ public sealed partial class SettingsWindow : WindowEx
 
     private void AddStopButton_Click(object sender, RoutedEventArgs e)
     {
-        if (RouteBox.SelectedItem is not TransitRoute route
-            || DirectionBox.SelectedItem is not TransitDirection direction
-            || StopBox.SelectedItem is not TransitStop stop)
+        if (StopBox.SelectedItem is not TransitStop stop)
         {
             return;
         }
 
+        TransitRoute? route = RouteBox.SelectedItem as TransitRoute;
+        TransitDirection? direction = DirectionBox.SelectedItem as TransitDirection;
         IReadOnlyList<SavedStop> existing = SettingsService.Stops;
-        if (existing.All(s => s.StopId != stop.Id) && SavedStop.DistinctStopCount(existing) >= _service.MaxStopsPerRequest)
+        if (existing.All(s => s.StopId != stop.Id) && SavedStop.DistinctStopCount(existing) >= SettingsService.MaxFavoriteStops)
         {
-            AddStatusText.Text = string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsStopLimitFormat"), _service.MaxStopsPerRequest);
+            AddStatusText.Text = string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsStopLimitFormat"), SettingsService.MaxFavoriteStops);
             return;
         }
 
@@ -539,12 +600,12 @@ public sealed partial class SettingsWindow : WindowEx
             stop.Name,
             stop.Location.Lat,
             stop.Location.Lon,
-            route.Id,
-            route.DisplayId,
-            route.Color,
-            direction.Id,
-            direction.Name,
-            AllRoutesCheck.IsChecked == true));
+            route?.Id ?? string.Empty,
+            route?.DisplayId ?? string.Empty,
+            route?.Color,
+            direction?.Id ?? string.Empty,
+            direction?.Name ?? string.Empty,
+            route is null || direction is null || AllRoutesCheck.IsChecked == true));
         AddStatusText.Text = string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsStopAddedFormat"), stop.Name);
     }
 
@@ -564,25 +625,35 @@ public sealed partial class SettingsWindow : WindowEx
         _selectedPin = null;
     }
 
-    private void ShowRouteOnMap(TransitRoute route, TransitDirection direction, IReadOnlyList<RoutePattern> patterns)
+    private void ShowRouteOnMap(TransitRoute route, IReadOnlyList<RoutePattern> patterns)
     {
         Color color = MapHelpers.ParseRouteColor(route.Color);
         _routeLayer.MapElements.Clear();
-        _routeLayer.MapElements.AddRange(patterns
-            .Where(p => string.Equals(p.DirectionId, direction.Id, StringComparison.OrdinalIgnoreCase))
-            .Select(p => new MapPolyline
-            {
-                Path = new Geopath(p.Points.Select(pt => new BasicGeoposition { Latitude = pt.Lat, Longitude = pt.Lon })),
-                StrokeColor = color,
-                StrokeThickness = 8,
-            }));
+        _routeLayer.MapElements.AddRange(patterns.Select(p => new MapPolyline
+        {
+            Path = new Geopath(p.Points.Select(pt => new BasicGeoposition { Latitude = pt.Lat, Longitude = pt.Lon })),
+            StrokeColor = color,
+            StrokeThickness = 8,
+        }));
     }
 
-    private void ShowStopsOnMap(TransitRoute route, IReadOnlyList<TransitStop> stops)
+    /// <summary>Lists stops to choose from, in the box and as dots on the map (in the route's color when there is one).</summary>
+    private void ShowStopChoices(TransitRoute? route, IReadOnlyList<TransitStop> stops, string placeholder)
     {
-        Color color = MapHelpers.ParseRouteColor(route.Color);
+        StopBox.ItemsSource = stops;
+        StopBox.PlaceholderText = placeholder;
+        StopBox.IsEnabled = stops.Count > 0;
+        AddStopButton.IsEnabled = false;
+        PickerLoadingRing.IsActive = false;
+        if (route is null)
+        {
+            _routeLayer.MapElements.Clear();
+        }
+
         // One shared glyph for every dot so they share a raster.
-        _stopGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, color, 12);
+        _stopGlyph = route is null
+            ? MapHelpers.CreateGlyph(MapHelpers.StopGlyph, ((Microsoft.UI.Xaml.Media.SolidColorBrush)_selectedGlyph.Foreground).Color, 12)
+            : MapHelpers.CreateGlyph(MapHelpers.StopGlyph, MapHelpers.ParseRouteColor(route.Color), 12);
         _stopLayer.MapElements.Clear();
         _stopPins.Clear();
         _selectedPin = null;
@@ -592,7 +663,10 @@ public sealed partial class SettingsWindow : WindowEx
         }
 
         _stopLayer.MapElements.AddRange(_stopPins.Keys);
-        _ = MapHelpers.FrameAsync(PickerMap, [.. stops.Select(s => s.Location)], MapAnimationKind.Default);
+        if (stops.Count > 0)
+        {
+            _ = MapHelpers.FrameAsync(PickerMap, [.. stops.Select(s => s.Location)], MapAnimationKind.Default);
+        }
     }
 
     private static bool IsTransitFailure(Exception ex) => ex is HttpRequestException or TaskCanceledException or TransitApiException;
@@ -600,7 +674,7 @@ public sealed partial class SettingsWindow : WindowEx
     private string Describe(Exception ex) => ex is TransitApiException api
         ? api.Message
         : ConnectivityService.IsInternetAvailable
-            ? string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsTransitUnavailableFormat"), _service.AgencyName)
+            ? string.Format(CultureInfo.CurrentCulture, _resources.GetString("SettingsTransitUnavailableFormat"), _service.ProviderName)
             : _resources.GetString("SettingsOffline");
 
     private async Task LoadStartupStateAsync()

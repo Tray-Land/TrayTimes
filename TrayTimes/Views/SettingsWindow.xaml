@@ -237,6 +237,31 @@
                         </Grid>
                     </Expander.Header>
                     <StackPanel Spacing="12">
+                        <TextBlock x:Uid="SettingsAddStopHelp" Style="{StaticResource SettingsDescriptionStyle}" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="StopSearchBox"
+                                x:Uid="SettingsStopSearchBox"
+                                AutomationProperties.AutomationId="StopSearchBox"
+                                KeyDown="StopSearchBox_KeyDown" />
+                            <Button
+                                x:Name="StopSearchButton"
+                                x:Uid="SettingsStopSearchButton"
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="StopSearchButton"
+                                VerticalAlignment="Bottom"
+                                Click="StopSearchButton_Click" />
+                        </Grid>
+                        <Button
+                            x:Name="LoadRoutesButton"
+                            x:Uid="SettingsLoadRoutesButton"
+                            AutomationProperties.AutomationId="LoadRoutesButton"
+                            HorizontalAlignment="Left"
+                            Click="LoadRoutesButton_Click" />
                         <ComboBox
                             x:Name="RouteBox"
                             x:Uid="SettingsRouteBox"
@@ -391,37 +416,6 @@
                 </Grid>
 
                 <Expander
-                    x:Uid="SettingsDirectoryExpander"
-                    AutomationProperties.AutomationId="DirectoryExpander"
-                    Style="{StaticResource SettingsExpanderStyle}">
-                    <Expander.Header>
-                        <Grid ColumnSpacing="16">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="20" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <FontIcon Glyph="&#xE8F1;" Style="{StaticResource SettingsIconStyle}" />
-                            <StackPanel Grid.Column="1" Spacing="4">
-                                <TextBlock x:Uid="SettingsDirectoryTitle" Style="{StaticResource SettingsCardTitleStyle}" />
-                                <TextBlock x:Uid="SettingsDirectoryDescription" Style="{StaticResource SettingsDescriptionStyle}" />
-                            </StackPanel>
-                        </Grid>
-                    </Expander.Header>
-                    <StackPanel Spacing="12">
-                        <TextBlock
-                            x:Name="StopIndexText"
-                            AutomationProperties.LiveSetting="Polite"
-                            Style="{StaticResource SettingsDescriptionStyle}" />
-                        <Button
-                            x:Name="RebuildIndexButton"
-                            x:Uid="SettingsRebuildIndexButton"
-                            AutomationProperties.AutomationId="RebuildIndexButton"
-                            HorizontalAlignment="Left"
-                            Click="RebuildIndexButton_Click" />
-                    </StackPanel>
-                </Expander>
-
-                <Expander
                     x:Uid="SettingsApiUsageExpander"
                     AutomationProperties.AutomationId="ApiUsageExpander"
                     Style="{StaticResource SettingsExpanderStyle}">
@@ -439,6 +433,31 @@
                         </Grid>
                     </Expander.Header>
                     <StackPanel Spacing="12">
+                        <TextBlock
+                            x:Name="BudgetText"
+                            AutomationProperties.LiveSetting="Polite"
+                            TextWrapping="Wrap" />
+                        <TextBlock x:Uid="SettingsBudgetHelp" Style="{StaticResource SettingsDescriptionStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <NumberBox
+                                x:Name="CallsPerMinuteBox"
+                                x:Uid="SettingsCallsPerMinuteBox"
+                                AutomationProperties.AutomationId="CallsPerMinuteBox"
+                                Width="160"
+                                Minimum="1"
+                                SmallChange="1"
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="BudgetBox_ValueChanged" />
+                            <NumberBox
+                                x:Name="CallsPerMonthBox"
+                                x:Uid="SettingsCallsPerMonthBox"
+                                AutomationProperties.AutomationId="CallsPerMonthBox"
+                                Width="160"
+                                Minimum="1"
+                                SmallChange="100"
+                                SpinButtonPlacementMode="Compact"
+                                ValueChanged="BudgetBox_ValueChanged" />
+                        </StackPanel>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" />
@@ -458,7 +477,7 @@
                                 HorizontalTextAlignment="End"
                                 Style="{StaticResource SettingsDescriptionStyle}" />
                             <TextBlock
-                                x:Uid="SettingsFortnightHeading"
+                                x:Uid="SettingsMonthHeading"
                                 Grid.Column="3"
                                 HorizontalTextAlignment="End"
                                 Style="{StaticResource SettingsDescriptionStyle}" />
@@ -488,17 +507,11 @@
                                         <TextBlock
                                             Grid.Column="3"
                                             HorizontalTextAlignment="End"
-                                            Text="{x:Bind Last14Days}" />
+                                            Text="{x:Bind ThisMonth}" />
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <Button
-                            x:Name="ResetApiUsageButton"
-                            x:Uid="SettingsResetApiUsageButton"
-                            AutomationProperties.AutomationId="ResetApiUsageButton"
-                            HorizontalAlignment="Left"
-                            Click="ResetApiUsageButton_Click" />
                     </StackPanel>
                 </Expander>
 

@@ -48,16 +48,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const double SplitterKeyStep = 20;
     private const int MaxNearbyStops = 8;
     private const int MaxRoutedStops = 12; // walking routes looked up per discovery
+    private const int NearbyRadiusMeters = 1000; // about a 12-minute walk
     private const double WalkingMetersPerMinute = 80; // about 3 mph
     private static readonly TimeSpan PendingPopWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LocationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RecentDismissWindow = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan PlaceRefreshInterval = TimeSpan.FromSeconds(30);
 
     private readonly HWND _hwnd;
     private readonly ArrivalsMonitor _monitor;
     private readonly BusTrackingService _tracker;
-    private readonly StopIndexService _stopIndex;
+    private readonly TransitBudget _budget;
     private readonly VehiclePositionsMonitor _vehiclePositions;
     private readonly PlaceArrivalsMonitor _placeMonitor;
     private readonly DispatcherQueueTimer _hideTimer;
@@ -72,7 +72,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private readonly List<(MapPolyline Line, string RouteId)> _placeRouteLines = [];
     private HashSet<RouteDirection>? _drawnNearbyRoutes;
-    private CancellationTokenSource? _nearbyRoutesCancellation;
 
     private readonly MapElementsLayer _routeLayer = new();
     private readonly List<(MapPolyline Line, string RouteId)> _routeLines = [];
@@ -92,7 +91,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly long _mapHeadingCallbackToken;
     private string? _selectedVehicleId;
 
-    private IReadOnlyDictionary<string, TransitRoute> _routes = new Dictionary<string, TransitRoute>();
+    // The row picked to show vehicles for: positions are fetched for this route direction only.
+    private RouteDirection? _selectedLine;
+    private string _selectedLineLabel = string.Empty;
+    private string? _selectedTripId;
+    private string? _onlyTripId; // When set (tracking), only this trip's vehicle is drawn, not the whole line's.
+    private GeoPoint? _frameWithVehicle; // The picked row's stop, to frame with its vehicle once positions arrive.
+
     private IReadOnlyList<StopGroupItem> _groups = [];
     private FlyoutMode _mode;
     private bool _isPopupVisible;
@@ -104,7 +109,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private bool _locationPermissionPending;
     private bool _isRequestingLocationPermission;
     private string? _locationPermissionError;
-    private CancellationTokenSource? _routesCancellation;
     private DateTime _lastDismissedAtUtc;
 
     private Action? _emptyAction;
@@ -121,7 +125,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private PredictionSnapshot? _shownPlaceSnapshot;
     private bool _placeReframe;
     private CommuteLeg? _commuteLeg;
-    private IReadOnlySet<RouteDirection> _directRoutes = new HashSet<RouteDirection>();
+    private IReadOnlySet<StopLine>? _placeLines; // The line directions each listed stop shows; null shows all.
+    private IReadOnlyDictionary<StopLine, TripTiming>? _placeTrips;
     private string? _destinationId; // The place picked from Going to, or null to guess.
 
     // Motion state: which rows have already animated in, so a refresh only animates what's new or changed.
@@ -138,13 +143,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private bool _captionShown;
     private int _captionVersion;
 
-    internal TimesFlyoutWindow(ArrivalsMonitor monitor, BusTrackingService tracker, StopIndexService stopIndex)
+    internal TimesFlyoutWindow(ArrivalsMonitor monitor, BusTrackingService tracker, TransitBudget budget)
     {
         InitializeComponent();
         _monitor = monitor;
         _tracker = tracker;
-        _stopIndex = stopIndex;
-        _vehiclePositions = new VehiclePositionsMonitor(_monitor.Service, UpdateVehicles);
+        _budget = budget;
+        _vehiclePositions = new VehiclePositionsMonitor(_monitor.Service, UpdateVehicles, log: DiagnosticLogService.Write);
         _placeMonitor = new PlaceArrivalsMonitor(_monitor.Predictions, LocatePlaceAsync, FindPlaceStopsAsync);
         _placeMonitor.Updated += OnPlaceUpdated;
         _hwnd = (HWND)WindowNative.GetWindowHandle(this);
@@ -156,7 +161,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _hideTimer = CreateTimer(TimeSpan.FromMilliseconds(150), repeating: false, HideIfFocusLeftWindow);
         _vehicleTimer = CreateTimer(VehiclePositionsMonitor.RefreshInterval, repeating: true, () => _ = RefreshVehiclesAsync(TransitTrigger.Timer));
-        _placeTimer = CreateTimer(PlaceRefreshInterval, repeating: true, () => _ = LoadPlaceAsync(reframe: false, TransitTrigger.Timer));
+        _placeTimer = CreateTimer(_monitor.RefreshInterval, repeating: true, OnPlaceTimerTick);
         _captionTimer = CreateTimer(TimeSpan.FromSeconds(5), repeating: false, () => HideMapCaption(animate: true));
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
@@ -177,7 +182,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _stopLayer.Tapped += StopLayer_Tapped;
         Map.Tapped += Map_Tapped;
 
-        TitleText.Text = $"{_monitor.Service.AgencyName} arrivals";
+        TitleText.Text = new ResourceLoader().GetString("FlyoutTitle");
         Root.ActualThemeChanged += (_, _) =>
         {
             MapHelpers.ApplyBasemap(Map, Root, MapCover);
@@ -190,8 +195,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _monitor.Updated += OnArrivalsUpdated;
         _tracker.Changed += OnTrackingChanged;
-        _stopIndex.Changed += OnStopIndexChanged;
-        _monitor.Schedule.Loaded += OnScheduleLoaded;
+        _monitor.Metadata.PatternsChanged += OnPatternsChanged;
         SettingsService.StopsChanged += OnStopsChanged;
         SettingsService.PlacesChanged += OnPlacesChanged;
 
@@ -255,7 +259,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _isPopupVisible = false;
         _locationPermissionPending = false;
         _vehiclePositions.IsForeground = false;
-        _routesCancellation?.Cancel();
         _lastDismissedAtUtc = DateTime.UtcNow;
         _hideTimer.Stop();
         _vehicleTimer.Stop();
@@ -277,12 +280,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _placeMonitor.Updated -= OnPlaceUpdated;
         _monitor.Updated -= OnArrivalsUpdated;
         _tracker.Changed -= OnTrackingChanged;
-        _stopIndex.Changed -= OnStopIndexChanged;
-        _monitor.Schedule.Loaded -= OnScheduleLoaded;
+        _monitor.Metadata.PatternsChanged -= OnPatternsChanged;
         SettingsService.StopsChanged -= OnStopsChanged;
         SettingsService.PlacesChanged -= OnPlacesChanged;
         Map.UnregisterPropertyChangedCallback(WinUIEx.Maps.MapControl.HeadingProperty, _mapHeadingCallbackToken);
         Close();
+    }
+
+    private void OnPlaceTimerTick()
+    {
+        _placeTimer.Interval = _monitor.RefreshInterval; // The call budget may have moved on.
+        _ = LoadPlaceAsync(reframe: false, TransitTrigger.Timer);
     }
 
     private DispatcherQueueTimer CreateTimer(TimeSpan interval, bool repeating, Action tick)
@@ -453,7 +461,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             if (_savedStopsDirty)
             {
                 _savedStopsDirty = false;
-                _ = RebuildRoutesAsync();
+                DrawFavoriteRoutes();
             }
 
             RebuildStopPins();
@@ -463,7 +471,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                 _ = FrameListedStopsAsync(MapAnimationKind.None);
             }
 
-            _ = RefreshVehiclesAsync(trigger);
             return;
         }
 
@@ -472,12 +479,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _placeReframe = reframe;
         _placeMonitor.IsForeground = true;
         OnPlaceUpdated(this, EventArgs.Empty);
+        _placeTimer.Interval = _monitor.RefreshInterval;
         _placeTimer.Start();
         _ = LoadPlaceAsync(reframe, trigger);
     }
 
     private void ConfigurePlace() =>
-        _placeMonitor.Configure(new PlaceContext(_mode, SettingsService.Places, _destinationId), _stopIndex.BuiltAt);
+        _placeMonitor.Configure(new PlaceContext(_mode, SettingsService.Places, _destinationId));
 
     private async Task<PlaceLocation> LocatePlaceAsync(bool quick)
     {
@@ -592,34 +600,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             if (!_monitor.Service.IsConfigured)
             {
-                _placeNotice = new Notice("API key needed", $"Add your {_monitor.Service.AgencyName} key to OAuth.resw and rebuild.");
+                _placeNotice = new Notice("API key needed", "Add your Transit API key (TransitApiKey) to OAuth.resw and rebuild.");
                 Render();
                 return;
             }
 
-            if (trigger == TransitTrigger.TimetableLoaded)
-            {
-                await _placeMonitor.RefreshTimetableAsync();
-            }
-            else
-            {
-                await _placeMonitor.RefreshAsync(force: trigger is TransitTrigger.ManualRefresh or TransitTrigger.Retry);
-            }
-            if (!Stale() && _placeStops.Count > 0 && _routes.Count == 0)
-            {
-                _routes = await _monitor.GetRouteCatalogAsync(RequestConsumer);
-                if (!Stale())
-                {
-                    DrawCommuteRoutes();
-                }
-            }
+            await _placeMonitor.RefreshAsync(force: trigger is TransitTrigger.ManualRefresh or TransitTrigger.Retry);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
             if (!Stale())
             {
                 _placeError = ex is TransitApiException api ? api.Message
-                    : ConnectivityService.IsInternetAvailable ? $"Can't reach {_monitor.Service.AgencyName} right now. Retrying shortly."
+                    : ConnectivityService.IsInternetAvailable ? $"Can't reach {_monitor.Service.ProviderName} right now. Retrying shortly."
                     : "No internet connection. Times will update when you're back online.";
             }
         }
@@ -627,10 +620,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             if (!Stale())
             {
-                if (trigger != TransitTrigger.TimetableLoaded)
-                {
-                    _placeReframe = false;
-                }
+                _placeReframe = false;
                 Render();
             }
         }
@@ -645,12 +635,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         PlaceStops? found = _placeMonitor.Discovery;
-        if (found?.DirectoryBuiltAt is { } directoryAt && directoryAt != _stopIndex.BuiltAt)
-        {
-            ConfigurePlace();
-            _ = LoadPlaceAsync(reframe: false, TransitTrigger.StopsChanged);
-            return;
-        }
         if (found is null)
         {
             _placeOrigin = null;
@@ -661,7 +645,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _placeError = null;
             _placeNotice = null;
             _commuteLeg = null;
-            _directRoutes = new HashSet<RouteDirection>();
+            _placeLines = null;
+            _placeTrips = null;
             _shownPlace = null;
             _shownPlaceSnapshot = null;
             _stopLayer.MapElements.Clear();
@@ -674,15 +659,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         PredictionSnapshot? snapshot = _placeMonitor.Snapshot;
-        IReadOnlyList<Arrival> arrivals = snapshot is null ? []
-            : _monitor.Schedule.AddScheduled(snapshot.Arrivals, [.. found.Stops.Select(n => n.Stop.Id)]);
+        IReadOnlyList<Arrival> arrivals = snapshot?.Arrivals ?? [];
         bool changed = !ReferenceEquals(_shownPlace, found);
         _placeOrigin = found.Origin;
         _placeStops = found.Stops;
         _placeArrivals = arrivals;
         _destinationEtas = EstimateDestinationArrivals(found, arrivals);
         _commuteLeg = found.Leg;
-        _directRoutes = found.DirectRoutes ?? new HashSet<RouteDirection>();
+        _placeLines = found.Lines;
+        _placeTrips = found.Trips;
         if (snapshot is not null && !ReferenceEquals(snapshot, _shownPlaceSnapshot))
         {
             _placeError = null;
@@ -705,8 +690,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         Render();
-        _ = DrawNearbyRoutesAsync();
-        _ = RefreshVehiclesAsync(TransitTrigger.PlaceResult);
+        DrawNearbyRoutes();
     }
 
     private void ClearPlacePredictionDemand()
@@ -726,19 +710,18 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return PlaceStops.Unavailable(new Notice("Can't find your location", locationError ?? "Try again in a moment.", "Try again", () => EnterMode(reframe: true, TransitTrigger.Retry)));
         }
 
-        // Straight-line distance picks the candidates; the walking route decides which is quickest to reach.
-        IReadOnlyList<IndexedStop> directory = await _stopIndex.GetAsync();
-        cancellationToken.ThrowIfCancellationRequested();
-        DateTimeOffset? builtAt = _stopIndex.BuiltAt;
-        IReadOnlyList<NearbyStop> candidates = NearbyStop.Find(directory, point, MaxRoutedStops);
-        IReadOnlyList<NearbyStop> stops = [.. (await WalkingRouteService.RankByWalkAsync(point, candidates, cancellationToken)).Take(MaxNearbyStops)];
-        return new PlaceStops(point, stops, new Notice("No stops nearby", $"There are no {_monitor.Service.AgencyName} stops within about a mile of you."),
-            DirectoryBuiltAt: builtAt);
+        // One call finds the lines around here and each one's closest stop (reused for nearby points);
+        // the walking route then decides which of those stops is quickest to reach.
+        NearbyLines nearby = await _monitor.Metadata.GetNearbyLinesAsync(point, NearbyRadiusMeters, cancellationToken);
+        PlaceBoardResult board = PlaceBoard.Nearby(nearby, point, MaxRoutedStops);
+        IReadOnlyList<NearbyStop> stops = [.. (await WalkingRouteService.RankByWalkAsync(point, board.Stops, cancellationToken)).Take(MaxNearbyStops)];
+        return new PlaceStops(point, stops, new Notice("No stops nearby", $"Transit has no stops within {FormatDistance(NearbyRadiusMeters)} of you."),
+            Lines: board.Lines);
     }
 
     /// <summary>
-    /// Works out where the rider is likely headed next, then finds the stops near them with a bus
-    /// that gets there in one ride.
+    /// Works out where the rider is likely headed next, then asks the trip planner how to get there
+    /// (transfers included) and lists where to board.
     /// </summary>
     /// <param name="here">The device's location, or null (it's off, or the PC can't tell), in which case the planner guesses from the time of day.</param>
     private async Task<PlaceStops> FindCommuteStopsAsync(PlaceContext context, GeoPoint? here, CancellationToken cancellationToken)
@@ -746,7 +729,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         IReadOnlyList<FavoritePlace> places = context.Places;
         Notice setUp = new(
             "Set your favorite places",
-            "Add home, plus work or school, in settings. Commute then shows the buses to wherever you're headed next.",
+            "Add home, plus work or school, in settings. Commute then shows the rides to wherever you're headed next.",
             "Open settings",
             App.Current.ShowSettings);
         if (!places.Any(p => p.Kind == PlaceKind.Home))
@@ -765,88 +748,33 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return PlaceStops.Unavailable(new Notice($"You're at {leg.To.Name}", "Use Going to, above, to pick somewhere else."), leg);
         }
 
-        IReadOnlyList<IndexedStop> directory = await _stopIndex.GetAsync();
-        cancellationToken.ThrowIfCancellationRequested();
-        DateTimeOffset? builtAt = _stopIndex.BuiltAt;
-        List<NearbyStop> origin = [.. NearbyStop.Find(directory, leg.Origin, int.MaxValue, CommutePlanner.WalkRadiusMeters)];
-        List<IndexedStop> originStops = [.. origin.Select(n => n.Stop)];
-        List<NearbyStop> destination = [.. NearbyStop.Find(directory, leg.To.Location, int.MaxValue, CommutePlanner.WalkRadiusMeters)];
-        List<IndexedStop> destinationStops = [.. destination.Select(n => n.Stop)];
-
-        // Shapes tell a route's two directions apart, so only buses heading toward the destination are listed.
-        IEnumerable<string> routeIds = CommutePlanner.SharedRoutes(originStops, destinationStops).Select(r => r.RouteId).Distinct(StringComparer.OrdinalIgnoreCase);
-        Dictionary<string, IReadOnlyList<RoutePattern>> patterns = new(StringComparer.OrdinalIgnoreCase);
-        foreach ((string routeId, IReadOnlyList<RoutePattern> routePatterns) in await Task.WhenAll(routeIds.Select(async id => (id, await GetPatternsAsync(id, required: true, cancellationToken)))))
-        {
-            patterns[routeId] = routePatterns;
-        }
-
-        IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(originStops, destinationStops, patterns);
-        // Walk times reorder the closest few; the rest stay in straight-line order after them.
-        IReadOnlyList<NearbyStop> byWalk = [.. await WalkingRouteService.RankByWalkAsync(leg.Origin, origin.Take(MaxRoutedStops).ToList(), cancellationToken), .. origin.Skip(MaxRoutedStops)];
-
-        // Quickest first, so a stop is kept only if it's the quickest walk for some direct line.
-        HashSet<RouteDirection> claimed = [];
-        List<NearbyStop> stops = [];
-        foreach (NearbyStop n in byWalk)
-        {
-            bool nearest = false;
-            foreach (StopRouteInfo r in n.Stop.Routes)
-            {
-                RouteDirection line = new(r.RouteId, r.DirectionId);
-                if (direct.Contains(line) && claimed.Add(line))
-                {
-                    nearest = true;
-                }
-            }
-
-            if (nearest)
-            {
-                stops.Add(n);
-            }
-        }
-
-        stops = [.. stops.Take(MaxNearbyStops)];
-        Notice noDirectBus = new(
-            $"No direct bus to {leg.To.Name}",
-            $"None of the buses within a 10-minute walk go within a 10-minute walk of {leg.To.Name}. Tray Times doesn't plan transfers yet.",
+        // One plan call per trip (reused for three hours from about the same place); the stops'
+        // live departures then come from the shared departures batch like any other tab's.
+        TripPlan plan = await _monitor.Metadata.PlanTripAsync(leg.Origin, leg.To.Location, cancellationToken);
+        PlaceBoardResult board = PlaceBoard.Commute(plan, MaxNearbyStops);
+        Notice noTrip = new(
+            $"No trip to {leg.To.Name} right now",
+            $"Transit couldn't find a way to {leg.To.Name} from here by transit.",
             "Show nearby stops",
             () => SelectMode(FlyoutMode.Nearby));
-        return new PlaceStops(leg.Origin, stops, noDirectBus, leg, direct,
-            stops.Count == 0 ? null : await WalkFromStopsAsync(leg.To.Location, destination, cancellationToken), builtAt);
-    }
-
-    /// <summary>Seconds to walk between each stop near <paramref name="place"/> and it, by stop ID. Routed for the closest few; the rest are estimated.</summary>
-    private static async Task<IReadOnlyDictionary<string, double>> WalkFromStopsAsync(GeoPoint place, IReadOnlyList<NearbyStop> nearby, CancellationToken cancellationToken)
-    {
-        IReadOnlyList<NearbyStop> routed = await WalkingRouteService.RankByWalkAsync(place, [.. nearby.Take(MaxRoutedStops)], cancellationToken);
-        return routed.Concat(nearby.Skip(MaxRoutedStops)).ToDictionary(
-            n => n.Stop.Id,
-            n => n.WalkSeconds ?? n.Meters / WalkingMetersPerMinute * 60);
+        return new PlaceStops(leg.Origin, board.Stops, noTrip, leg, board.Lines, board.Trips);
     }
 
     /// <summary>
-    /// When the rider would reach their destination on each listed bus: the bus's departure, its
-    /// scheduled ride (shifted by how late it's running), then the walk from where it lets them off.
+    /// When the rider would reach their destination on each listed departure: its departure, plus
+    /// how long the planner's trip on that line takes from there (ride, transfers, and walk).
     /// </summary>
-    private IReadOnlyDictionary<Arrival, DateTimeOffset> EstimateDestinationArrivals(PlaceStops found, IReadOnlyList<Arrival> arrivals)
+    private static IReadOnlyDictionary<Arrival, DateTimeOffset> EstimateDestinationArrivals(PlaceStops found, IReadOnlyList<Arrival> arrivals)
     {
         Dictionary<Arrival, DateTimeOffset> etas = [];
-        if (found.DestinationWalks is not { Count: > 0 } walks
-            || found.DirectRoutes is not { } direct
-            || _monitor.Schedule.Timetable is not { } timetable)
+        if (found.Trips is not { Count: > 0 } trips)
         {
             return etas;
         }
 
-        string[] alightAt = [.. walks.Keys];
-        IEnumerable<Arrival> shown = arrivals
-            .Where(a => a.Status == ArrivalStatus.Scheduled && direct.Contains(new RouteDirection(a.RouteId, a.DirectionId)))
-            .GroupBy(a => a.StopId)
-            .SelectMany(g => g.Take(RoutesPerNearbyStop * TimesPerRoute)); // enough to reach every bus that might lead a row
-        foreach (Arrival arrival in shown)
+        foreach (Arrival arrival in arrivals.Where(a => a.Status == ArrivalStatus.Scheduled))
         {
-            if (CommutePlanner.ArrivalAtDestination(timetable.GetDownstreamArrivals(arrival, alightAt), walks) is { } eta)
+            if (PlaceBoard.ArrivalAtDestination(arrival, trips) is { } eta)
             {
                 etas[arrival] = eta;
             }
@@ -919,7 +847,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             NormalizedAnchorPoint = new Point(0.5, 0.5),
         });
 
-    /// <summary>Draws the commute's direct routes, in their direction of travel.</summary>
+    /// <summary>Draws the commute's lines, in their direction of travel, from shapes the trip plan brought.</summary>
     private void DrawCommuteRoutes()
     {
         if (_mode != FlyoutMode.Commute)
@@ -929,93 +857,55 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _commuteRouteLayer.MapElements.Clear();
         _placeRouteLines.Clear();
-        foreach (RouteDirection route in _directRoutes)
+        foreach (IGrouping<RouteDirection, StopLine> route in (_placeLines ?? new HashSet<StopLine>()).GroupBy(l => new RouteDirection(l.RouteId, l.DirectionId)))
         {
-            if (_monitor.Metadata.TryGetPatterns(route.RouteId, out IReadOnlyList<RoutePattern> patterns))
+            Color color = RouteColor(_placeArrivals.FirstOrDefault(a => new RouteDirection(a.RouteId, a.DirectionId) == route.Key)?.RouteColor
+                ?? _placeStops.SelectMany(s => s.Stop.Routes).FirstOrDefault(r => string.Equals(r.RouteId, route.Key.RouteId, StringComparison.OrdinalIgnoreCase))?.RouteColor);
+            foreach (RoutePattern pattern in _monitor.Metadata.GetCachedPatterns(route.Key.RouteId, route.Key.DirectionId))
             {
-                Color color = RouteColor(route.RouteId, null, null);
-                foreach (RoutePattern pattern in patterns.Where(p => string.Equals(p.DirectionId, route.DirectionId, StringComparison.OrdinalIgnoreCase)))
-                {
-                    MapPolyline line = CreateRouteLine(pattern, color);
-                    _commuteRouteLayer.MapElements.Add(line);
-                    _placeRouteLines.Add((line, route.RouteId));
-                }
+                MapPolyline line = CreateRouteLine(pattern, color);
+                _commuteRouteLayer.MapElements.Add(line);
+                _placeRouteLines.Add((line, route.Key.RouteId));
             }
         }
 
         UpdateRouteThickness();
     }
 
-    /// <summary>Draws the route and direction of every arrival listed in Nearby mode, redrawing only when that set changes.</summary>
-    private async Task DrawNearbyRoutesAsync()
+    /// <summary>
+    /// Draws the route and direction of every departure listed in Nearby mode, from shapes the
+    /// discovery call brought, redrawing only when that set changes.
+    /// </summary>
+    private void DrawNearbyRoutes()
     {
         HashSet<RouteDirection> wanted = [.. _placeArrivals
             .Where(a => a.Status != ArrivalStatus.Canceled)
             .Select(a => new RouteDirection(a.RouteId, a.DirectionId))];
-        if (_mode != FlyoutMode.Nearby || (_drawnNearbyRoutes?.SetEquals(wanted) ?? false))
+        if (_mode != FlyoutMode.Nearby || _allowClose || (_drawnNearbyRoutes?.SetEquals(wanted) ?? false))
         {
             return;
         }
 
-        _nearbyRoutesCancellation?.Cancel();
-        CancellationTokenSource cancellation = new();
-        _nearbyRoutesCancellation = cancellation;
-        try
+        List<(MapPolyline Line, string RouteId)> lines = [];
+        foreach (RouteDirection route in wanted)
         {
-            if (_routes.Count == 0)
+            Color color = RouteColor(_placeArrivals.First(a => new RouteDirection(a.RouteId, a.DirectionId) == route).RouteColor);
+            foreach (RoutePattern pattern in _monitor.Metadata.GetCachedPatterns(route.RouteId, route.DirectionId))
             {
-                // Colors come from the catalog; without it every line would fall back to the default blue.
-                try
-                {
-                    _routes = await _monitor.GetRouteCatalogAsync(RequestConsumer);
-                }
-                catch (Exception ex) when (!cancellation.IsCancellationRequested && ex is (HttpRequestException or TaskCanceledException or TransitApiException))
-                {
-                    System.Diagnostics.Debug.WriteLine($"Route catalog load failed: {ex.GetType().Name}. Drawing routes in the default color.");
-                }
+                lines.Add((CreateRouteLine(pattern, color), route.RouteId));
             }
-
-            List<(MapPolyline Line, string RouteId)> lines = [];
-            foreach (IGrouping<string, RouteDirection> byRoute in wanted.GroupBy(r => r.RouteId, StringComparer.OrdinalIgnoreCase))
-            {
-                IReadOnlyList<RoutePattern> patterns = await GetPatternsAsync(byRoute.Key, cancellationToken: cancellation.Token);
-                Color color = RouteColor(byRoute.Key, null, null);
-                foreach (RoutePattern pattern in patterns.Where(p => byRoute.Any(r => string.Equals(r.DirectionId, p.DirectionId, StringComparison.OrdinalIgnoreCase))))
-                {
-                    lines.Add((CreateRouteLine(pattern, color), byRoute.Key));
-                }
-            }
-
-            if (_mode != FlyoutMode.Nearby || _allowClose)
-            {
-                return;
-            }
-
-            _commuteRouteLayer.MapElements.Clear();
-            _placeRouteLines.Clear();
-            _placeRouteLines.AddRange(lines);
-            _commuteRouteLayer.MapElements.AddRange(lines.Select(l => l.Line));
-            _drawnNearbyRoutes = wanted;
-            UpdateRouteThickness();
         }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-            // A newer set of arrivals (or leaving Nearby) owns the layer now.
-        }
-        finally
-        {
-            if (ReferenceEquals(_nearbyRoutesCancellation, cancellation))
-            {
-                _nearbyRoutesCancellation = null;
-            }
 
-            cancellation.Dispose();
-        }
+        _commuteRouteLayer.MapElements.Clear();
+        _placeRouteLines.Clear();
+        _placeRouteLines.AddRange(lines);
+        _commuteRouteLayer.MapElements.AddRange(lines.Select(l => l.Line));
+        _drawnNearbyRoutes = wanted;
+        UpdateRouteThickness();
     }
 
     private void ResetNearbyRoutes()
     {
-        _nearbyRoutesCancellation?.Cancel();
         _drawnNearbyRoutes = null;
         _placeRouteLines.Clear();
     }
@@ -1051,7 +941,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                         .Select(r => new ArrivalItem(
                             r.Next,
                             new GeoPoint(stop.Lat, stop.Lon),
-                            RouteColor(r.Next.RouteId, stop.RouteId, stop.RouteColor),
+                            RouteColor(r.Next.RouteColor ?? stop.RouteColor),
                             now,
                             r.Later,
                             tracked))],
@@ -1078,9 +968,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             else if (_placeStops.Count == 0)
             {
                 busy = true;
-                empty = _stopIndex.IsBuilding
-                    ? new Notice("Getting the stop list", $"Downloading every {_monitor.Service.AgencyName} stop. This happens once a week and takes a minute.")
-                    : new Notice("Finding stops…", string.Empty);
+                empty = new Notice("Finding stops…", string.Empty);
             }
 
             if (_mode == FlyoutMode.Nearby && _locationPermissionRequired && _placeStops.Count == 0)
@@ -1216,7 +1104,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         IndexedStop stop = nearby.Stop;
         bool commute = _mode == FlyoutMode.Commute;
-        bool Listed(string routeId, string directionId) => !commute || _directRoutes.Contains(new RouteDirection(routeId, directionId));
+
+        // Each line is listed at one stop only (its closest, or where the trip boards), so it isn't repeated.
+        bool Listed(string routeId, string directionId) => _placeLines is null || _placeLines.Contains(new StopLine(stop.Id, routeId, directionId));
 
         int walkMinutes = Math.Max(1, nearby.WalkMinutes(WalkingMetersPerMinute));
         string[] lines = [.. stop.Routes.Where(r => Listed(r.RouteId, r.DirectionId)).Select(r => r.RouteDisplayId).Distinct(StringComparer.OrdinalIgnoreCase)];
@@ -1225,15 +1115,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             : $" · {string.Join(", ", lines.Take(5))} +{lines.Length - 5}";
         string subtitle = $"{FormatDistance(nearby.DistanceMeters)} · {walkMinutes} min walk{lineText}";
 
-        // Stops on opposite sides of a street share a name, so say which way the buses go.
+        // Stops on opposite sides of a street share a name, so say which way the lines go.
         string[] directions = [.. stop.Routes
             .Where(r => Listed(r.RouteId, r.DirectionId))
-            .Select(r => FormatDirection(r.DirectionName))
+            .Select(r => r.DirectionName.Trim())
             .Where(d => d.Length > 0)
-            .Distinct(StringComparer.OrdinalIgnoreCase)];
-        string title = directions.Length == 0 ? stop.Name : $"{stop.Name} · {string.Join("/", directions)}";
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(3)];
+        string name = stop.Name.Length > 0 ? stop.Name : new ResourceLoader().GetString("UnnamedStop");
+        string title = directions.Length == 0 ? name : $"{name} · {string.Join("/", directions)}";
 
-        // Only a list from the rider's real location can flag buses they can't walk to in time.
+        // Only a list from the rider's real location can flag departures they can't walk to in time.
         bool checkWalk = _mode == FlyoutMode.Nearby || (commute && _commuteLeg is { IsGuess: false });
         bool TooSoon(Arrival a) => checkWalk && a.Status != ArrivalStatus.Canceled && a.MinutesAway(now) < walkMinutes;
         List<ArrivalItem> arrivals = [.. RouteArrivals.ByRoute(
@@ -1249,35 +1141,36 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                 return new ArrivalItem(
                     a,
                     stop.Location,
-                    RouteColor(a.RouteId, null, stop.Routes.FirstOrDefault(r => string.Equals(r.RouteId, a.RouteId, StringComparison.OrdinalIgnoreCase))?.RouteColor),
+                    RouteColor(a.RouteColor ?? stop.Routes.FirstOrDefault(r => string.Equals(r.RouteId, a.RouteId, StringComparison.OrdinalIgnoreCase))?.RouteColor),
                     now,
                     row.Later,
                     tracked,
                     tooSoonToWalk: tooSoon,
                     destinationName: commute ? _commuteLeg?.To.Name : null,
-                    destinationEta: !tooSoon && _destinationEtas.TryGetValue(a, out DateTimeOffset eta) ? eta : null);
+                    destinationEta: !tooSoon && _destinationEtas.TryGetValue(a, out DateTimeOffset eta) ? eta : null,
+                    transfers: _placeTrips is not null && _placeTrips.TryGetValue(StopLine.Of(a), out TripTiming? timing) ? timing.Transfers : 0);
             })];
 
         return new StopGroupItem(stop.Id, title, subtitle, stop.Location, arrivals, emptyText, stop, isSaved);
     }
 
-    /// <summary>BusTime's "NORTH" as "North".</summary>
-    private static string FormatDirection(string direction) =>
-        CultureInfo.CurrentCulture.TextInfo.ToTitleCase(direction.Trim().ToLower(CultureInfo.CurrentCulture));
-
+    /// <summary>Feet and miles where the region measures that way, else meters and kilometers.</summary>
     private static string FormatDistance(double meters)
     {
+        if (RegionInfo.CurrentRegion.IsMetric)
+        {
+            return meters < 1000
+                ? $"{Math.Max(50, Math.Round(meters / 50) * 50).ToString("N0", CultureInfo.CurrentCulture)} m"
+                : $"{(meters / 1000).ToString("0.0", CultureInfo.CurrentCulture)} km";
+        }
+
         double miles = meters / 1609.344;
         return miles < 0.1
             ? $"{Math.Max(50, Math.Round(meters * 3.28084 / 50) * 50).ToString("N0", CultureInfo.CurrentCulture)} ft"
             : $"{miles.ToString("0.0", CultureInfo.CurrentCulture)} mi";
     }
 
-    /// <summary>A route's color: the known one if given, else from the route catalog.</summary>
-    private Color RouteColor(string routeId, string? knownRouteId, string? knownColor) =>
-        knownColor is not null && (knownRouteId is null || string.Equals(routeId, knownRouteId, StringComparison.OrdinalIgnoreCase))
-            ? MapHelpers.ParseRouteColor(knownColor)
-            : MapHelpers.ParseRouteColor(_routes.TryGetValue(routeId, out TransitRoute? route) ? route.Color : null);
+    private static Color RouteColor(string? color) => MapHelpers.ParseRouteColor(color);
 
     // ---- Events ----
 
@@ -1315,54 +1208,41 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
-    private void OnStopIndexChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
+    /// <summary>Route shapes arrived with some response: draw the lines that were missing them.</summary>
+    private void OnPatternsChanged(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
     {
-        if (_isPopupVisible && _mode != FlyoutMode.Favorites)
-        {
-            PlaceStops? previous = _placeMonitor.Discovery;
-            ConfigurePlace();
-            if (previous is not null && _placeMonitor.Discovery is null)
-            {
-                _ = LoadPlaceAsync(reframe: false, TransitTrigger.StopsChanged);
-            }
-            else
-            {
-                Render();
-            }
-        }
-    });
-
-    /// <summary>Locally enrich current rows and destination ETAs; Favorites re-merges its own raw snapshot.</summary>
-    private void OnScheduleLoaded(object? sender, EventArgs e) => DispatcherQueue.TryEnqueue(() =>
-    {
-        if (_isPopupVisible && _mode != FlyoutMode.Favorites && !_allowClose)
-        {
-            _ = LoadPlaceAsync(reframe: false, TransitTrigger.TimetableLoaded);
-        }
-    });
-
-    private async void OnArrivalsUpdated(object? sender, EventArgs e)
-    {
-        TransitTrigger trigger = _monitor.IsLoading ? TransitTrigger.FavoritesLoading : TransitTrigger.FavoritesResult;
-        if (_mode != FlyoutMode.Favorites)
+        if (_allowClose)
         {
             return;
         }
 
-        if (_routes.Count == 0 && _monitor.Service.IsConfigured && SettingsService.Stops.Any(s => s.AllRoutes))
+        _savedStopsDirty = true;
+        if (!_isPopupVisible)
         {
-            // All-routes stops need other routes' colors; the catalog is cached after the first load.
-            _routes = await _monitor.GetRouteCatalogAsync();
-            if (_allowClose || _mode != FlyoutMode.Favorites)
-            {
-                return;
-            }
+            return;
         }
 
-        Render();
-        if (_isPopupVisible && trigger == TransitTrigger.FavoritesResult && !_monitor.IsLoading)
+        switch (_mode)
         {
-            _ = RefreshVehiclesAsync(trigger);
+            case FlyoutMode.Favorites:
+                _savedStopsDirty = false;
+                DrawFavoriteRoutes();
+                break;
+            case FlyoutMode.Commute:
+                DrawCommuteRoutes();
+                break;
+            default:
+                _drawnNearbyRoutes = null;
+                DrawNearbyRoutes();
+                break;
+        }
+    });
+
+    private void OnArrivalsUpdated(object? sender, EventArgs e)
+    {
+        if (_mode == FlyoutMode.Favorites)
+        {
+            Render();
         }
     }
 
@@ -1397,52 +1277,27 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _stopLayer.MapElements.AddRange(_stopPins.Keys);
     }
 
-    /// <summary>Draws each saved stop's route (in its direction) in the route's color.</summary>
-    private async Task RebuildRoutesAsync()
+    /// <summary>
+    /// Draws each saved stop's route (in its direction) in the route's color. Shapes come only from
+    /// responses the app needed anyway (the picker's route details, discovery, or departures fetched
+    /// with shapes for a stop not seen lately), so a missing line appears once its shape arrives.
+    /// </summary>
+    private void DrawFavoriteRoutes()
     {
-        _routesCancellation?.Cancel();
-        CancellationTokenSource cancellation = new();
-        _routesCancellation = cancellation;
-        try
-        {
-            await DrawRoutesAsync(cancellation.Token);
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-            // Dismissed before the lines loaded: draw them on the next open. A newer rebuild owns the flag.
-            if (ReferenceEquals(_routesCancellation, cancellation))
-            {
-                _savedStopsDirty = true;
-            }
-        }
-        finally
-        {
-            if (ReferenceEquals(_routesCancellation, cancellation))
-            {
-                _routesCancellation = null;
-            }
-
-            cancellation.Dispose();
-        }
-    }
-
-    private async Task DrawRoutesAsync(CancellationToken cancellationToken)
-    {
-        IReadOnlyList<SavedStop> stops = SettingsService.Stops;
-        List<(MapPolyline Line, string RouteId)> lines = [];
-        foreach (IGrouping<string, SavedStop> byRoute in stops.GroupBy(s => s.RouteId, StringComparer.OrdinalIgnoreCase))
-        {
-            IReadOnlyList<RoutePattern> patterns = await GetPatternsAsync(byRoute.Key, cancellationToken: cancellationToken);
-            Color color = MapHelpers.ParseRouteColor(byRoute.First().RouteColor);
-            foreach (RoutePattern pattern in patterns.Where(p => byRoute.Any(s => s.AllRoutes || string.Equals(s.DirectionId, p.DirectionId, StringComparison.OrdinalIgnoreCase))))
-            {
-                lines.Add((CreateRouteLine(pattern, color), byRoute.Key));
-            }
-        }
-
         if (_allowClose)
         {
             return;
+        }
+
+        List<(MapPolyline Line, string RouteId)> lines = [];
+        foreach (IGrouping<string, SavedStop> byRoute in SettingsService.Stops.Where(s => s.RouteId.Length > 0).GroupBy(s => s.RouteId, StringComparer.OrdinalIgnoreCase))
+        {
+            Color color = MapHelpers.ParseRouteColor(byRoute.First().RouteColor);
+            foreach (RoutePattern pattern in _monitor.Metadata.GetCachedPatterns(byRoute.Key)
+                .Where(p => byRoute.Any(s => s.AllRoutes || string.Equals(s.DirectionId, p.DirectionId, StringComparison.OrdinalIgnoreCase))))
+            {
+                lines.Add((CreateRouteLine(pattern, color), byRoute.Key));
+            }
         }
 
         _routeLayer.MapElements.Clear();
@@ -1459,12 +1314,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         StrokeThickness = SelectedRouteThickness,
     };
 
-    /// <summary>Keeps the selected bus's route thick and thins the rest; with no selection every route is thick.</summary>
+    /// <summary>Keeps the selected row's route thick and thins the rest; with no selection every route is thick.</summary>
     private void UpdateRouteThickness()
     {
-        string? selectedRouteId = _selectedVehicleId is not null && _vehicles.TryGetValue(_selectedVehicleId, out Vehicle? vehicle)
-            ? vehicle.RouteId
-            : null;
+        string? selectedRouteId = _selectedLine?.RouteId;
         foreach ((MapPolyline line, string routeId) in _routeLines.Concat(_placeRouteLines))
         {
             line.StrokeThickness = selectedRouteId is null || string.Equals(routeId, selectedRouteId, StringComparison.OrdinalIgnoreCase)
@@ -1473,39 +1326,22 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
-    private async Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId, bool required = false, CancellationToken cancellationToken = default)
-    {
-        using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, TransitTrigger.Metadata);
-        try
-        {
-            return await _monitor.Metadata.GetPatternsAsync(routeId, cancellationToken);
-        }
-        catch (Exception ex) when (!required && !cancellationToken.IsCancellationRequested && ex is (HttpRequestException or TaskCanceledException or TransitApiException))
-        {
-            System.Diagnostics.Debug.WriteLine($"Decorative route shape load failed: {ex.GetType().Name}. The next open can retry.");
-            return [];
-        }
-    }
-
-    /// <summary>Moves the bus icons for the soonest arrivals in the current list.</summary>
+    /// <summary>
+    /// Moves the vehicle icons for the selected row's route direction. Nothing is fetched until a
+    /// row is picked, and the timer keeps them moving only while the call budget is at Normal.
+    /// </summary>
     private async Task RefreshVehiclesAsync(TransitTrigger trigger, bool force = false)
     {
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(RequestConsumer, trigger);
-        if (!_monitor.Service.IsConfigured || !_isPopupVisible)
+        if (!_monitor.Service.IsConfigured || !_isPopupVisible || _selectedLine is not { } line
+            || (trigger == TransitTrigger.Timer && _budget.Level != TransitBudgetLevel.Normal))
         {
             return;
         }
 
-        List<ArrivalItem> upcoming = [.. _groups
-            .SelectMany(g => g.Arrivals)
-            .Where(a => a.Arrival.VehicleId is not null && a.Arrival.Status != ArrivalStatus.Canceled)
-            .OrderBy(a => a.Arrival.PredictedTime)
-            .DistinctBy(a => a.Arrival.VehicleId)
-            .Take(_monitor.Service.MaxStopsPerRequest)];
-
         try
         {
-            await _vehiclePositions.RefreshAsync([.. upcoming.Select(a => a.Arrival.VehicleId!)], force);
+            await _vehiclePositions.RefreshAsync(line.RouteId, line.DirectionId, force);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
         {
@@ -1515,6 +1351,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void UpdateVehicles(IReadOnlyList<Vehicle> vehicles)
     {
+        if (_selectedLine is null)
+        {
+            return; // The row was deselected while positions loaded.
+        }
+
+        if (_onlyTripId is not null)
+        {
+            vehicles = [.. vehicles.Where(v => v.TripId == _onlyTripId)];
+        }
+
         HashSet<string> seen = [];
         foreach (Vehicle vehicle in vehicles)
         {
@@ -1559,7 +1405,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             }
         }
 
-        SelectVehicle(_selectedVehicleId);
+        // Highlight the picked trip's own vehicle, and the first time it shows up, frame it with its stop.
+        Vehicle? trip = _selectedTripId is null ? null : vehicles.FirstOrDefault(v => v.TripId == _selectedTripId);
+        SelectVehicle(_selectedVehicleId ?? trip?.Id);
+        if (_frameWithVehicle is { } stop)
+        {
+            _frameWithVehicle = null;
+            if (trip is not null)
+            {
+                _ = MapHelpers.FrameAsync(Map, [stop, trip.Location], MapAnimationKind.Default);
+            }
+        }
     }
 
     private void SelectVehicle(string? vehicleId)
@@ -1598,6 +1454,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
+    /// <summary>Removes every vehicle and forgets the selected row, so no more positions are fetched.</summary>
     private void ClearVehicles()
     {
         _vehicleLayer.MapElements.Clear();
@@ -1606,7 +1463,38 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _vehicleArrowStates.Clear();
         _vehicles.Clear();
         _selectedVehicleId = null;
+        _selectedLine = null;
+        _selectedTripId = null;
+        _onlyTripId = null;
+        _frameWithVehicle = null;
     }
+
+    /// <summary>
+    /// Shows a row's route direction's vehicles, picking out its own trip's. With <paramref name="onlyThisTrip"/>
+    /// (tracking), the rest of the line's vehicles are left off the map.
+    /// </summary>
+    private void ShowLine(Arrival arrival, GeoPoint stop, bool onlyThisTrip = false)
+    {
+        RouteDirection line = new(arrival.RouteId, arrival.DirectionId);
+        if (_selectedLine != line)
+        {
+            ClearVehicles();
+            _selectedLine = line;
+        }
+
+        _selectedLineLabel = LineLabel(arrival);
+        _selectedTripId = arrival.TripId;
+        _onlyTripId = onlyThisTrip ? arrival.TripId : null;
+        Vehicle? known = arrival.TripId is null ? null : _vehicles.Values.FirstOrDefault(v => v.TripId == arrival.TripId);
+        SelectVehicle(known?.Id);
+        _frameWithVehicle = known is null ? stop : null;
+        _ = MapHelpers.FrameAsync(Map, known is null ? [stop] : [stop, known.Location], MapAnimationKind.Default);
+        _ = RefreshVehiclesAsync(TransitTrigger.VehicleSelected);
+    }
+
+    /// <summary>"Bus 14", or "Route 14" when the feed doesn't name the mode.</summary>
+    private static string LineLabel(Arrival arrival) =>
+        arrival.Mode is { Length: > 0 } mode ? $"{mode} {arrival.RouteDisplayId}" : $"Route {arrival.RouteDisplayId}";
 
     private void VehicleLayer_Tapped(object? sender, MapElementTappedEventArgs args)
     {
@@ -1614,7 +1502,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             args.Handled = true;
             SelectVehicle(id);
-            ShowMapCaption($"Bus {vehicle.Id} · Route {vehicle.RouteId} to {vehicle.Destination}{(vehicle.IsDelayed ? " · Delayed" : string.Empty)}");
+            string occupancy = vehicle.Occupancy switch
+            {
+                VehicleOccupancy.NotCrowded => " · Not crowded",
+                VehicleOccupancy.SomeCrowding => " · Some crowding",
+                VehicleOccupancy.Crowded => " · Crowded",
+                _ => string.Empty,
+            };
+            string label = vehicle.Label is { } name ? $" · Vehicle {name}" : string.Empty;
+            ShowMapCaption($"{_selectedLineLabel}{label}{occupancy}");
         }
     }
 
@@ -1623,7 +1519,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (args.MapElement is MapIcon icon && _stopPins.TryGetValue(icon, out string? name))
         {
             args.Handled = true;
-            SelectVehicle(null);
+            DeselectVehicle();
             ShowMapCaption(name);
         }
     }
@@ -1633,7 +1529,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (!args.Handled && _selectedVehicleId is not null)
         {
-            SelectVehicle(null);
+            DeselectVehicle();
             HideMapCaption(animate: true);
         }
     }
@@ -1793,17 +1689,16 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
-        SelectVehicle(item.Arrival.VehicleId);
-        List<GeoPoint> points = [item.StopLocation];
-        if (item.Arrival.VehicleId is { } vid && _vehicles.TryGetValue(vid, out Vehicle? vehicle))
-        {
-            points.Add(vehicle.Location);
-        }
-
-        _ = MapHelpers.FrameAsync(Map, points, MapAnimationKind.Default);
+        ShowLine(item.Arrival, item.StopLocation);
     }
 
-    /// <summary>A time chip: starts tracking mode for that bus (replacing any other), or stops it.</summary>
+    private void DeselectVehicle()
+    {
+        _selectedTripId = null;
+        SelectVehicle(null);
+    }
+
+    /// <summary>A time chip: starts tracking mode for that departure (replacing any other), or stops it.</summary>
     private void TrackButton_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not BusTimeItem item)
@@ -1815,7 +1710,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             RequestPop(item.Key);
             _tracker.Stop();
-            ShowMapCaption($"Stopped tracking the {item.ClockText} route {item.RouteLabel} bus.");
+            ShowMapCaption($"Stopped tracking the {item.ClockText} {LineLabel(item.Arrival)}.");
             return;
         }
 
@@ -1827,13 +1722,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         string stopName = _groups.FirstOrDefault(g => g.Arrivals.Any(a => a.Times.Contains(item)))?.Title ?? string.Empty;
         RequestPop(item.Key);
         _tracker.Start(item.Arrival, stopName);
+        ShowLine(item.Arrival, item.StopLocation, onlyThisTrip: true); // Show just its bus and zoom to it.
         int lead = SettingsService.HeadOutMinutes;
-        string bus = $"the {item.ClockText} route {item.RouteLabel} bus";
+        string ride = $"the {item.ClockText} {LineLabel(item.Arrival)}";
         ShowMapCaption(item.Arrival.MinutesAway(DateTimeOffset.Now) <= lead
-            ? $"Tracking {bus}. It's under {lead} min away, so head out now."
+            ? $"Tracking {ride}. It's under {lead} min away, so head out now."
             : item.Arrival.IsRealTime
-                ? $"Tracking {bus}. You'll be notified {lead} min before it arrives."
-                : $"Tracking {bus}. It's scheduled, so we'll look for live data as it gets close and notify you {lead} min before it arrives.");
+                ? $"Tracking {ride}. You'll be notified {lead} min before it leaves."
+                : $"Tracking {ride}. It's scheduled, so we'll look for live data as it gets close and notify you {lead} min before it leaves.");
     }
 
     private static readonly int[] LeadChoices = [1, 2, 3, 5, 10, 15, 20, 30];
@@ -1862,7 +1758,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                     return;
                 }
 
-                ShowMapCaption($"You'll be notified {minutes} min before the bus arrives.");
+                ShowMapCaption($"You'll be notified {minutes} min before your ride leaves.");
             };
             menu.Items.Add(item);
         }
@@ -1877,7 +1773,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (sender is FrameworkElement { DataContext: StopGroupItem group })
         {
-            SelectVehicle(null);
+            DeselectVehicle();
             _ = MapHelpers.FrameAsync(Map, [group.Location], MapAnimationKind.Default, singlePointZoom: 16);
         }
     }
@@ -1899,9 +1795,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
-        if (SavedStop.DistinctStopCount(saved) >= _monitor.Service.MaxStopsPerRequest)
+        if (SavedStop.DistinctStopCount(saved) >= SettingsService.MaxFavoriteStops)
         {
-            ShowMapCaption($"You can have up to {_monitor.Service.MaxStopsPerRequest} favorite stops. Remove one in settings first.");
+            ShowMapCaption($"You can have up to {SettingsService.MaxFavoriteStops} favorite stops. Remove one in settings first.");
             return;
         }
 
@@ -1941,7 +1837,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void FitButton_Click(object sender, RoutedEventArgs e)
     {
-        SelectVehicle(null);
+        DeselectVehicle();
         Motion.Pop(FitIcon, 1.4f);
         _ = FrameListedStopsAsync(MapAnimationKind.Default);
     }

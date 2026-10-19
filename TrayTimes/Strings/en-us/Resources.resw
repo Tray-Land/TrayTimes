@@ -52,10 +52,10 @@
     <value>Customize your commute and how Tray Times runs.</value>
   </data>
   <data name="SettingsKeyBar.Title" xml:space="preserve">
-    <value>No MCTS API key</value>
+    <value>No Transit API key</value>
   </data>
   <data name="SettingsKeyBar.Message" xml:space="preserve">
-    <value>Copy OAuth.resw.sample to OAuth.resw, paste your BusTime key into MctsApiKey, and rebuild.</value>
+    <value>Copy OAuth.resw.sample to OAuth.resw, paste your Transit API key into TransitApiKey, and rebuild.</value>
   </data>
   <data name="SettingsCommuteHeading.Text" xml:space="preserve">
     <value>Your commute</value>
@@ -115,13 +115,37 @@
     <value>Add a stop</value>
   </data>
   <data name="SettingsAddStopDescription.Text" xml:space="preserve">
-    <value>Choose a route, direction, and stop, or select it on the map.</value>
+    <value>Search for a stop, or pick a route, direction, and stop. Select it on the map or in the list.</value>
+  </data>
+  <data name="SettingsAddStopHelp.Text" xml:space="preserve">
+    <value>Move the map to your area first: searches and routes are for wherever the map is. Each search or route list uses a Transit API call, so they're saved for later.</value>
+  </data>
+  <data name="SettingsStopSearchBox.Header" xml:space="preserve">
+    <value>Find a stop</value>
+  </data>
+  <data name="SettingsStopSearchBox.PlaceholderText" xml:space="preserve">
+    <value>Stop name or number</value>
+  </data>
+  <data name="SettingsStopSearchBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Find a stop by name or number near the map</value>
+  </data>
+  <data name="SettingsStopSearchButton.Content" xml:space="preserve">
+    <value>Search</value>
+  </data>
+  <data name="SettingsStopSearchButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Search for stops near the map</value>
+  </data>
+  <data name="SettingsLoadRoutesButton.Content" xml:space="preserve">
+    <value>Browse routes in this area</value>
+  </data>
+  <data name="SettingsLoadRoutesButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Load the routes of the transit networks around the map</value>
   </data>
   <data name="SettingsRouteBox.Header" xml:space="preserve">
     <value>Route</value>
   </data>
   <data name="SettingsRouteBox.PlaceholderText" xml:space="preserve">
-    <value>Loading routes...</value>
+    <value>Browse routes first</value>
   </data>
   <data name="SettingsRouteBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Route</value>
@@ -139,7 +163,7 @@
     <value>Stop</value>
   </data>
   <data name="SettingsPickerMap.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
-    <value>Map of the route's stops. Select a stop to choose it.</value>
+    <value>Map of stops to choose from. Select a stop to choose it.</value>
   </data>
   <data name="SettingsPickerLoadingRing.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Loading stops</value>
@@ -157,25 +181,25 @@
     <value>Add stop</value>
   </data>
   <data name="SettingsAlertsHeading.Text" xml:space="preserve">
-    <value>Bus alerts</value>
+    <value>Ride alerts</value>
   </data>
   <data name="SettingsAlertsHelp.Text" xml:space="preserve">
-    <value>Ring the bell next to a bus in the flyout to track its arrival in the tray.</value>
+    <value>Ring the bell next to a departure in the flyout to track it in the tray.</value>
   </data>
   <data name="SettingsHeadOutTitle.Text" xml:space="preserve">
     <value>Time to head out</value>
   </data>
   <data name="SettingsHeadOutDescription.Text" xml:space="preserve">
-    <value>Notify me this many minutes before my bus arrives.</value>
+    <value>Notify me this many minutes before my ride leaves.</value>
   </data>
   <data name="SettingsHeadOutBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.HelpText" xml:space="preserve">
-    <value>Number of minutes before the bus arrives to send a notification.</value>
+    <value>Number of minutes before the ride leaves to send a notification.</value>
   </data>
   <data name="SettingsKeepAwakeTitle.Text" xml:space="preserve">
     <value>Keep awake while tracking</value>
   </data>
   <data name="SettingsKeepAwakeDescription.Text" xml:space="preserve">
-    <value>Prevent this PC from sleeping until bus tracking ends.</value>
+    <value>Prevent this PC from sleeping until tracking ends.</value>
   </data>
   <data name="SettingsAppHeading.Text" xml:space="preserve">
     <value>App &amp; data</value>
@@ -186,21 +210,6 @@
   <data name="SettingsStartupDescription.Text" xml:space="preserve">
     <value>Keep Tray Times ready in the notification area when you sign in.</value>
   </data>
-  <data name="SettingsDirectoryExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
-    <value>Stop directory</value>
-  </data>
-  <data name="SettingsDirectoryTitle.Text" xml:space="preserve">
-    <value>Stop directory</value>
-  </data>
-  <data name="SettingsDirectoryDescription.Text" xml:space="preserve">
-    <value>Cached stops used to find nearby routes.</value>
-  </data>
-  <data name="SettingsRebuildIndexButton.Content" xml:space="preserve">
-    <value>Update now</value>
-  </data>
-  <data name="SettingsRebuildIndexButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
-    <value>Update stop directory now</value>
-  </data>
   <data name="SettingsApiUsageExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Transit API usage</value>
   </data>
@@ -208,7 +217,40 @@
     <value>Transit API usage</value>
   </data>
   <data name="SettingsApiUsageDescription.Text" xml:space="preserve">
-    <value>MCTS BusTime requests by endpoint over the last 14 days.</value>
+    <value>Calls to the Transit API, and how Tray Times paces itself to stay within your key's limits.</value>
+  </data>
+  <data name="SettingsBudgetHelp.Text" xml:space="preserve">
+    <value>Your key's limits. Transit's free tier is 5 calls a minute and 1,500 a month. Each day gets an even share of what's left of the month: as it's used, the open flyout refreshes less often, then only when you refresh. Tracking keeps going until the month's calls run out.</value>
+  </data>
+  <data name="SettingsCallsPerMinuteBox.Header" xml:space="preserve">
+    <value>Calls per minute</value>
+  </data>
+  <data name="SettingsCallsPerMinuteBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Transit API calls allowed per minute</value>
+  </data>
+  <data name="SettingsCallsPerMonthBox.Header" xml:space="preserve">
+    <value>Calls per month</value>
+  </data>
+  <data name="SettingsCallsPerMonthBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Transit API calls allowed per month</value>
+  </data>
+  <data name="SettingsBudgetFormat" xml:space="preserve">
+    <value>{0:N0} of {1:N0} calls used this month. Today: {2:N0} of about {3:N0}. {4}</value>
+  </data>
+  <data name="SettingsBudgetLevelNormal" xml:space="preserve">
+    <value>The open flyout refreshes every minute.</value>
+  </data>
+  <data name="SettingsBudgetLevelConserve" xml:space="preserve">
+    <value>The open flyout refreshes every 3 minutes to stay within today's share.</value>
+  </data>
+  <data name="SettingsBudgetLevelLow" xml:space="preserve">
+    <value>Today's share is used, so times update when you open the flyout or refresh, not on their own.</value>
+  </data>
+  <data name="SettingsBudgetLevelReserve" xml:space="preserve">
+    <value>Only this month's reserve is left: times update when you refresh, and tracking still works.</value>
+  </data>
+  <data name="SettingsBudgetLevelExhausted" xml:space="preserve">
+    <value>This month's calls are used up. Times resume next month.</value>
   </data>
   <data name="SettingsEndpointHeading.Text" xml:space="preserve">
     <value>Endpoint</value>
@@ -219,17 +261,11 @@
   <data name="SettingsWeekHeading.Text" xml:space="preserve">
     <value>7 days</value>
   </data>
-  <data name="SettingsFortnightHeading.Text" xml:space="preserve">
-    <value>14 days</value>
+  <data name="SettingsMonthHeading.Text" xml:space="preserve">
+    <value>Month</value>
   </data>
   <data name="SettingsApiUsageList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Transit API requests by endpoint</value>
-  </data>
-  <data name="SettingsResetApiUsageButton.Content" xml:space="preserve">
-    <value>Reset counts</value>
-  </data>
-  <data name="SettingsResetApiUsageButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
-    <value>Reset API usage counts</value>
   </data>
   <data name="SettingsAboutExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>About Tray Times</value>
@@ -241,7 +277,7 @@
     <value>Transit data, maps, and acknowledgments.</value>
   </data>
   <data name="SettingsTransitCredits.Text" xml:space="preserve">
-    <value>Arrival times and bus locations: Milwaukee County Transit System real-time BusTime API.</value>
+    <value>Departures, trip plans, and vehicle locations: the Transit API (transitapp.com), with data from transit agencies worldwide.</value>
   </data>
   <data name="SettingsMapCredits.Text" xml:space="preserve">
     <value>Basemap: Azure Maps. Map control: WinUIEx.Maps by Morten Nielsen.</value>
@@ -264,23 +300,26 @@
   <data name="SettingsAllRequests" xml:space="preserve">
     <value>All requests</value>
   </data>
-  <data name="SettingsDirectoryDownloading" xml:space="preserve">
-    <value>Downloading the stop directory...</value>
-  </data>
-  <data name="SettingsDirectoryUpdatedFormat" xml:space="preserve">
-    <value>{0:N0} stops, updated {1:d}.</value>
-  </data>
-  <data name="SettingsDirectoryNotDownloaded" xml:space="preserve">
-    <value>Stop directory not downloaded yet.</value>
-  </data>
   <data name="SettingsApiKeyNeeded" xml:space="preserve">
     <value>API key needed</value>
   </data>
   <data name="SettingsRoutesUnavailable" xml:space="preserve">
     <value>Couldn't load routes</value>
   </data>
-  <data name="SettingsReopenToRetryFormat" xml:space="preserve">
-    <value>Couldn't reach {0}. Close and reopen this window to try again.</value>
+  <data name="SettingsLoadRoutesFirst" xml:space="preserve">
+    <value>Browse routes in this area first</value>
+  </data>
+  <data name="SettingsNoRoutesHere" xml:space="preserve">
+    <value>No routes found here. Move the map and try again.</value>
+  </data>
+  <data name="SettingsNoMatchingStops" xml:space="preserve">
+    <value>No matching stops near the map</value>
+  </data>
+  <data name="FlyoutTitle" xml:space="preserve">
+    <value>Departures</value>
+  </data>
+  <data name="UnnamedStop" xml:space="preserve">
+    <value>Stop</value>
   </data>
   <data name="SettingsChooseRoute" xml:space="preserve">
     <value>Choose a route</value>

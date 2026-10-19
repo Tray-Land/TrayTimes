@@ -11,10 +11,12 @@ internal static class GeocodingService
 {
     private const string BaseUrl = "https://atlas.microsoft.com/search/";
 
-    // Bias results toward the transit agency's service area (downtown Milwaukee).
-    private static readonly GeoPoint BiasPoint = new(43.0389, -87.9065);
-
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    /// <summary>Where to bias results: the rider's home, else wherever the flyout's map was left, else nowhere (worldwide).</summary>
+    private static GeoPoint? BiasPoint =>
+        SettingsService.Places.FirstOrDefault(p => p.Kind == PlaceKind.Home)?.Location
+        ?? (SettingsService.FlyoutMapView is { } view ? new GeoPoint(view.Lat, view.Lon) : null);
 
     /// <summary>False without an Azure Maps key; callers should fall back to device location.</summary>
     public static bool IsAvailable => Secrets.AzureMapsKey is not null;
@@ -26,8 +28,9 @@ internal static class GeocodingService
             return [];
         }
 
+        string bias = BiasPoint is { } point ? string.Create(CultureInfo.InvariantCulture, $"&lat={point.Lat}&lon={point.Lon}") : string.Empty;
         string url = string.Create(CultureInfo.InvariantCulture,
-            $"{BaseUrl}address/json?api-version=1.0&typeahead=true&limit=5&countrySet=US&lat={BiasPoint.Lat}&lon={BiasPoint.Lon}&query={Uri.EscapeDataString(query.Trim())}&subscription-key={Uri.EscapeDataString(key)}");
+            $"{BaseUrl}address/json?api-version=1.0&typeahead=true&limit=5{bias}&query={Uri.EscapeDataString(query.Trim())}&subscription-key={Uri.EscapeDataString(key)}");
         using JsonDocument doc = await GetJsonAsync(url, cancellationToken);
 
         List<GeocodeResult> results = [];

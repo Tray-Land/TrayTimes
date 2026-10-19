@@ -23,6 +23,12 @@ internal static class SettingsService
 
     public const int MaxHeadOutMinutes = 30;
 
+    /// <summary>The most favorite stops; they all share one departures request.</summary>
+    public const int MaxFavoriteStops = 20;
+
+    /// <summary>Saved data written by this version: 2 is the first using Transit IDs.</summary>
+    public const int CurrentDataVersion = 2;
+
     /// <summary>Raised after the saved stops list changes.</summary>
     public static event EventHandler? StopsChanged;
 
@@ -111,6 +117,29 @@ internal static class SettingsService
     {
         get => Get(nameof(KeepAwakeWhileTracking), false);
         set => Set(nameof(KeepAwakeWhileTracking), value);
+    }
+
+    /// <summary>The version of the saved data; 1 (or missing) holds MCTS BusTime stop IDs.</summary>
+    public static int DataVersion
+    {
+        get => Get(nameof(DataVersion), 1);
+        set => Set(nameof(DataVersion), value);
+    }
+
+    /// <summary>The Transit API key's limits; Transit's free tier unless the developer changed them.</summary>
+    public static TransitBudgetPolicy TransitBudget
+    {
+        get => new()
+        {
+            CallsPerMinute = Math.Clamp(Get("TransitCallsPerMinute", TransitBudgetPolicy.DefaultCallsPerMinute), 1, 10_000),
+            CallsPerMonth = Math.Clamp(Get("TransitCallsPerMonth", TransitBudgetPolicy.DefaultCallsPerMonth), 1, 100_000_000),
+        };
+
+        set
+        {
+            Set("TransitCallsPerMinute", value.CallsPerMinute);
+            Set("TransitCallsPerMonth", value.CallsPerMonth);
+        }
     }
 
     /// <summary>Transit API call tally; a fresh one if none is saved or it can't be read.</summary>
