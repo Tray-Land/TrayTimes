@@ -8,6 +8,7 @@ Created: 2026-10-15. Branch: `feature/transit-app-api`.
 |-------|-------|--------|
 | 1 | No sign-in. Swap every data source to Transit, add a call budget, and keep the Favorites, Commute, Nearby, tracking, and Settings features. | implemented, awaiting developer testing |
 | 2 | Sign-in feasibility study and the features it would enable. See [transit-login-feasibility.md](transit-login-feasibility.md). | plan written; recommends bring-your-own-key first; not started |
+| 3 | One board instead of three tabs, with a full trip planner. See [board-and-trip-planner-plan.md](board-and-trip-planner-plan.md). | in progress; D1–D7 confirmed; one-board UI built, packaged checks pending; trip view pending |
 
 ## The budget that drives the design
 
