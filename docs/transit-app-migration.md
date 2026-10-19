@@ -8,7 +8,7 @@ Created: 2026-10-15. Branch: `feature/transit-app-api`.
 |-------|-------|--------|
 | 1 | No sign-in. Swap every data source to Transit, add a call budget, and keep the Favorites, Commute, Nearby, tracking, and Settings features. | implemented, awaiting developer testing |
 | 2 | Sign-in feasibility study and the features it would enable. See [transit-login-feasibility.md](transit-login-feasibility.md). | plan written; recommends bring-your-own-key first; not started |
-| 3 | One board instead of three tabs, with a full trip planner. See [board-and-trip-planner-plan.md](board-and-trip-planner-plan.md). | in progress; D1–D7 confirmed; one-board UI built, packaged checks pending; trip view pending |
+| 3 | One board instead of three tabs, with a full trip planner. See [board-and-trip-planner-plan.md](board-and-trip-planner-plan.md). | implementation steps 01–08 complete (2026-10-19); full suite 559/559, ARM64 build 0 warnings/errors; field observations recorded separately in the plan |
 
 ## The budget that drives the design
 
@@ -18,7 +18,7 @@ The quota belongs to the **key**, not the user. A key compiled into a Store buil
 
 Design rules, in priority order:
 
-1. One request per refresh, whatever the tab. `stop_departures` takes up to 100 stops, so Favorites, Commute, Nearby, and tracking share one batched call.
+1. One departures request per refresh. `stop_departures` takes up to 100 stops, so the board, saved stops, suggestion/transfer stops, near-departure timed trips, and tracking share one batched call.
 2. Discovery is cached and persisted. Which stops are near you, which trip gets you to work, and which routes run in an area rarely change, and a desktop PC rarely moves. They're kept in LocalState and reused across restarts.
 3. Decorative data never costs a request. Route lines are drawn only from shapes already returned by calls the app made anyway.
 4. Vehicle positions are fetched on demand, when a row is selected, rather than polled for every listed bus.
@@ -26,14 +26,14 @@ Design rules, in priority order:
 
 ## Endpoint review
 
-Every v4 endpoint, what it's for, and whether Phase 1 uses it.
+Every v4 endpoint, what it's for, and its current use (including the Phase 3 board and planner).
 
-| Endpoint | What it returns | Phase 1 use | Cache |
+| Endpoint | What it returns | Current use | Cache |
 |----------|-----------------|-------------|-------|
-| `GET /v4/public/stop_departures` | Upcoming departures for up to 100 stops, grouped by route and direction, merged real-time and scheduled (`is_real_time`), with route names, colors, alerts, and optionally stops and shapes | **Every live time**: Favorites, Commute boarding stops, Nearby stops, tracking. Shapes are requested only for stops not seen with shapes in the last 7 days. | Per-stop snapshots in `PredictionCoordinator`; freshness set by the budget |
-| `GET /v4/public/nearby_routes` | Routes within ≤1.5 km, each direction's closest stop, departures, and optionally itinerary stops and shapes | **Nearby discovery**: one call gives the stops, their lines, and the shapes to draw | Persisted; reused within 150 m for 24 h |
-| `GET /v4/public/plan` | Multimodal trip plans with transfers, walking legs, departure options, and per-departure alighting times | **Commute**: replaces the shape-matching direct-route search, so transfers now work | Persisted; reused within 150 m of the origin, same destination, for 3 h |
-| `GET /v4/public/search_stops` | Stops matching a name or stop code near a point | **Settings**: stop search, run on submit only (no typeahead) | In memory, 1 day |
+| `GET /v4/public/stop_departures` | Upcoming departures for up to 100 stops, grouped by route and direction, merged real-time and scheduled (`is_real_time`), with route names, colors, alerts, and optionally stops and shapes | **Every live time**: board, saved stops, all boarding/transfer stops of the suggestion's options, near-departure timed trips, and tracking. Shapes are requested only for stops not seen with shapes in the last 7 days. | Per-stop snapshots in `PredictionCoordinator`; freshness set by the budget |
+| `GET /v4/public/nearby_routes` | Routes within ≤1.5 km, each direction's closest stop, departures, and optionally itinerary stops and shapes | **Board discovery**: near the device, a saved place, or a saved stop; no discovery for All saved stops | Persisted; reused within 150 m for 24 h |
+| `GET /v4/public/plan` | Multimodal trip plans with transfers, walking legs, departure options, and per-departure alighting times | **Suggestion and full trip view**, including every leg/alternative line, walking fallback, outage avoidance, searched places/stop-ID destinations, and leave-at/arrive-by. Live timing reuses the shared departures batch, not another plan call. | 3 h within 150 m of the origin and 50 m of the destination; stop identity, persistence, and time mode/UTC five-minute bucket are separate keys. Saved-place plans persist; temporary searched plans stay memory-only until explicit Save. Infeasible live plans re-plan at most once per 15 min. |
+| `GET /v4/public/search_stops` | Stops matching a name or stop code near a point | **Settings and destination search**: run on submit only (no typeahead); street addresses use Azure Maps only when configured | In memory, 1 day |
 | `GET /v4/public/available_networks` | Networks serving a point | **Settings**: route browser, first step | Combined with routes below |
 | `GET /v4/public/routes_for_networks` | Every route of up to 20 networks | **Settings**: route browser list | Persisted, 7 days, per area |
 | `GET /v4/public/route_details` | One route's itineraries (directions/branches), ordered stops, and shapes | **Settings**: direction and stop pickers and the route line | Persisted, 7 days |
@@ -92,8 +92,8 @@ Tracking base schedule (was 60/30/10 s for BusTime): 3 min when over 10 minutes 
 ## Request sharing
 
 - `PredictionCoordinator` keeps per-stop snapshots and in-flight sharing, now with batches of 100.
-- **Coalescing window (new):** a new batch waits 750 ms before sending, and other consumers' stops requested in that time join it. Opening the flyout in Commute or Nearby therefore usually costs one call for both the tab's stops and the Favorites tooltip.
-- **Filler threshold (changed):** a request fills with browsing stops that are more than half a refresh interval old, instead of a full interval. Favorites' and Commute/Nearby's timers drift into phase, so one call serves both.
+- **Coalescing window:** a new batch waits 750 ms before sending, and other consumers' stops requested in that time join it. The board, suggestion (including transfers), and saved stops therefore share one departures call on open.
+- **Filler threshold:** a request fills with browsing stops that are more than half a refresh interval old, instead of a full interval. Independent consumers' timers drift into phase, so one call serves them together.
 - Tracking can now fill its request with due browsing stops too. With 100-stop batches this costs nothing, and it keeps the open flyout fresh.
 
 ## Caches and persistence
@@ -102,7 +102,7 @@ Tracking base schedule (was 60/30/10 s for BusTime): 3 min when over 10 minutes 
 
 ## Expected calls (free tier, typical day)
 
-Rows marked † are measured by `TrayTimes.Tests/Services/RequestBudgetTests.cs` through the real monitors, coordinator, caches, and client, using fake HTTP and a fake clock.
+The table below records the Phase 1 tabbed build. For the current board/planner, use the [measured Phase 3 call table](board-and-trip-planner-plan.md#call-budget), which includes cold/warm opens, jumps, destinations, timed plans, live transfers, and re-planning. Rows marked † are measured by `TrayTimes.Tests\Services\RequestBudgetTests.cs` through the real monitors, coordinator, caches, and client, using fake HTTP and a fake clock.
 
 | Scenario | BusTime build | Transit build |
 |----------|---------------|---------------|

@@ -2,7 +2,7 @@
 
 Replace the flyout's three tabs (Favorites, Commute, Nearby) with one departures board centered on where you are, a trip suggestion above it, and a full trip planner behind the suggestion. Favorites become places to jump the board to.
 
-Created: 2026-10-18. Branch: `feature/transit-app-api` (or a branch from it). Status: steps 01–03 done (2026-10-18); D1–D7 confirmed as recommended (2026-10-18); step 04 built and tested, waiting on the developer's packaged checks (2026-10-18). It builds on Phase 1 in [transit-app-migration.md](transit-app-migration.md) and keeps its call budget rules.
+Created: 2026-10-18. Branch: `feature/transit-app-api` (or a branch from it). Status: implementation steps 01–08 done (2026-10-19); D1–D7 confirmed as recommended (2026-10-18). Remaining field observations are listed in the acceptance evidence below. It builds on Phase 1 in [transit-app-migration.md](transit-app-migration.md) and keeps its call budget rules.
 
 ## Why
 
@@ -207,6 +207,7 @@ LiveTrip.Compute(itinerary, batchArrivals, now) → LiveTrip?:
   - Contexts: `BoardCenter` for the board, and `SuggestionContext(Places, DestinationId)`, which compares its places by sequence, for the suggestion.
   - `IPlaceArrivalsMonitor` is the non-generic view the flyout uses for "the current tab's monitor".
   - `SharedLocation` shares one lookup per refresh: the flyout calls `BeginRefresh()`, then refreshes the monitors. The first request decides whether it's a quick fix, and its refinement is shared.
+- **As built (step 07):** the optional time-constrained trip has its own `PlaceArrivalsMonitor<TimedTripContext>` and `TransitConsumer.Trip`. It uses the already chosen origin, not another location lookup. The board and live suggestion keep their own discoveries, so returning to Leave now uses the held suggestion without a request. `PlaceStops.WatchedStops` overrides the normal plan stop list: future options register no stops until within 30 minutes of departure, then join the same batch. Closing/hiding cancels and unregisters only this extra consumer.
 
 ### 4. Board composition (Core, pure)
 
@@ -231,17 +232,21 @@ Add `PlaceBoard.Around(NearbyLines nearby, IReadOnlyList<SavedStop> saved, GeoPo
 
 The flyout code-behind is already 1,863 lines, so new UI goes in user controls rather than growing it:
 
-- `Controls/SuggestionCard.xaml` holds the card, and `Controls/TripView.xaml` holds the legs, options, and Back. The trip view loads with `x:Load` on first open (see the performance instructions).
+- `Controls/SuggestionCard.xaml` holds the card, and `Controls/TripView.xaml` holds the legs, options, and Back. **As built (step 05):** an empty `ContentControl` hosts a `TripView` created only on first open and reused until the flyout is destroyed. `FindName` cannot realize `x:Load` under a WinUI `Window`; the compiled-binding alternative also generated calls to the missing `Window.FindName` in this project. Explicit lazy creation preserves deferred construction without that limitation.
 - `TimesFlyoutWindow` keeps the map, the monitors, vehicles, and tracking, and switches between the board and the trip view.
 - Remove: the `SelectorBar` (`TimesFlyoutWindow.xaml:322-342`), the commute header (`:435-476`), `ModeBar_SelectionChanged`/`SelectMode`/`EnterMode`'s mode branches (`TimesFlyoutWindow.xaml.cs:415-488`), the mode switches in `Render`, `OnPatternsChanged`, `FrameListedStopsAsync`, `RebuildStopPins`, and `Refresh`, plus `FlyoutMode` (`TrayTimes.Core/Models/FlyoutMode.cs`) and its setting (`SettingsService.FlyoutMode`, `TrayTimes/Services/SettingsService.cs:66-76`; the stored value is just ignored).
 - Map layers: ~~the board uses `_commuteRouteLayer` for nearby lines and `_routeLayer` for pinned saved stops' lines.~~ As built in step 04: one layer, `_routeLayer`, draws the line of every departure the board lists, pinned saved stops included (`DrawRoutes`). The Favorites-only layer and `DrawFavoriteRoutes` are gone. The trip view clears `_routeLayer` and draws the itinerary in it. Each `RideLine.Path` is already the ridden part (`plan_shape`), so no clipping is needed when it's present. A `GeoMath` helper that projects the boarding and alighting stops onto the full shape is needed only as a fallback for an empty `Path`.
 - New strings go in `Strings/en-us/Resources.resw` with `x:Uid` or `ResourceLoader`, and use format placeholders, not concatenation. Existing hard-coded strings move to resources only where a step rewrites them.
+- **As built (step 05):** Core's `TripSelection` retains a feasible selected itinerary across batch updates, exposes the first three watched transit options plus the walk-only fallback, and selects the best remaining transit option (then walking) if the selection becomes infeasible. `LiveTrip.FirstRideDepartures` projects that ride's tracking chips from the same batch and scheduled fallbacks, preserving trip IDs without restoring canceled or superseded trips.
+- `TripView` uses a stock `SelectorBar`, a virtualized `ListView` with walk/ride templates, and the board's existing time-chip template and tracking handlers. `TripMapRenderer` draws only known ridden paths and dashed walk paths with boarding/alighting pins and origin/destination markers. Empty ride paths have no full-shape clipping fallback.
+- **As built (step 07):** the trip view adds Leave now / Leave at / Arrive by with native `CalendarDatePicker` and `TimePicker` controls in a flyout. Editing/canceling makes no request; Plan trip submits the normalized time. Future trips show their date, retain every planned leg's timing, and offer no tracking chips until they become live. Arrive-by options are ordered by latest departure and exclude options arriving after the deadline.
+- **Marker clarity (developer request, 2026-10-19):** both board and trip maps use shared full-color emoji place markers (house, briefcase, graduation cap, pushpin; red location pin when not at a saved place). Stops remain small dots, and vehicles keep their bus emoji. Toolbar, menu, and card glyphs are unchanged.
 
 ### 6. Persistence
 
 - `CachedTripPlan` (`TransitCacheSnapshot.cs:14`) gains an optional `Itineraries` list. Entries without it (saved by older builds) are skipped on import. Keep `TransitCacheSnapshot.CurrentVersion` at 1: bumping it would throw away every cached nearby result and route detail (`MetadataTransitService.Import`, `:182`), costing calls for no reason. (Done in step 01. Walk and ride paths are saved as encoded polylines by `EncodedPathJsonConverter`, like shapes. An itinerary that fails validation is skipped, and its plan is fetched again.)
 - Plans to **searched** destinations (step 06) stay in memory and aren't written to `transit-cache.json`. Only saved places, which the rider chose to store, persist.
-- With `leave_time`/`arrival_time`, the plan cache key gains the requested time, rounded to 5 minutes. "Now" plans keep the current key.
+- With `leave_time`/`arrival_time`, the plan cache key gains `TripTime` (mode plus UTC time, normalized to 5 minutes). Leave-at rounds up and arrive-by rounds down, so normalization never relaxes the rider's constraint. "Now" is the default time key. `CachedTripPlan.Time` is optional, so old version-1 snapshots still load. Temporary timed plans remain memory-only; explicit Save promotes all fresh times while retaining their original ages.
 
 ### 7. Launch and Settings
 
@@ -251,22 +256,23 @@ The flyout code-behind is already 1,863 lines, so new UI goes in user controls r
 
 ## Call budget
 
-Free tier: 5 calls a minute, 1,500 a month (about 50 a day). Expected physical calls, with warm caches unless noted:
+Free tier: 5 calls a minute, 1,500 a month (about 50 a day). Physical Transit calls measured by `RequestBudgetTests` through the real HTTP client, cooldown/budget gate, metadata caches, coordinator, and monitors, with fake HTTP and a controllable clock. Counts assume Normal freshness and successful requests; discovery is warm unless noted. Azure Maps is outside the Transit quota.
 
-| Scenario | Today | After |
-|----------|-------|-------|
-| Open the flyout at a known place | 1 departures call (Nearby or Commute tab, plus Favorites) | 1 departures call (board, suggestion stops including transfers, and Favorites) |
-| First open of the day at that place | + 1 `nearby_routes` (Nearby) or + 1 `plan` (Commute) | + 1 `nearby_routes` + 1 `plan` (both are shown now) |
-| Open the trip view, switch options | n/a | 0 |
-| Jump to a saved stop or place | (switching tabs) 1 departures call | 1 departures call, + 1 `nearby_routes` the first time that day |
-| All saved stops | (Favorites tab) 0–1 | 0–1 |
-| Pick another destination | 1 `plan` (cached 3 h) | 1 `plan` (cached 3 h) |
-| Search an address | n/a | Azure Maps only, + 1 `plan` |
-| Leave at / arrive by | n/a | 1 `plan` per distinct time (cached) |
-| Keeping a trip's times live | n/a | 0 (its stops join the batch) |
-| A trip becomes infeasible | n/a | ≤ 1 `plan` per 15 min |
+| Scenario | Tabbed build baseline | Board/planner measured calls | `RequestBudgetTests` evidence |
+|----------|-----------------------|------------------------------|-------------------------------|
+| Open the flyout at a known place | 1 departures call (one tab plus Favorites) | **1 departures** for board, suggestion/transfer stops, and saved stops; **0** on reopen within a minute | `Board_OpenWithSuggestionAndFavorites_CostsOneBatchPlusOnlyUncachedDiscovery(true)`; `Board_ReopenedWithinAMinute_ReusesBothDiscoveriesAndEveryDeparture` |
+| First open with both discoveries cold | + 1 `nearby_routes` or + 1 `plan` | **3 total**: 1 `nearby_routes` + 1 `plan` + 1 shared departures | `Board_OpenWithSuggestionAndFavorites_CostsOneBatchPlusOnlyUncachedDiscovery(false)` |
+| Open the trip view, switch options, return to board | n/a | **0** | `TripView_OpenSwitchOptionsAndReturnToBoard_MakesNoAdditionalRequest` |
+| Jump to a saved stop or place | 1 departures when switching tabs | **1 departures** when stale, **+1 nearby_routes** when that center is uncached; **0** if both are fresh | `Board_JumpToSavedPlaceOrStop_CostsOneBatchAndOnlyUncachedNearbyDiscovery` (four combinations); `Board_JumpToAFreshSavedStop_ReusesNearbyAndDeparturesWithoutACall` |
+| All saved stops | 0–1 | **0** with fresh departures, **1** when stale; no discovery | `Board_AllSavedStops_CostsNoDiscoveryAndOnlyStaleDepartures` (fresh/stale) |
+| Pick another destination | 1 `plan` (cached 3 h) | **1 plan** if uncached, **+0–1 shared departures** if new boarding stops need data; returning to the cached destination while its departures are fresh is **0** | `Suggestion_NewDestination_CostsOnePlanAndABatchOnlyForUncachedBoardingStops` (same/new stops) |
+| Search an address, choose it, save | n/a | **0 Transit search**; choosing costs **1 plan**, plus the new-stop departures above; explicit Save costs **0**. Address lookup uses Azure Maps only | `Destination_AddressSubmitThenChooseAndSave_CostsOnePlanAndNoTransitSearch`; the destination-change cases cover new stops |
+| Search a stop, choose it | n/a | **1 search_stops** on uncached submit + **1 plan** on choice, plus any new-stop departures; normalized repeat searches are free | `Destination_StopSubmitThenChoose_CostsOneCachedSearchAndOneStopTargetPlan` |
+| Leave at / arrive by | n/a | **1 plan** per distinct mode/UTC five-minute bucket; same bucket and return to cached Now are **0**. Far-future stops add no departures | `TimedPlans_SameRoundedTimeAndReturningToNow_CostOnePlanPerDistinctTime`; `TimedTrip_FutureThenNearDeparture_JoinsTheSharedBatchOnlyWhenLiveAndClearsOnlyItsConsumer` |
+| Keeping a trip's times live | n/a | **0 additional calls**: every ride's boarding stop joins the existing board/saved-stop batch | `BoardSuggestionAndFavorites_DueTogether_ShareOneCallWithTheTripsTransferStop` checks one batch per refresh and changed live transfer/arrival times |
+| A trip becomes infeasible | n/a | **At most 1 plan per 15 min** per origin/destination; repeated checks reuse it | `Replan_InfeasibleTripCheckedEveryMinute_CostsAtMostOnePlanPerFifteenMinutes` |
 
-The new cost is the second discovery on the first open of the day (about +1 call a day) plus exploring trips on purpose. Step 08 measures these through `RequestBudgetTests`.
+The new cold-open cost is the second discovery, not another live-times poll. Nearby discovery lasts 24 hours, but plans last 3 hours, so "first open of the day" is not a guarantee that only one plan is needed that day. Exploring destinations can also introduce a previously uncached boarding stop; the original estimate omitted that departures batch. Failed/canceled requests and budget waiting retain the existing gate behavior. These deterministic scenarios are not evidence of a normal day's actual usage; that remains a field observation.
 
 ## Decisions (confirmed 2026-10-18: every recommended default)
 
@@ -297,28 +303,39 @@ Allowed statuses: `pending`, `in_progress`, `blocked`, `done`, `deferred`.
 | 01 | Itinerary model, full plan parsing, persistence | M | done | 2026-10-18. Full suite 418/418 (was 408), app build 0 warnings. Model as built in §1 (lines per ride). Live fixture recorded (1 call). See the execution log |
 | 02 | Live trip timing and re-plan rule | M | done | 2026-10-18. Step tests 64/64; full suite 438/438 (was 418); app build 0 warnings. `LiveTrip`, `ReplanGuard`, `MetadataTransitService.ReplanTripAsync` (§2). No API calls. See the execution log |
 | 03 | Two place monitors, board composition, shared location | M | done | 2026-10-18. Step tests 108/108; full suite 467/467 (was 438); app build 0 warnings. Generic monitor, `SharedLocation`, `BoardCenter`, `PlaceBoard.Around`/`Saved`/`BoardingStopIds`, `IsCurrentPlan` (§2–§4). Tabs still work, on two monitors. No API calls. See the execution log |
-| 04 | One board in the flyout: place chip, suggestion card, tooltip, launch | L | in_progress | 2026-10-18. Code complete. Full suite 482/482 (was 467); app build 0 warnings. Live smoke check passed (chip, card, Going to, D1 fallback, jump to Near Home). Left: the developer's packaged checks (see the checkpoint), then mark `done`. See the execution log |
-| 05 | Trip view: legs, options, map, tracking, back | L | pending | Needs D7 |
-| 06 | Destinations: search, stops, save as place | M | pending | |
-| 07 | Leave at / arrive by | S | pending | Needs D6; may be `deferred` |
-| 08 | Budget measurements, docs, acceptance checklist | S | pending | |
+| 04 | One board in the flyout: place chip, suggestion card, tooltip, launch | L | done | 2026-10-18. Full suite 482/482; app build 0 warnings. Developer confirmed the packaged checks passed before step 05. See the execution log |
+| 05 | Trip view: legs, options, map, tracking, back | L | done | 2026-10-19. Full suite 495/495; ARM64 app build 0 warnings/errors; 14/14 packaged UI checks. Developer confirmed remaining manual accessibility checks passed. See the execution log |
+| 06 | Destinations: search, stops, save as place | M | done | 2026-10-19. Full suite 521/521; ARM64 app build 0 warnings/errors. Developer confirmed remaining Narrator, keyboard, Light/High Contrast checks passed. See the execution log. |
+| 07 | Leave at / arrive by | S | done | 2026-10-19. Full suite 544/544 (23 new cases); ARM64 app build 0 warnings/errors; 9/9 packaged time-control checks; both live API probes returned HTTP 200. Developer confirmed the remaining manual accessibility/theme checks passed. See the execution log. |
+| 08 | Budget measurements, docs, acceptance checklist | S | done | 2026-10-19. Added 15 budget cases; budget suite 24/24; full suite 559/559; ARM64 app build 0 warnings/errors; packaged smoke 6/6. Measured call table, README, migration endpoint table, and acceptance evidence updated. Field observations are explicitly deferred below. |
 
 ### Current checkpoint
 
 - Step 03 is done (2026-10-18). D1–D7 were confirmed as recommended (2026-10-18).
-- Step 04 is built and tested (2026-10-18), and stays `in_progress` until the developer runs the packaged checks below. Next action: those checks, then mark step 04 `done` and start step 05.
-- **Step 04 packaged checks for the developer** (from its acceptance, not yet done by hand):
+- Step 04 is done: the developer confirmed "The packaged checks passed; proceed to step 05" (2026-10-18).
+- Step 05 is done: the developer confirmed the remaining manual accessibility checks passed and requested step 06 (2026-10-19).
+- Step 06 is done: the developer confirmed the remaining search/save accessibility and theme checks passed and requested step 07 (2026-10-19). Existing step 05–06 worktree changes are preserved.
+- **Step 06 validation (2026-10-19):** 521/521 tests, 0 failed/skipped; ARM64 app build with 0 warnings/errors. Packaged address/search/save checks passed 7/7; stop search and planning passed 5 checks before exposing an Escape bug; after the fix, keyboard/input/navigation checks passed 5/5. Typing and navigation made no lookup request; saving reused the held plan.
+- **Step 07 implementation complete:** time-aware plan/cache keys, scheduled future options that become live within 30 minutes of departure, and native date/time controls. Step 06's manual checks are accepted. Missing-Azure-key fallback has unit coverage, but was not forced in the live app by changing credentials.
+- **Step 07 validation (2026-10-19):** 544/544 tests, 0 failed/skipped; ARM64 app build 0 warnings/errors; 9/9 packaged checks. Leave-at and arrive-by planned tomorrow's trips, repeating a time reused its plan, future stops requested no live batch, Leave now restored the live suggestion with no plan call, and Cancel/Escape/Back worked. Both direct API probes returned HTTP 200 with the expected time constraints.
+- **Step 07 developer checks accepted (2026-10-19):** the developer confirmed Narrator, keyboard-only date/time entry and submission, and Light/High Contrast readability passed, and requested step 08.
+- **Step 08 done (2026-10-19):** preserved the existing implementation; added 15 deterministic HTTP/clock budget cases (24 total), corrected every call-table row with named test evidence, and updated the README and migration endpoint table. Full suite 559/559; ARM64 build 0 warnings/errors; packaged board/trip/time-editor smoke 6/6, with screenshots reviewed.
+- **Implementation complete; field follow-ups remain:** a side-by-side comparison of trip legs with the Transit app and a normal day's actual usage have not been recorded. Transfer delays, walking fallback, infeasibility, and budget counts have deterministic coverage; this session did not force live disruptions or change system settings. See the acceptance evidence below.
+- **Step 05 validation (2026-10-19):** 495/495 tests, 0 failed/skipped; ARM64 app build with 0 warnings/errors; 14/14 local packaged UI checks. Opening, option switching, Fit, and Back added no Transit request. Options changed the arrival/legs/map; tracking toggled and stopped through the existing bell; Back/Escape/Backspace/Alt+Left restored the board and focus; Escape on the board hid the flyout.
+- **Step 05 developer checks accepted:** Narrator over Back, arrival options, walk/ride stop names, and tracking chips; Light and High Contrast readability, including route badges and map paths. The live cached plan had three direct transit options, so transfer/walk-only/infeasibility behavior was covered by tests rather than extra paid planning calls.
+- **Step 04 packaged checks confirmed by the developer**:
   1. With saved stops: open the jump menu, and check each stop shows its next departure with no request in the log. Jump to a saved stop and to All saved stops.
   2. Jump to Near Work (costs 1 `nearby_routes` the first time that day).
   3. Turn Windows location off: the board falls back to Near Home, the card says "guessed from the time of day", and the location-permission bar works when you pick Near you.
   4. Keyboard only: Tab reaches the place chip, then the card, then Going to. Escape hides the flyout. (Escape was sent by script, and the flyout hid, but the tool warned its key may not reach WinUI, so confirm by hand.)
   5. Narrator reads the card as "To Work, leave in 6 minutes, arrive 8:42, 1 transfer" (the name was checked through UI Automation). Check High Contrast.
   6. Star a stop near you: it moves to the top of the board without the list blanking.
-- **Step 05 handoffs from step 04:**
-  - **The card's click** (`SuggestionCard.TripInvoked`) now shows the first ride's vehicles, like a row (`TimesFlyoutWindow.SuggestionCard_TripInvoked`), or frames a walk. Step 05 replaces it with opening the trip view. The card's `Item.Trip` is the shown `LiveTrip`, and `Item.Leg` its origin and destination.
-  - **Re-plan:** `TimesFlyoutWindow.SuggestionItem` calls `LiveTrip.Best`. When the plan has ride options but none can still be made and there's no walk-only trip, step 04's `LoadPlaceAsync` calls `ReplanTripAsync` under the guard and a diagnostics scope, then refreshes the suggestion if a new plan arrives. Step 05 should show "Finding a new route…" while that refresh is pending; it doesn't need to own the re-plan.
-  - **Map:** there's one route layer now (`_routeLayer`, see §5). The trip view clears it and draws the itinerary there; returning to the board calls `EnterBoard` or `DrawRoutes` again.
-  - **Back:** Escape still hides the flyout (`Escape_Invoked`). Step 05 makes it return to the board while the trip view is open.
+- **Step 05 integration / step 06 handoffs:**
+  - **The card's click** (`SuggestionCard.TripInvoked`) opens the trip with the card's itinerary selected, using the held plan and shared batch. No discovery, departures, or vehicle request is made by navigation.
+  - **Re-plan:** `LoadPlaceAsync` still owns infeasibility re-planning under the existing guard and diagnostics scope. The trip and card now show "Finding a new route…" while it runs, and a superseded monitor version cannot apply the old result/error to a new destination.
+  - **Map:** `_routeLayer` is shared. Board updates cannot replace the trip geometry while it is open; Back restores the held board's pins, center, routes, and Fit label without requesting data. Explicit tracking retains the existing vehicle-selection behavior; Fit returns to the whole itinerary.
+  - **Back:** the button, Escape, Backspace, and Alt+Left restore the board and suggestion focus. Escape on the board still hides the flyout. Each new flyout open starts on the board.
+  - **Next:** record the deferred field observations when available; no implementation step remains active.
 
 ### 01 — Itinerary model, full plan parsing, persistence
 
@@ -458,6 +475,22 @@ Allowed statuses: `pending`, `in_progress`, `blocked`, `done`, `deferred`.
 7. (If step 07 shipped) Arrive by 9:00 tomorrow.
 8. Narrator and keyboard-only pass over the chip, card, trip view, and Back.
 9. After a normal day, Settings' usage card shows well under 50 calls.
+
+### Acceptance evidence (2026-10-19)
+
+The implementation steps are complete. This checklist distinguishes developer acceptance and automated evidence from field observations that an agent session cannot establish.
+
+| # | Status | Evidence / remaining observation |
+|---|--------|----------------------------------|
+| 1 | Accepted / automated | Step 04 packaged acceptance covered the board, pinned stops, and countdown; `PlaceBoardTests`, `BoardCenterTests`, and the cold/warm-open budget cases cover composition and shared calls. Final packaged smoke confirms the board and suggestion render. |
+| 2 | Accepted / automated | Developer accepted step 04's place/stop/All saved jumps and free next-departure menu. Step 08 measures cold/warm saved-place and saved-stop jumps, fresh reuse, and fresh/stale All saved stops. |
+| 3 | Passed navigation/tracking; field comparison deferred | Step 05 passed 14 packaged checks, including options, tracking, map changes, and Back. Step 08 rechecked trip opening and Back. An explicit side-by-side comparison of every leg with the Transit app has not been recorded. |
+| 4 | Automated; live disruption not forced | `LiveTripTests` covers missed transfers and cancellations. The shared-refresh budget test now checks both rides use live arrivals and the destination arrival changes, with one batch per refresh and no plan call. |
+| 5 | Accepted / automated | Developer accepted step 04's location-off fallback and guessed-origin notice; `BoardCenterTests` and shared-location tests cover fallback order and one location lookup. No system permission was changed in step 08. |
+| 6 | Accepted / automated | Step 06 passed packaged address/stop search, temporary planning, and Save checks. Step 08 measures address-only lookup, normalized stop-search reuse, stop-ID planning, and request-free Save. |
+| 7 | Accepted / automated | Step 07's 9 packaged checks included tomorrow's leave-at/arrive-by trips and cached return to Now; the developer accepted remaining manual checks. Time, cache, sorting, live-transition, and HTTP-parameter tests pass. Step 08 additionally measures different five-minute buckets. |
+| 8 | Accepted | Developer accepted step 04–07 Narrator, keyboard-only, and Light/High Contrast checks. Step 08 changes no UI; its final smoke confirms named controls, editor Cancel, and restored suggestion focus. |
+| 9 | Deferred field observation | No normal day's actual usage has been supplied or observed. The measured scenarios and governor tests pass, but do not establish this real-world total. Check Settings after normal use; do not count forced development probes as a typical day. |
 
 ## Verification
 
@@ -796,3 +829,233 @@ Each session appends an execution-log entry with the date, step, and status; the
 - The app was left running in the tray for the developer's checks.
 
 **Next action:** the developer runs the step 04 packaged checks in the checkpoint, then marks step 04 `done`. Then step 05, starting from its handoffs.
+
+### 2026-10-18 — Step 04 acceptance / Step 05 start — in_progress
+
+- The developer confirmed the step 04 packaged checks passed and requested step 05. Step 04 is now `done`.
+- Step 05 scope: a deferred `TripView` with live options (including walk-only), walk/ride templates, first-ride tracking, itinerary map paths and pins, Fit, and Back/Escape/Backspace/Alt+Left.
+- Baseline: `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=ARM64 --verbosity quiet` passed 482/482, 0 failed, 0 skipped.
+- Opening and switching options must use the existing plan and shared batch, not request data.
+- Next action: implement step 05, then run its tests, build, and packaged interaction checks.
+
+### 2026-10-19 — Step 05: trip view implementation and validation — in_progress (manual acceptance pending)
+
+**Changes**
+
+- Added `TrayTimes.Core\Commute\TripSelection.cs`: local option selection over the held plan and shared batch, including the walk-only fallback, selection retention, and feasible replacement. Added `LiveTrip.FirstRideDepartures` for first-ride tracking candidates, retaining scheduled trip IDs and excluding canceled/superseded trips.
+- Added `TrayTimes\Controls\TripView.xaml` / `.xaml.cs`, `TripViewItems.cs`, and `TripLegTemplateSelector.cs`: Back and arrival heading, native option selector, walk/ride templates, stop names and times, duration/distance, transfer wait, stop count, live/scheduled/delay status, and destination footer. Only the first ride gets the existing board time chips and bells.
+- Added `TrayTimes\Views\TripMapRenderer.cs`: ridden shapes in route colors, thinner dashed walking paths, boarding/alighting pins, place markers, and full-itinerary Fit. Geometry is retained across countdown-only updates. No full-shape clipping fallback was added.
+- Updated `TimesFlyoutWindow.xaml` / `.xaml.cs` to host the lazy control, open it from the suggestion, keep the shared batch updating it, protect its map from board updates, show guarded re-plan progress/errors, and restore the board without discovery or requests.
+- Back button, Escape, Backspace, and Alt+Left return to the board and focus the suggestion; opening focuses Back. Escape on the board still hides the flyout. A trip map is not saved as the next Near you board view.
+- Reused tracking rather than adding a tracker or transfer-tracking behavior. `BusTimeItem` can now carry its boarding stop name even when that stop is absent from the board.
+- Added resource-backed trip labels, accessibility names, Fit labels, distance units, and the tracking strings touched by this step in `Resources.resw`. Shared regional distance formatting moved to `AppStrings.Distance`. Logs remain in English.
+- No packages, settings migrations, destination-search UI, time pickers, or README changes.
+
+**Tests**
+
+- Added eight `TripSelectionTests`: watched-option limit plus walking, opening the preferred card option, keeping selection while live times update, replacing an infeasible selection, replacing the plan, walking fallback, no feasible selection, and rejecting a non-option.
+- Added four `LiveTripTests.FirstRideDepartures_*` cases: live/planned/canceled merging, not restoring a trip that moved earlier, scheduled fallback IDs and count limit, and no chips for walking.
+- Added `RequestBudgetTests.TripView_OpenSwitchOptionsAndReturnToBoard_MakesNoAdditionalRequest`: every transit boarding stop is watched in the original batch; opening, choosing all options, computing chips, and updating locally do not add a call.
+- Corrected that new request test's fake response to an empty departures batch. The default synthetic live departures made its artificial transfer infeasible; the empty response exercises deterministic scheduled fallback without changing production behavior.
+
+**Commands and results**
+
+Architecture was detected from `$env:PROCESSOR_ARCHITECTURE` as ARM64, and mapped to `$Platform` before build/test commands.
+
+- Baseline full suite: 482 passed, 0 failed/skipped.
+- `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --filter "FullyQualifiedName~TripSelectionTests|FullyQualifiedName~LiveTripTests|FullyQualifiedName~RequestBudgetTests|FullyQualifiedName~TrackedBusTests" --verbosity minimal`: 95 passed, 0 failed/skipped.
+- Final `dotnet build .\TrayTimes\TrayTimes.csproj -c Debug -p:Platform=$Platform --verbosity quiet`: succeeded, 0 warnings, 0 errors.
+- Final `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --verbosity minimal`: 495 passed, 0 failed/skipped.
+- `winapp run .\TrayTimes\TrayTimes.csproj -c Debug --arch $Platform.ToLowerInvariant() -p Platform=$Platform --no-build --detach --json`: launched the current platform-specific packaged build. The process stayed responsive and was left running in the tray with test tracking stopped.
+- `git diff --check`: passed. Git reported only its existing LF-to-CRLF conversion notices.
+
+**Runtime findings resolved**
+
+- The initial map helper build had ambiguous WinUI/WinUIEx map type names; explicit WinUIEx aliases fixed it.
+- Launching with `--arch` and `--no-build` alone selected stale `bin\Debug` output instead of the validated `bin\ARM64\Debug` output. Passing `-p Platform=$Platform` selected the correct binary; the new `FitButton` AutomationId confirmed it.
+- The first deferred implementation used `Root.FindName` with `x:Load="False"`. The packaged check exposed a blank pane: Window-rooted deferred content is not realized by `FindName`. A bound `x:Load` also failed compilation because its generated code called `Window.FindName`. The final empty `ContentControl` creates `TripView` explicitly on first use and retains it thereafter. This preserves the performance goal without a Window-specific workaround.
+- The UI script initially read the wrong JSON property for labels and omitted `--value` when using `wait-for --contains`. Those harness errors were corrected; the final batch below passed.
+
+**Packaged checks**
+
+Windows Sandbox was unavailable; checks ran locally against the packaged ARM64 app, without clearing saved data or changing system permissions/themes. A bounded PowerShell batch and its screenshots/results are in the session artifacts, not the repository.
+
+All 14 assertions passed:
+
+1. Back restores suggestion focus.
+2. Opening focuses Back.
+3. Fit describes the whole trip.
+4. Heading, arrival, legs, and destination expose stable accessible IDs.
+5. Selecting another option changes the arrival.
+6. Escape returns to the board with suggestion focus.
+7. Backspace does the same.
+8. Alt+Left does the same.
+9. Opening, option switching, Fit, and Back add **zero Transit requests**, measured against the app log around those actions.
+10. The first ride has an enabled tracking chip.
+11. Starting tracking toggles its name and gold bell.
+12. The same chip stops tracking.
+13. Escape on the board hides the flyout.
+14. The app remains responsive.
+
+Viewed screenshots of the initial trip, a different option, the tracked first ride, and the restored board: option changes updated the route geometry and boarding/alighting details; tracking used the existing caption/bell; the board's routes and suggestion focus returned. Explicit tracking made its normal vehicle request; navigation made none.
+
+**Not run / remaining acceptance**
+
+- Narrator and Light/High Contrast checks remain for the developer. System-wide theme/accessibility settings were not changed on the shared desktop.
+- The current cached plan had three direct transit options. Transfer timing, walking fallback, live batch updates, infeasibility, and re-plan policy have automated coverage; no extra paid plan calls or artificial live cancellations were used to force those UI scenarios.
+- Default-height, long multi-ride layout remains worth inspecting when such a trip is available.
+
+**Next action:** run the remaining step 05 accessibility checks, then mark step 05 `done`. Only then start step 06 (destination search, stops, and Save as place).
+
+### 2026-10-19 — Step 05 acceptance / Step 06 destinations — in_progress (implemented; manual acceptance pending)
+
+The developer confirmed that step 05's remaining Narrator, Light theme, and High Contrast checks passed and requested step 06. Step 05 is now `done`. Its existing uncommitted implementation was preserved; this session did not start step 07.
+
+**Changes**
+
+- Added a lazy `DestinationSearchView` behind **Going to → Search for a place…**, with a visible label, named controls, live status, virtualized results, and localized labels/errors in `Resources.resw`. The map and board state are retained while the search replaces the list pane.
+- Added platform-free `DestinationSearch`: queries run only on explicit submit, never on typing. Street addresses use Azure Maps only; stop names/codes also make one Transit stop search. Without an Azure Maps key, all submits use stops only and the UI explains the limitation. Without a search location, addresses still work and the UI explains why stops cannot be searched.
+- Both providers run concurrently when applicable. A provider-specific failure keeps the other provider's results and is reported explicitly. Empty/overlong queries and invalid result names, stop IDs, or coordinates are rejected; the submitted query limit is 200 characters. Editing, Back, hiding, or another submit cancels stale results.
+- Choosing a result creates a temporary custom destination and updates only the suggestion's destination, not the board center. Explicit planning also works with device location when no Home is saved. Each flyout opening resets the temporary destination and returns to the normal guessed suggestion.
+- Added `TripDestination` and destination-aware planning overloads through `ITransitService`, cooldown, metadata cache, and Transit HTTP service. A stop target sends `to_global_stop_ids` instead of destination coordinates. Existing coordinate-based callers retain their behavior.
+- Temporary destinations and their plans remain in memory: the metadata cache distinguishes temporary/saved targets and stop IDs, and excludes temporary plans from snapshots. Saved stop-target plans round-trip their optional destination stop ID without changing snapshot version 1; old snapshots remain compatible.
+- **Save as place** explicitly adds a custom favorite through the existing settings API, refreshes Going to, and hides Save. Saving promotes the held temporary plan to the persistent cache without another request and without resetting its age. Saving is disabled while discovery/re-planning runs. Settings preserves a saved stop ID on name-only edits and clears it when its address changes.
+- Search queries/results are not logged. Existing diagnostics remain in English and record endpoint/consumer/trigger/outcome only. Public shared route-shape caching is unchanged.
+- Back and Escape cancel search and restore keyboard focus to Going to. Backspace continues to edit the query rather than navigating. No dependencies, time controls, README changes, or commits were added.
+
+**Tests (26 additional cases; full suite 495 → 521)**
+
+- `DestinationSearchTests`: address-only submits; one stop search and duplicate removal; no-key stop fallback; partial/all-provider failures; cancellation; no-location behavior; invalid coordinates; empty/overlong input; query classification; and creating a custom favorite while retaining stop identity.
+- `SuggestionContextTests`: temporary destination selection, destination-aware cache targets, and invalidation when temporary/saved context changes.
+- `TransitAppServiceTests`: URL-encoded stop-target planning with `to_global_stop_ids` and no destination-coordinate parameters.
+- `MetadataTransitServiceTests`: stop/coordinate cache separation, memory-only temporary plans, saved-stop snapshot round-trip, explicit save promotion retaining the original lifetime, and guarded temporary re-planning.
+
+**Commands and results**
+
+Architecture was detected in each fresh build/test shell:
+
+```powershell
+$arch = $env:PROCESSOR_ARCHITECTURE
+$Platform = if ($arch -eq 'AMD64') { 'x64' } else { $arch }
+```
+
+This machine selected ARM64.
+
+- Baseline full suite: 495 passed, 0 failed/skipped.
+- Targeted destination/context/transit/cache tests during implementation: 112 passed, 0 failed/skipped.
+- `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity minimal`: final rerun after the keyboard fix passed 521 tests, 0 failed/skipped.
+- `dotnet build .\TrayTimes\TrayTimes.csproj -c Debug -p:Platform=$Platform --verbosity quiet`: succeeded with 0 warnings and 0 errors, including the final keyboard fix.
+- `winapp run .\TrayTimes\TrayTimes.csproj -c Debug --arch $Platform.ToLowerInvariant() -p Platform=$Platform --no-build --detach --json`: launched the final platform-specific packaged app; it remained responsive and was left running.
+- `git -c core.safecrlf=false --no-pager diff --check`: passed.
+
+**Packaged checks and fixes**
+
+Windows Sandbox was unavailable. Bounded `winapp ui` PowerShell batches ran locally against the packaged ARM64 build, without clearing settings or changing system themes, permissions, or credentials. Scripts, structured results, and eight viewed screenshots are in the session artifacts, not the repository.
+
+- Address/save batch: **7/7 passed**. Named search controls and visible label; typing caused no stop search; submitted address returned choices without a Transit stop search; selection planned a temporary trip; Save added the custom place and updated Going to; trip opening/Back worked; tested query text was absent from the app log.
+- Stop batch: **5 functional checks passed**, then Escape from the editor failed. Submit made one `SearchStops` request and returned stop choices; selecting a stop planned a temporary trip with explicit Save; trip opening/Back worked; Backspace edited without a request. The batch's second reported failure was its wrapper for the same Escape failure, not a separate product defect.
+- Fixed Escape by handling the search control's routed key event even when the inner `AutoSuggestBox` editor has consumed it. The window accelerator alone did not receive that key.
+- Final keyboard/input batch: **5/5 passed**. Escape from the focused editor restored the board and Going to focus; Backspace edited in place; explicit Back restored the same focus; a 201-character submitted query showed the localized length error without requests; the final search view was readable and the app stayed responsive. The whole batch added zero `SearchStops` or `Plan` requests.
+- An initial nullable `Map.Center` build error was fixed with a nullable search bias and an explicit missing-location message, rather than assuming a map center always exists.
+- The first address selection made one `Plan` request; saving reused it. Stop-name submit made one Transit search. Normal shared departures continued; address geocoding used Azure Maps, not Transit. No extra requests were made to force transfer/cancellation scenarios.
+- The public test destination saved by the first batch was removed through Settings afterward. No existing favorites were deleted, and no stop test destination was saved.
+
+**Remaining acceptance / handoff**
+
+- Run Narrator over the search label, live status, address and stop results, Back, Going to, and Save as place. Check keyboard-only result selection and saving, then Light and High Contrast readability at the normal flyout size. Step 05's accepted checks do not stand in for this new UI.
+- Missing-Azure-key and provider/location failures have automated coverage but were not forced in the live app by changing credentials or permissions.
+- Step 06 remains `in_progress` only for those manual checks. Once accepted, mark it `done`; step 07 (leave at / arrive by) remains `pending`.
+
+### 2026-10-19 — Step 06 acceptance / Step 07 time planning and marker clarity — in_progress (implemented; manual UI acceptance pending)
+
+The developer confirmed that step 06's remaining Narrator, keyboard-only selection/save, and Light/High Contrast checks passed, and requested step 07. Step 06 is now `done`. The existing uncommitted step 05–06 changes were preserved; step 08 was not started.
+
+**Changes**
+
+- Added platform-free `TripTime` / `TripTimeMode` with a default Leave now value. Time constraints use UTC five-minute buckets: leave-at rounds up, arrive-by rounds down. Local picker input is converted using the local time zone; skipped or repeated daylight-saving times and past submissions show resource-backed errors rather than silently picking another time.
+- Added time-aware planning overloads through `ITransitService`, cooldown, metadata cache, and Transit HTTP service. A timed request sends exactly one of `leave_time` or `arrival_time`; coordinate and stop-ID destinations keep their existing behavior. The cooldown and call-budget gate still cover every physical request.
+- Metadata plan keys distinguish time and mode as well as origin, destination, stop identity, and temporary/saved status. Optional `CachedTripPlan.Time` round-trips without changing snapshot version 1. Temporary time-constrained plans are not exported. Explicit Save promotes every fresh time for that destination without a request or an age reset.
+- Added `LiveTrip.Scheduled` and time-aware `TripSelection`: future walks/rides retain their original times, current departures cannot retime tomorrow's trip, and future trips have no tracking chips. Within 30 minutes of an option's departure, it uses the shared live batch and existing scheduled fallbacks. Arrive-by options sort by departure, latest first, and options violating either time constraint are excluded.
+- Added the native Leave now / Leave at / Arrive by menu and a `CalendarDatePicker` / `TimePicker` editor in `TripView`. Date/time labels, validation, dated headings, accessible names, and the future scheduled-time notice are localized. Merely opening/editing/canceling the form makes no request; Plan trip is explicit.
+- A third, optional place monitor owns only the timed trip under `TransitConsumer.Trip`. It reuses the selected origin rather than asking Windows for another location. Far-future options register no live boarding stops; near departure they join the board/suggestion batch. Superseding, hiding, Back, or Leave now cancels its work and removes only its consumer. The board and live suggestion remain intact.
+- At the developer's request, `MapHelpers.CreatePlaceIcon` now supplies full-color emoji for Home (house), Work (briefcase), School (graduation cap), custom places (pushpin), and current location (red location pin). Board and trip maps share it; stop dots and bus emoji remain distinct. Menu/card/toolbar glyphs are unchanged.
+- No dependencies, credentials, permissions, system theme settings, README changes, or commits were added.
+
+**Tests (23 additional cases; full suite 521 → 544)**
+
+- `TripTimeTests` (11 cases): leave-at/arrive-by normalization, exact buckets, default Now, invalid mode, local-zone conversion, skipped/repeated daylight-saving times, and invalid clock ranges.
+- `TransitAppServiceTests` (2 cases): each time mode sends only its normalized parameter, including with a stop-ID destination. The existing Leave now request test also verifies both time parameters are absent.
+- `MetadataTransitServiceTests` (3): same rounded times reuse a plan; mode/bucket changes stay separate; Leave now remains cached; timed saved-stop plans round-trip; temporary timed plans stay memory-only until explicit Save, which retains their age.
+- `TripSelectionTests` (5): every future leg retains its timing despite unrelated live data; crossing the 30-minute boundary adopts live departures without leaving before the constraint; arrive-by ordering/deadline filtering; future walking-only timing; and leave-at filtering.
+- `RequestBudgetTests` (2): one plan call per distinct time through the real budget/cooldown/cache path, with free reuse/return to Now; future stops excluded from the batch until near departure, then coalesced with the board and suggestion, with consumer-specific cleanup on hide.
+
+**Commands and results**
+
+Architecture was detected in each fresh build/test shell:
+
+```powershell
+$arch = $env:PROCESSOR_ARCHITECTURE
+$Platform = if ($arch -eq 'AMD64') { 'x64' } else { $arch }
+```
+
+This machine selected ARM64.
+
+- Baseline `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity minimal`: 521 passed, 0 failed/skipped.
+- Existing affected-class regression run: 162 passed, 0 failed/skipped.
+- Targeted time/context/cache/HTTP tests during implementation: 101 passed, 0 failed/skipped.
+- Final full suite, `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity minimal`: 544 passed, 0 failed/skipped, including a rerun after the marker changes.
+- `dotnet build .\TrayTimes\TrayTimes.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity quiet`: succeeded with 0 warnings and 0 errors, including the final emoji marker build.
+- `winapp run .\TrayTimes\TrayTimes.csproj -c Debug --arch $Platform.ToLowerInvariant() -p Platform=$Platform --no-build --detach --json`: launched the platform-specific packaged build. The final process remained responsive and was left running, with the board restored to Near you.
+- `git -c core.safecrlf=false --no-pager diff --check`: passed.
+
+**Live API retest (explicitly requested)**
+
+- Made two direct `public/plan` probes between public metro stations, not saved places, using the configured header key without printing it or request URLs. No response body or new fixture was stored.
+- Leave-at: HTTP 200, two transit options, all starting at or after the requested time.
+- Arrive-by: HTTP 200, three transit options, all arriving by the requested deadline.
+- The final packaged batch made two timed plan calls (leave-at and arrive-by); repeating a time and returning to Now added none. An earlier harness attempt made one additional successful timed plan call. The app log confirms all three packaged timed-plan attempts succeeded. Normal board/suggestion refreshes also ran.
+
+**Packaged checks**
+
+Windows Sandbox was unavailable (`WindowsSandbox.exe` absent), so bounded `winapp ui` batches ran locally without clearing settings or changing themes/credentials. Scripts, structured reports, and screenshots are in the session artifacts, not the repository.
+
+- Time controls: **9/9 passed**. Named/enabled date, clock, Apply and Cancel; Leave at tomorrow with scheduled times; same-time cache reuse; Arrive by tomorrow with a dated arrival; no live request for a far-future trip; Leave now restoring live options without a plan call; Cancel without a request; Escape dismissing only the editor; Back restoring the board and responsiveness.
+- Marker checks: **2/2 passed**. Jumping to Work displayed the full-color briefcase; returning to Near you displayed the red location pin with separate stop dots. Viewed those screenshots and the three trip screenshots: the house marker, future scheduled-time notice, dated headings, live restoration, and layouts were visible without overlapping controls.
+- Two early harness issues were corrected, not product defects: the InfoBar's message is exposed as child text rather than the root value, and package re-registration can change the PID, so the batch must use the latest launch result. The final standalone batch captures its own PID and passes.
+- No additional API calls were used to force daylight-saving, cancellation, or near-departure scenarios; deterministic tests cover those paths.
+
+**Remaining acceptance / next action**
+
+- Manually check Narrator, keyboard-only date/time entry and submission, and Light/High Contrast readability of the new time editor/notices and emoji map markers. Existing step 06 acceptance does not stand in for this new UI.
+- Step 07 remains `in_progress` only for that manual acceptance. Once accepted, mark it `done`; step 08 (budget table measurements, README/migration docs, final checklist) remains `pending`.
+
+### 2026-10-19 — Step 07 acceptance / Step 08 budget measurements and documentation — done
+
+The developer confirmed that step 07's remaining Narrator, keyboard-only date/time entry/submission, and Light/High Contrast checks passed, and requested step 08. Step 07 is now `done`. All existing uncommitted implementation changes were preserved.
+
+**Changes**
+
+- Added 15 cases in `TrayTimes.Tests\Services\RequestBudgetTests.cs`, bringing that suite from 9 to 24 cases. New cases cover cold/warm board + suggestion + saved-stop opens, a quick reopen, cold/warm saved-place and saved-stop jumps, a fresh saved-stop jump, fresh/stale All saved stops, changing destinations with existing/new boarding stops, address search/choice/Save, normalized stop search/stop-ID planning, and the guarded re-plan interval.
+- Strengthened the shared-refresh test to compute the live transfer trip before and after a delay: both rides use live arrivals, the arrival time changes, and each refresh still makes exactly one departures call. Strengthened timed-plan counts with a different leave-at five-minute bucket as well as mode changes, same-bucket reuse, and return to Now.
+- The fake app now supplies nearby, transfer-plan, stop-search, and departures responses through the real client, cooldown/budget gate, caches, coordinator, and monitors. Azure address lookup is a fake provider delegate; no test uses a key or the network. Unexpected test endpoints fail explicitly.
+- Replaced the estimate table with measured counts and named evidence for every row. Corrected the two assumptions exposed by measurements: a new destination can also need a departures batch for new boarding stops, and a three-hour plan lifetime does not imply only one plan per day.
+- Updated `README.md` for the board, jump menu, suggestion, full trip view, submit-only address/stop search, Save/privacy, time planning, launch/fallback behavior, shared polling, and platform-detected build/test/run commands.
+- Updated `docs\transit-app-migration.md` with current board/planner endpoint uses, time/stop/persistence cache keys, shared transfers, and a link to the current budget table. Its tabbed-build measurements remain labeled historical.
+- Added the acceptance-evidence table above. No implementation row remains active. External Transit-app comparison and normal-day usage are explicitly deferred field observations, not claimed passes.
+- No production code, XAML, resource strings, dependencies, credentials, settings, or commits changed in this step.
+
+**Commands and results**
+
+Architecture was detected from `$env:PROCESSOR_ARCHITECTURE` and mapped to `$Platform` in each fresh build/test shell; this machine selected ARM64.
+
+- Baseline: `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity minimal` — 544 passed, 0 failed/skipped.
+- Targeted: `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --no-restore --filter "FullyQualifiedName~RequestBudgetTests" --verbosity minimal` — final 24 passed, 0 failed/skipped. An initial fixture edit placed helper methods inside a local function and failed compilation; moving them to the fake app's member scope fixed it before the passing runs.
+- Final full suite: `dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity minimal` — 559 passed, 0 failed/skipped.
+- App: `dotnet build .\TrayTimes\TrayTimes.csproj -c Debug -p:Platform=$Platform --no-restore --verbosity minimal` — succeeded, 0 warnings and 0 errors.
+- Packaged launch: `winapp run .\TrayTimes\TrayTimes.csproj -c Debug --arch $Platform.ToLowerInvariant() -p Platform=$Platform --no-build --detach --json` — successful single-instance handoff. The launcher process exited as designed; the running instance was resolved by process path and its visible, responsive `Tray Times` window, not mistaken for a crash.
+- Local `winapp ui` batch — 6/6 passed: named/enabled board controls; suggestion opens held options/legs; native date/time editor controls; Cancel preserves Leave now; Back restores board and suggestion focus; app remains responsive. Four screenshots were viewed, covering the board, trip, editor, and restored board. Script, JSON results, and screenshots are session artifacts, not repository files.
+- `git -c core.safecrlf=false --no-pager diff --check` — passed.
+
+Windows Sandbox was unavailable, so the smoke check ran locally without clearing data, modifying favorites, or changing themes/permissions. It submitted no search or timed plan and started no tracking. Normal live refreshes were not disabled; their physical call count was not measured in this smoke run. This step's budget measurements are the deterministic tests, not paid API probes. The app was left responsive in the tray with the board restored.
+
+**Next action:** record the deferred field observations when available. All eight implementation steps are done; the follow-up features remain out of scope.
