@@ -5,39 +5,122 @@ namespace TrayTimes.Commute;
 
 public sealed record PlaceNotice(string Title, string Text, string? Button = null, Action? Action = null);
 
-public sealed record PlaceContext(FlyoutMode Mode, IReadOnlyList<FavoritePlace> Places, string? DestinationId);
+/// <summary>What the trip suggestion plans for: the saved places, and the destination the rider picked (null to guess).</summary>
+public sealed record SuggestionContext(IReadOnlyList<FavoritePlace> Places, string? DestinationId)
+{
+    /// <summary>The trip to suggest from <paramref name="here"/> (null when unknown); see <see cref="CommutePlanner.Plan"/>.</summary>
+    public CommuteLeg? Leg(GeoPoint? here, DateTimeOffset now) =>
+        CommutePlanner.Plan(Places, here, now, Places.FirstOrDefault(p => p.Id == DestinationId));
+
+    public bool Equals(SuggestionContext? other) =>
+        other is not null && DestinationId == other.DestinationId && Places.SequenceEqual(other.Places);
+
+    public override int GetHashCode() => HashCode.Combine(DestinationId, Places.Count);
+}
 
 public sealed record PlaceLocation(GeoPoint? Point, Task<GeoPoint?>? Refined = null, string? Error = null);
 
 /// <summary>Validated discovery metadata, independent of the age of live predictions.</summary>
 /// <param name="Lines">The line directions each stop lists; null lists every route at the stop.</param>
 /// <param name="Trips">For a commute, how each listed line gets to the destination.</param>
+/// <param name="Plan">For a commute, the planner's whole trips.</param>
+/// <param name="EveryLineAt">For a board, the stops that list every line (saved with All routes).</param>
+/// <param name="Center">For a board, where it's actually centered, after <see cref="BoardCenter.Resolve"/>.</param>
+/// <param name="Revision">Which version of its inputs (such as the saved stops) discovery read, so an isOutdated hook can tell when they've changed.</param>
 public sealed record PlaceStops(
     GeoPoint? Origin,
     IReadOnlyList<NearbyStop> Stops,
     PlaceNotice EmptyNotice,
     CommuteLeg? Leg = null,
     IReadOnlySet<StopLine>? Lines = null,
-    IReadOnlyDictionary<StopLine, TripTiming>? Trips = null)
+    IReadOnlyDictionary<StopLine, TripTiming>? Trips = null,
+    TripPlan? Plan = null,
+    IReadOnlySet<string>? EveryLineAt = null,
+    BoardCenter? Center = null,
+    int Revision = 0)
 {
+    /// <summary>
+    /// The stops whose departures to keep fresh: the listed stops, plus where every ride of the plan's
+    /// trip options boards, so a whole trip stays live from the shared batch.
+    /// </summary>
+    public IReadOnlyList<string> StopIds => [.. Stops
+        .Select(n => n.Stop.Id)
+        .Concat(Plan is null ? [] : PlaceBoard.BoardingStopIds(Plan))
+        .Distinct(StringComparer.Ordinal)];
+
     public static PlaceStops Unavailable(PlaceNotice notice, CommuteLeg? leg = null) => new(null, [], notice, leg);
+
+    /// <summary>
+    /// Which lines the list shows at each stop, now that <paramref name="arrivals"/> say which lines serve
+    /// the stops in <see cref="EveryLineAt"/>: every line there, and elsewhere the stop's <see cref="Lines"/>
+    /// (all of them when null). A line departing from a stop in EveryLineAt isn't listed again at a stop
+    /// that isn't <paramref name="saved"/>, so it isn't repeated.
+    /// </summary>
+    public Func<StopLine, bool> Listing(IEnumerable<Arrival> arrivals, IReadOnlySet<string> saved)
+    {
+        ArgumentNullException.ThrowIfNull(arrivals);
+        ArgumentNullException.ThrowIfNull(saved);
+        IReadOnlySet<string> everyLine = EveryLineAt ?? new HashSet<string>();
+        HashSet<RouteDirection> shownThere = [.. arrivals
+            .Where(a => everyLine.Contains(a.StopId))
+            .Select(a => new RouteDirection(a.RouteId, a.DirectionId))];
+        return line => everyLine.Contains(line.StopId)
+            || ((Lines?.Contains(line) ?? true)
+                && (saved.Contains(line.StopId) || !shownThere.Contains(new RouteDirection(line.RouteId, line.DirectionId))));
+    }
+}
+
+/// <summary>A place monitor's state, whatever it discovers stops for.</summary>
+public interface IPlaceArrivalsMonitor
+{
+    event EventHandler? Updated;
+
+    PlaceStops? Discovery { get; }
+
+    PredictionSnapshot? Snapshot { get; }
+
+    string? LocationError { get; }
+
+    int Version { get; }
+
+    bool IsLoading { get; }
+
+    bool IsForeground { get; set; }
+
+    Task RefreshAsync(bool force = false, bool checkLocation = true);
 }
 
 /// <summary>
-/// One flyout's place state. Refresh predictions immediately from valid discovery while checking
-/// location independently; only meaningful movement or context changes repeat discovery.
-/// Call on the owning UI thread.
+/// One flyout place's state, such as the board or the trip suggestion. Refresh predictions
+/// immediately from valid discovery while checking location independently; only meaningful
+/// movement or context changes repeat discovery. Call on the owning UI thread.
 /// </summary>
-public sealed class PlaceArrivalsMonitor(
+/// <typeparam name="TContext">What stops are discovered for. A context that isn't equal to the last one invalidates discovery.</typeparam>
+/// <param name="consumer">Whose browsing stops these are in the shared batch and the request log: each instance registers only its own.</param>
+/// <param name="holds">
+/// Whether a discovery still answers its context from a location, beyond being near it (a guessed
+/// trip can change with the time of day); null when it always does. One that doesn't is dropped at once.
+/// </param>
+/// <param name="isOutdated">
+/// Whether a discovery that still holds should be found again on the next refresh, staying shown
+/// until the new one arrives (such as an expired trip plan); null when it never is.
+/// </param>
+public sealed class PlaceArrivalsMonitor<TContext>(
     PredictionCoordinator predictions,
+    TransitConsumer consumer,
     Func<bool, Task<PlaceLocation>> locate,
-    Func<PlaceContext, PlaceLocation, CancellationToken, Task<PlaceStops>> discover,
-    TimeProvider? timeProvider = null)
+    Func<TContext, PlaceLocation, CancellationToken, Task<PlaceStops>> discover,
+    Func<TContext, PlaceStops, GeoPoint?, bool>? holds = null,
+    Func<PlaceStops, bool>? isOutdated = null) : IPlaceArrivalsMonitor
+    where TContext : class
 {
-    public const double MovedMeters = 25;
+    private const double MovedMeters = 25;
 
-    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private PlaceContext? _context;
+    private readonly TransitConsumer _consumer = consumer is TransitConsumer.Commute or TransitConsumer.Nearby
+        ? consumer
+        : throw new ArgumentOutOfRangeException(nameof(consumer));
+
+    private TContext? _context;
     private GeoPoint? _resolvedLocation;
     private bool _hasLocation;
     private bool _isForeground;
@@ -82,22 +165,11 @@ public sealed class PlaceArrivalsMonitor(
     }
 
     /// <summary>Invalidate incompatible discovery before rendering, including guessed-trip changes.</summary>
-    public void Configure(PlaceContext context)
+    public void Configure(TContext context)
     {
-        if (context.Mode is not (FlyoutMode.Commute or FlyoutMode.Nearby))
-        {
-            throw new ArgumentOutOfRangeException(nameof(context));
-        }
-
-        bool same = _context?.Mode == context.Mode
-            && (context.Mode == FlyoutMode.Nearby
-                || (_context.DestinationId == context.DestinationId && _context.Places.SequenceEqual(context.Places)));
-        if (same && Discovery is { } found)
-        {
-            same = context.Mode != FlyoutMode.Commute || found.Leg == Plan(context, _resolvedLocation);
-        }
-
-        _context = context with { Places = context.Places.ToArray() };
+        bool same = _context is { } old && EqualityComparer<TContext>.Default.Equals(old, context)
+            && (Discovery is not { } found || Holds(context, found, _resolvedLocation));
+        _context = context;
         if (!same)
         {
             ++_version;
@@ -120,7 +192,7 @@ public sealed class PlaceArrivalsMonitor(
     /// </summary>
     public async Task RefreshAsync(bool force = false, bool checkLocation = true)
     {
-        if (!_isForeground || _context is null)
+        if (!_isForeground || _context is not { } context)
         {
             return;
         }
@@ -137,7 +209,7 @@ public sealed class PlaceArrivalsMonitor(
         {
             if (checkLocation || Discovery is null)
             {
-                discovery = _discoveryTask ??= DiscoverAsync(_context, version);
+                discovery = _discoveryTask ??= DiscoverAsync(context, version);
             }
 
             await Task.WhenAll(arrivals, discovery);
@@ -157,7 +229,7 @@ public sealed class PlaceArrivalsMonitor(
         }
     }
 
-    private async Task DiscoverAsync(PlaceContext context, int version)
+    private async Task DiscoverAsync(TContext context, int version)
     {
         using CancellationTokenSource cancellation = new();
         _discoveryCancellation = cancellation;
@@ -178,7 +250,7 @@ public sealed class PlaceArrivalsMonitor(
         }
     }
 
-    private async Task DiscoverCoreAsync(PlaceContext context, int version, CancellationToken cancellationToken)
+    private async Task DiscoverCoreAsync(TContext context, int version, CancellationToken cancellationToken)
     {
         // A destination/configuration change can use the last validated location without
         // waiting for another Windows fix. Its new routes are still fully validated.
@@ -213,22 +285,21 @@ public sealed class PlaceArrivalsMonitor(
         if (location.Refined is not null && await location.Refined is { } precise
             && IsCurrent(version) && NeedsDiscovery(context, precise))
         {
-            using IDisposable scope = TransitRequestDiagnostics.BeginScope(Consumer, TransitTrigger.RefinedLocation);
+            using IDisposable scope = TransitRequestDiagnostics.BeginScope(_consumer, TransitTrigger.RefinedLocation);
             await ResolveAsync(context, new PlaceLocation(precise), version, cancellationToken);
         }
     }
 
-    private bool NeedsDiscovery(PlaceContext context, GeoPoint? point) =>
+    private bool NeedsDiscovery(TContext context, GeoPoint? point) =>
         Discovery is null || Discovery.Origin is null
         || (_resolvedLocation is null) != (point is null)
         || (_resolvedLocation is { } old && point is { } next && GeoMath.DistanceMeters(old, next) > MovedMeters)
-        || (context.Mode == FlyoutMode.Commute && Discovery.Leg != Plan(context, point));
+        || !Holds(context, Discovery, point)
+        || (isOutdated?.Invoke(Discovery) ?? false);
 
-    private CommuteLeg? Plan(PlaceContext context, GeoPoint? point) =>
-        CommutePlanner.Plan(context.Places, point, _time.GetLocalNow(),
-            context.Places.FirstOrDefault(p => p.Id == context.DestinationId));
+    private bool Holds(TContext context, PlaceStops found, GeoPoint? point) => holds?.Invoke(context, found, point) ?? true;
 
-    private async Task ResolveAsync(PlaceContext context, PlaceLocation location, int version, CancellationToken cancellationToken)
+    private async Task ResolveAsync(TContext context, PlaceLocation location, int version, CancellationToken cancellationToken)
     {
         PlaceStops found = await discover(context, location, cancellationToken);
         if (!IsCurrent(version))
@@ -236,9 +307,8 @@ public sealed class PlaceArrivalsMonitor(
             return;
         }
 
-        string[] ids = [.. found.Stops.Select(n => n.Stop.Id)];
         bool sameStops = Discovery is { } previous
-            && previous.Stops.Select(n => n.Stop.Id).ToHashSet(StringComparer.Ordinal).SetEquals(ids);
+            && previous.StopIds.ToHashSet(StringComparer.Ordinal).SetEquals(found.StopIds);
         bool force = _forceDiscovery;
         _forceDiscovery = false;
         Discovery = found;
@@ -267,7 +337,7 @@ public sealed class PlaceArrivalsMonitor(
         try
         {
             Task<PredictionSnapshot> pending = predictions.GetAsync(
-                [.. found.Stops.Select(n => n.Stop.Id)], predictions.BrowsingInterval,
+                found.StopIds, predictions.BrowsingInterval,
                 force, combineBrowsing: true, cancellationToken: cancellation.Token);
             previous?.Cancel();
             PredictionSnapshot snapshot = await pending;
@@ -292,15 +362,7 @@ public sealed class PlaceArrivalsMonitor(
 
     private bool IsCurrent(int version) => _isForeground && version == _version;
 
-    private TransitConsumer Consumer => _context?.Mode == FlyoutMode.Commute ? TransitConsumer.Commute : TransitConsumer.Nearby;
-
-    private void RegisterStops()
-    {
-        predictions.SetBrowsingStops(TransitConsumer.Commute, []);
-        predictions.SetBrowsingStops(TransitConsumer.Nearby, []);
-        if (_isForeground && Discovery is { } found)
-        {
-            predictions.SetBrowsingStops(Consumer, [.. found.Stops.Select(n => n.Stop.Id)]);
-        }
-    }
+    /// <summary>Registers this monitor's stops under its own consumer only, so another monitor's stay registered.</summary>
+    private void RegisterStops() =>
+        predictions.SetBrowsingStops(_consumer, _isForeground && Discovery is { } found ? found.StopIds : []);
 }

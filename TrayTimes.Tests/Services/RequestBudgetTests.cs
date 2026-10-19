@@ -71,11 +71,11 @@ public sealed class RequestBudgetTests
     {
         // Arrange: Nearby's discovery is already cached, as on a desktop that hasn't moved.
         App app = new();
-        PlaceArrivalsMonitor nearby = app.CreatePlaceMonitor(["near1", "near2"]);
+        PlaceArrivalsMonitor<BoardCenter> nearby = app.CreatePlaceMonitor<BoardCenter>(TransitConsumer.Nearby, ["near1", "near2"]);
 
         // Act
         app.Favorites.IsForeground = true;
-        nearby.Configure(new PlaceContext(FlyoutMode.Nearby, [], null));
+        nearby.Configure(new NearYou());
         nearby.IsForeground = true;
         Task place = nearby.RefreshAsync(checkLocation: false);
         Task favorites = app.WaitForFavoritesAsync(() => { });
@@ -94,9 +94,9 @@ public sealed class RequestBudgetTests
     {
         // Arrange
         App app = new();
-        PlaceArrivalsMonitor nearby = app.CreatePlaceMonitor(["near"]);
+        PlaceArrivalsMonitor<BoardCenter> nearby = app.CreatePlaceMonitor<BoardCenter>(TransitConsumer.Nearby, ["near"]);
         await app.OpenFavoritesAsync();
-        nearby.Configure(new PlaceContext(FlyoutMode.Nearby, [], null));
+        nearby.Configure(new NearYou());
         nearby.IsForeground = true;
         app.Clock.Advance(TimeSpan.FromSeconds(20));
         await AdvancingAsync(app, nearby.RefreshAsync(checkLocation: false));
@@ -113,6 +113,36 @@ public sealed class RequestBudgetTests
 
         // Assert
         Assert.AreEqual(3, app.Handler.Attempts - before);
+    }
+
+    [TestMethod]
+    public async Task BoardSuggestionAndFavorites_DueTogether_ShareOneCallWithTheTripsTransferStop()
+    {
+        // Arrange: both discoveries are cached, as at a known place; the trip changes at "transfer".
+        App app = new();
+        DateTimeOffset now = app.Clock.GetUtcNow();
+        TripPlan plan = new([new TripItinerary([Ride("boards", now.AddMinutes(5)), Ride("transfer", now.AddMinutes(20))], now.AddMinutes(5), now.AddMinutes(30))], []);
+        PlaceArrivalsMonitor<BoardCenter> board = app.CreatePlaceMonitor<BoardCenter>(TransitConsumer.Nearby, ["near"]);
+        PlaceArrivalsMonitor<SuggestionContext> suggestion = app.CreatePlaceMonitor<SuggestionContext>(TransitConsumer.Commute, ["boards"], plan);
+        board.Configure(new NearYou());
+        suggestion.Configure(new SuggestionContext([], null));
+        app.Favorites.IsForeground = true;
+        board.IsForeground = true;
+        suggestion.IsForeground = true;
+        Task RefreshAllAsync(Action favorites) => AdvancingAsync(app, Task.WhenAll(
+            board.RefreshAsync(checkLocation: false), suggestion.RefreshAsync(checkLocation: false), app.WaitForFavoritesAsync(favorites)));
+
+        // Act: the flyout opens, then its timers refresh everything a minute later.
+        await RefreshAllAsync(() => { });
+        int opened = app.Handler.Attempts;
+        app.Clock.Advance(TimeSpan.FromMinutes(1));
+        await RefreshAllAsync(app.FavoritesTimer.Fire);
+
+        // Assert
+        Assert.AreEqual(1, opened);
+        Assert.AreEqual(2, app.Handler.Attempts);
+        CollectionAssert.AreEquivalent(new[] { "fav", "near", "boards", "transfer" }, RequestTestHandler.StopIds(app.Handler.Requests[^1]));
+        CollectionAssert.AreEquivalent(new[] { "boards", "transfer" }, suggestion.Snapshot!.Arrivals.Select(a => a.StopId).ToArray());
     }
 
     [TestMethod]
@@ -144,6 +174,11 @@ public sealed class RequestBudgetTests
         Assert.AreEqual(12, app.Handler.Attempts);
         CollectionAssert.AreEqual(new[] { "Time to head out" }, NotificationService.Titles);
     }
+
+    /// <summary>A ten-minute ride on the 14, boarding at <paramref name="stopId"/>.</summary>
+    private static RideLeg Ride(string stopId, DateTimeOffset departs) => new(departs, departs.AddMinutes(10),
+        [new RideLine(new TransitRoute("14", "14", "Route 14", null), new TransitDirection("0", "North"),
+            new TransitStop(stopId, stopId, new GeoPoint(43, -88)), null, 4, [], [new PlannedDeparture(departs, departs.AddMinutes(10), true, null)])]);
 
     /// <summary>Lets a coalescing window elapse while waiting, as real time would.</summary>
     private static async Task AdvancingAsync(App app, Task work)
@@ -205,12 +240,14 @@ public sealed class RequestBudgetTests
             }
         }
 
-        public PlaceArrivalsMonitor CreatePlaceMonitor(string[] stopIds) => new(
+        /// <summary>A place monitor whose discovery lists <paramref name="stopIds"/>, plus the rides of <paramref name="plan"/>.</summary>
+        public PlaceArrivalsMonitor<TContext> CreatePlaceMonitor<TContext>(TransitConsumer consumer, string[] stopIds, TripPlan? plan = null)
+            where TContext : class => new(
             Predictions,
+            consumer,
             _ => Task.FromResult(new PlaceLocation(new GeoPoint(43, -88))),
             (_, location, _) => Task.FromResult(new PlaceStops(location.Point, [.. stopIds.Select(id => new NearbyStop(
                 new IndexedStop(id, id, 43, -88, [new StopRouteInfo("14", "14", null, "0", "North")]), 100))],
-                new PlaceNotice("None", string.Empty))),
-            Clock);
+                new PlaceNotice("None", string.Empty), Plan: plan)));
     }
 }

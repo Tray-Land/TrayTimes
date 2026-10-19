@@ -22,6 +22,8 @@ public sealed class TransitAppService : ITransitService
     private const int MaxNetworksPerRequest = 20;
     private const int MaxSearchResults = 20;
     private const int TripOptions = 3;
+    private const string Walk = "walk";
+    private const string Transit = "transit";
 
     private static readonly Uri DefaultBaseUri = new("https://external.transitapp.com/v4/");
     private static readonly HttpClient SharedHttp = CreateHttpClient();
@@ -152,63 +154,21 @@ public sealed class TransitAppService : ITransitService
                 ("num_result", TripOptions.ToString(CultureInfo.InvariantCulture)),
                 ("max_num_departures", "3"),
                 ("should_update_realtime", "true"),
+                ("walk_fallback", "true"),
+                ("consider_downtimes", "true"),
             ],
             cancellationToken);
 
-        List<TripOption> options = [];
+        List<TripItinerary> itineraries = [];
         List<RoutePattern> shapes = [];
         foreach (PlanResultDto result in response.Results ?? [])
         {
-            List<LegDto> legs = result.Legs ?? [];
-            int first = legs.FindIndex(l => string.Equals(l.LegMode, "transit", StringComparison.OrdinalIgnoreCase));
-            if (first < 0 || result.EndTime is not { } end)
+            if (MapItinerary(result) is { } trip)
             {
-                continue; // A walk-only plan; the flyout lists transit departures.
+                itineraries.Add(trip);
             }
 
-            List<LegDto> before = [.. legs.Take(first)];
-            LegDto leg = legs[first];
-            int transfers = legs.Count(l => string.Equals(l.LegMode, "transit", StringComparison.OrdinalIgnoreCase)) - 1;
-            double afterLeg = leg.EndTime is { } legEnd ? end - legEnd : 0;
-            double walkSeconds = before.Sum(l => l.Duration ?? 0);
-            double walkMeters = before.Sum(l => l.Distance ?? 0);
-            GeoPoint? walkEnd = before.Count > 0 && GeoMath.DecodePolyline(before[^1].Polyline) is { Count: > 0 } path ? path[^1] : null;
-
-            foreach (RouteDto routeDto in leg.Routes ?? [])
-            {
-                if (MapRoute(routeDto) is not { } route)
-                {
-                    continue;
-                }
-
-                ScheduleItemDto? departure = (leg.Departures ?? [])
-                    .Where(d => d.DepartureTime is not null
-                        && (d.PlanDetails?.GlobalRouteId is null || string.Equals(d.PlanDetails.GlobalRouteId, route.Id, StringComparison.Ordinal)))
-                    .MinBy(d => d.DepartureTime);
-                ItineraryDto? itinerary = routeDto.Itineraries?.FirstOrDefault(i =>
-                    departure?.PlanDetails?.InternalItineraryId is not { } id || i.InternalItineraryId == id || i.PlanDetails?.InternalItineraryId == id)
-                    ?? routeDto.Itineraries?.FirstOrDefault();
-                if (departure is null || itinerary is null || BoardingStop(itinerary, departure, walkEnd) is not { } stop)
-                {
-                    continue;
-                }
-
-                double alight = departure.PlanDetails?.ArrivalScheduleItem is { } alighting
-                    ? alighting.DepartureTime ?? alighting.ArrivalTime ?? leg.EndTime ?? end
-                    : leg.EndTime ?? end;
-                string directionId = DirectionOf(itinerary.DirectionId);
-                options.Add(new TripOption(
-                    stop,
-                    route,
-                    new TransitDirection(directionId, DirectionName(itinerary, route)),
-                    walkMeters,
-                    TimeSpan.FromSeconds(walkSeconds),
-                    FromUnix(departure.DepartureTime!.Value),
-                    FromUnix(alight + afterLeg),
-                    transfers));
-            }
-
-            foreach (LegDto transit in legs.Where(l => string.Equals(l.LegMode, "transit", StringComparison.OrdinalIgnoreCase)))
+            foreach (LegDto transit in (result.Legs ?? []).Where(l => IsMode(l, Transit)))
             {
                 foreach (RouteDto routeDto in transit.Routes ?? [])
                 {
@@ -223,7 +183,7 @@ public sealed class TransitAppService : ITransitService
             }
         }
 
-        return new TripPlan(options, shapes);
+        return new TripPlan(itineraries, shapes);
     }
 
     public async Task<IReadOnlyList<TransitStop>> SearchStopsAsync(GeoPoint near, string query, CancellationToken cancellationToken = default)
@@ -394,25 +354,133 @@ public sealed class TransitAppService : ITransitService
         }
     }
 
-    /// <summary>Where a plan's first ride starts: the stop its departure lists first, else its offset in the itinerary's stops.</summary>
-    private static TransitStop? BoardingStop(ItineraryDto itinerary, ScheduleItemDto departure, GeoPoint? walkEnd)
+    /// <summary>A plan result leg by leg, or null when it has a leg this app can't show (another mode, or a ride with no usable departure).</summary>
+    private static TripItinerary? MapItinerary(PlanResultDto result)
+    {
+        List<LegDto> legs = result.Legs ?? [];
+        if (legs.Count == 0 || (result.StartTime ?? StartOf(legs[0])) is not { } departs)
+        {
+            return null;
+        }
+
+        List<TripLeg> mapped = [];
+        double cursor = departs;
+        for (int i = 0; i < legs.Count; i++)
+        {
+            LegDto leg = legs[i];
+            double starts = StartOf(leg) ?? cursor;
+            double ends = leg.EndTime ?? (starts + leg.Duration) ?? starts;
+            TripLeg? next = IsMode(leg, Walk) ? MapWalk(leg, starts, ends)
+                : IsMode(leg, Transit) ? MapRide(leg, starts, ends, WalkPoint(legs, i - 1, atEnd: true), WalkPoint(legs, i + 1, atEnd: false))
+                : null;
+            if (next is null)
+            {
+                return null;
+            }
+
+            mapped.Add(next);
+            cursor = ends;
+        }
+
+        return new TripItinerary(mapped, FromUnix(departs), FromUnix(result.EndTime ?? cursor));
+    }
+
+    private static WalkLeg MapWalk(LegDto leg, double starts, double ends) => new(
+        FromUnix(starts),
+        FromUnix(ends),
+        leg.Distance is { } meters && double.IsFinite(meters) ? meters : 0,
+        GeoMath.DecodePolyline(leg.Polyline));
+
+    /// <summary>
+    /// A transit leg with each line its departures ride, soonest first. Departures on several
+    /// itineraries of one line direction from the same stop join one line.
+    /// </summary>
+    private static RideLeg? MapRide(LegDto leg, double starts, double ends, GeoPoint? walkEnd, GeoPoint? nextWalkStart)
+    {
+        List<RideLine> lines = [];
+        foreach (ScheduleItemDto departure in (leg.Departures ?? []).Where(d => !d.IsCancelled && d.DepartureTime is not null).OrderBy(d => d.DepartureTime))
+        {
+            if (MapLine(leg.Routes ?? [], departure, ends - starts, walkEnd, nextWalkStart) is not { } line)
+            {
+                continue;
+            }
+
+            int same = lines.FindIndex(l => l.Route.Id == line.Route.Id && l.Direction.Id == line.Direction.Id && l.BoardAt.Id == line.BoardAt.Id);
+            if (same < 0)
+            {
+                lines.Add(line);
+            }
+            else
+            {
+                lines[same] = lines[same] with { Departures = [.. lines[same].Departures, .. line.Departures] };
+            }
+        }
+
+        return lines.Count == 0 ? null : new RideLeg(FromUnix(starts), FromUnix(ends), lines);
+    }
+
+    /// <summary>The line one departure rides, with just that departure.</summary>
+    /// <param name="rideSeconds">How long the leg's ride takes, for a departure that doesn't say when it gets you off.</param>
+    private static RideLine? MapLine(List<RouteDto> routes, ScheduleItemDto departure, double rideSeconds, GeoPoint? walkEnd, GeoPoint? nextWalkStart)
+    {
+        SchedulePlanDetailsDto? details = departure.PlanDetails;
+        RouteDto? routeDto = NonEmpty(details?.GlobalRouteId) is { } routeId
+            ? routes.FirstOrDefault(r => string.Equals(NonEmpty(r.GlobalRouteId), routeId, StringComparison.Ordinal))
+            : routes.FirstOrDefault();
+        ItineraryDto? itinerary = routeDto?.Itineraries?.FirstOrDefault(i =>
+            details?.InternalItineraryId is not { } id || i.InternalItineraryId == id || i.PlanDetails?.InternalItineraryId == id)
+            ?? routeDto?.Itineraries?.FirstOrDefault();
+        if (MapRoute(routeDto) is not { } route || itinerary is null)
+        {
+            return null;
+        }
+
+        List<ScheduleItemDto> visits = details?.StopScheduleItems ?? [];
+        IReadOnlyList<GeoPoint> path = GeoMath.DecodePolyline(itinerary.PlanDetails?.PlanShape);
+        string? boardId = NonEmpty(visits.FirstOrDefault()?.GlobalStopId) ?? NonEmpty(departure.GlobalStopId);
+        if (PlanStop(itinerary, boardId, itinerary.PlanDetails?.StartStopOffset, walkEnd ?? (path.Count > 0 ? path[0] : null)) is not { } boardAt)
+        {
+            return null;
+        }
+
+        // A one-item list only names the boarding stop, so it says nothing about where the ride ends.
+        string? alightId = visits.Count > 1 ? NonEmpty(visits[^1].GlobalStopId) : null;
+        TransitStop? alightAt = PlanStop(itinerary, alightId, itinerary.PlanDetails?.EndStopOffset, nextWalkStart ?? (path.Count > 0 ? path[^1] : null));
+        int stops = visits.Count > 1
+            ? visits.Count - 1
+            : itinerary.PlanDetails is { StartStopOffset: { } first, EndStopOffset: { } last } && first >= 0 && last > first ? (int)(last - first) : 0;
+
+        double departs = departure.DepartureTime!.Value;
+        double alights = details?.ArrivalScheduleItem is { } alighting ? alighting.ArrivalTime ?? alighting.DepartureTime ?? departs + rideSeconds : departs + rideSeconds;
+        PlannedDeparture planned = new(FromUnix(departs), FromUnix(Math.Max(departs, alights)), departure.IsRealTime, NonEmpty(departure.RtTripId) ?? NonEmpty(departure.TripSearchKey));
+        return new RideLine(route, new TransitDirection(DirectionOf(itinerary.DirectionId), DirectionName(itinerary, route)), boardAt, alightAt, stops, path, [planned]);
+    }
+
+    /// <summary>
+    /// A stop a plan names: by ID in the itinerary's stops, else at its offset there, else (the stop
+    /// list can be abridged) just the ID, placed at <paramref name="near"/>.
+    /// </summary>
+    private static TransitStop? PlanStop(ItineraryDto itinerary, string? id, double? offset, GeoPoint? near)
     {
         List<StopDto> stops = itinerary.Stops ?? [];
-        string? id = NonEmpty(departure.PlanDetails?.StopScheduleItems?.FirstOrDefault()?.GlobalStopId) ?? NonEmpty(departure.GlobalStopId);
         StopDto? found = id is null ? null : stops.FirstOrDefault(s => s.GlobalStopId == id);
-        if (found is null && itinerary.PlanDetails?.StartStopOffset is { } offset && offset >= 0 && offset < stops.Count)
+        if (found is null && offset is { } index && index >= 0 && index < stops.Count)
         {
-            found = stops[(int)offset];
+            found = stops[(int)index];
         }
 
-        if (MapStop(found) is { } stop)
-        {
-            return stop;
-        }
-
-        // The stop list can be abridged; the walk there still says where it is.
-        return id is not null && walkEnd is { } point ? new TransitStop(id, string.Empty, point) : null;
+        return MapStop(found) ?? (id is not null && near is { } point ? new TransitStop(id, string.Empty, point) : null);
     }
+
+    /// <summary>Where the leg at <paramref name="index"/> starts or ends, if it's a walk with a path.</summary>
+    private static GeoPoint? WalkPoint(List<LegDto> legs, int index, bool atEnd) =>
+        index >= 0 && index < legs.Count && IsMode(legs[index], Walk) && GeoMath.DecodePolyline(legs[index].Polyline) is { Count: > 0 } path
+            ? (atEnd ? path[^1] : path[0])
+            : null;
+
+    private static double? StartOf(LegDto leg) => leg.StartTime ?? (leg.EndTime - leg.Duration);
+
+    private static bool IsMode(LegDto leg, string mode) => string.Equals(leg.LegMode, mode, StringComparison.OrdinalIgnoreCase);
 
     private static TransitRoute? MapRoute(RouteDto? dto)
     {

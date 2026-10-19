@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace TrayTimes.Transit;
 
 /// <summary>
@@ -41,6 +43,7 @@ public sealed class MetadataTransitService : ITransitService
     private readonly MetadataCache<(GeoPoint Point, int Radius), NearbyLines> _nearby;
     private readonly MetadataCache<(GeoPoint From, GeoPoint To), TripPlan> _plans;
     private readonly MetadataCache<(GeoPoint Near, string Query), IReadOnlyList<TransitStop>> _searches;
+    private readonly ReplanGuard _replans;
     private readonly Lock _shapeGate = new();
     private readonly Dictionary<(string Route, string Direction), ShapeEntry> _shapes = [];
     private readonly Dictionary<string, DateTimeOffset> _coverage = new(StringComparer.Ordinal);
@@ -56,6 +59,7 @@ public sealed class MetadataTransitService : ITransitService
         _nearby = new(_time, NearbyLifetime, RetainedNearby, Diagnostics, TransitEndpoint.NearbyRoutes, OnLoaded);
         _plans = new(_time, PlanLifetime, RetainedPlans, Diagnostics, TransitEndpoint.Plan, OnLoaded);
         _searches = new(_time, SearchLifetime, RetainedSearches, Diagnostics, TransitEndpoint.SearchStops, null);
+        _replans = new(_time);
     }
 
     /// <summary>Raised after a cached result or shape is added, so the app can save a snapshot. May fire on any thread.</summary>
@@ -112,11 +116,33 @@ public sealed class MetadataTransitService : ITransitService
         return _nearby.GetAsync(key, token => WithShapesAsync(_inner.GetNearbyLinesAsync(point, radiusMeters, token), r => r.Shapes), cancellationToken);
     }
 
-    public Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default)
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default) =>
+        _plans.GetAsync(PlanKey(from, to), LoadPlan(from, to), cancellationToken);
+
+    /// <summary>
+    /// Plans a trip again in place of its cached plan, for when that plan's trips can no longer be made
+    /// (the last connection is gone). To protect the call budget, a trip is planned again at most once
+    /// per <see cref="ReplanGuard.Interval"/>; until then this returns the cached plan. An expired plan
+    /// doesn't need this: <see cref="PlanTripAsync"/> plans it again.
+    /// </summary>
+    public Task<TripPlan> ReplanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default)
     {
-        (GeoPoint, GeoPoint) key = _plans.Nearest(k => Within(k.To, to, SameDestinationMeters) is not null ? Within(k.From, from, SamePlaceMeters) : null, (from, to));
-        return _plans.GetAsync(key, token => WithShapesAsync(_inner.PlanTripAsync(from, to, token), r => r.Shapes), cancellationToken);
+        (GeoPoint, GeoPoint) key = PlanKey(from, to);
+        if (_replans.TryAcquire(from, to))
+        {
+            _plans.Forget(key);
+        }
+
+        return _plans.GetAsync(key, LoadPlan(from, to), cancellationToken);
     }
+
+    /// <summary>
+    /// Whether <paramref name="plan"/> is still the fresh cached plan for about this trip. Whoever holds a
+    /// plan checks this on refresh, and asks <see cref="PlanTripAsync"/> again once it isn't (it expired,
+    /// or the trip was planned again). Never starts a request.
+    /// </summary>
+    public bool IsCurrentPlan(GeoPoint from, GeoPoint to, TripPlan plan) =>
+        _plans.TryGetFresh(PlanKey(from, to), out TripPlan? cached) && ReferenceEquals(cached, plan);
 
     public Task<IReadOnlyList<TransitStop>> SearchStopsAsync(GeoPoint near, string query, CancellationToken cancellationToken = default)
     {
@@ -171,7 +197,7 @@ public sealed class MetadataTransitService : ITransitService
             [.. _areaRoutes.Completed().Select(e => new CachedAreaRoutes(e.Key, e.FetchedAt, e.Value))],
             [.. _routeDetails.Completed().Select(e => new CachedRouteDetails(e.FetchedAt, e.Value.Route, e.Value.Itineraries))],
             [.. _nearby.Completed().Select(e => new CachedNearbyLines(e.Key.Point, e.Key.Radius, e.FetchedAt, e.Value.Lines))],
-            [.. _plans.Completed().Select(e => new CachedTripPlan(e.Key.From, e.Key.To, e.FetchedAt, e.Value.Options))],
+            [.. _plans.Completed().Select(e => new CachedTripPlan(e.Key.From, e.Key.To, e.FetchedAt, e.Value.Itineraries))],
             shapes,
             coverage);
     }
@@ -211,9 +237,9 @@ public sealed class MetadataTransitService : ITransitService
 
         foreach (CachedTripPlan entry in snapshot.TripPlans ?? [])
         {
-            if (entry?.Options is { } options && options.All(IsValid))
+            if (entry?.Itineraries is { } itineraries && itineraries.All(IsValid))
             {
-                _plans.Seed((entry.From, entry.To), new TripPlan(options, []), now - entry.FetchedAt);
+                _plans.Seed((entry.From, entry.To), new TripPlan(itineraries, []), now - entry.FetchedAt);
             }
         }
 
@@ -268,8 +294,27 @@ public sealed class MetadataTransitService : ITransitService
     private static bool IsValid(NearbyLine? line) =>
         line is not null && IsValid(line.Route) && IsValid(line.Direction) && IsValid(line.Stop) && double.IsFinite(line.Meters);
 
-    private static bool IsValid(TripOption? option) =>
-        option is not null && IsValid(option.BoardAt) && IsValid(option.Route) && IsValid(option.Direction) && option.Arrives >= option.Departs;
+    private static bool IsValid(TripItinerary? itinerary) =>
+        itinerary is { Legs: { Count: > 0 } legs } && legs.All(IsValid) && itinerary.Arrives >= itinerary.Departs;
+
+    private static bool IsValid(TripLeg? leg) => leg switch
+    {
+        WalkLeg walk => walk.Ends >= walk.Starts && double.IsFinite(walk.Meters) && walk.Path is not null,
+        RideLeg ride => ride.Ends >= ride.Starts && ride.Lines is { Count: > 0 } lines && lines.All(IsValid),
+        _ => false,
+    };
+
+    private static bool IsValid(RideLine? line) =>
+        line is not null && IsValid(line.Route) && IsValid(line.Direction) && IsValid(line.BoardAt)
+        && (line.AlightAt is null || IsValid(line.AlightAt)) && line.Stops >= 0 && line.Path is not null
+        && line.Departures is { Count: > 0 } departures && departures.All(d => d is not null && d.Alights >= d.Departs);
+
+    /// <summary>The cached or pending plan's key for about the same origin and destination, else this trip's own.</summary>
+    private (GeoPoint From, GeoPoint To) PlanKey(GeoPoint from, GeoPoint to) =>
+        _plans.Nearest(k => Within(k.To, to, SameDestinationMeters) is not null ? Within(k.From, from, SamePlaceMeters) : null, (from, to));
+
+    private Func<CancellationToken, Task<TripPlan>> LoadPlan(GeoPoint from, GeoPoint to) =>
+        token => WithShapesAsync(_inner.PlanTripAsync(from, to, token), r => r.Shapes);
 
     private bool IsCovered(string stopId)
     {
@@ -412,6 +457,22 @@ public sealed class MetadataTransitService : ITransitService
             }
         }
 
+        /// <summary>The loaded value for <paramref name="key"/>, while it's fresh.</summary>
+        public bool TryGetFresh(TKey key, [MaybeNullWhen(false)] out T value)
+        {
+            lock (_gate)
+            {
+                if (_entries.TryGetValue(key, out Entry? entry) && entry.Completion.Task.IsCompletedSuccessfully && IsFreshOrPending(entry))
+                {
+                    value = entry.Completion.Task.Result;
+                    return true;
+                }
+            }
+
+            value = default;
+            return false;
+        }
+
         public IReadOnlyList<(TKey Key, T Value, DateTimeOffset FetchedAt)> Completed()
         {
             lock (_gate)
@@ -420,6 +481,18 @@ public sealed class MetadataTransitService : ITransitService
                 return [.. _entries
                     .Where(p => p.Value.Completion.Task.IsCompletedSuccessfully && IsFreshOrPending(p.Value))
                     .Select(p => (p.Key, p.Value.Completion.Task.Result, now - Age(p.Value)))];
+            }
+        }
+
+        /// <summary>Drops a completed entry so the next request loads it again. A pending load is kept, since it's already new.</summary>
+        public void Forget(TKey key)
+        {
+            lock (_gate)
+            {
+                if (_entries.TryGetValue(key, out Entry? entry) && entry.Completion.Task.IsCompleted)
+                {
+                    _entries.Remove(key);
+                }
             }
         }
 

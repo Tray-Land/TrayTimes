@@ -32,14 +32,14 @@ public sealed class StopGroupItem(
 
     public Visibility EmptyVisibility => Arrivals.Count == 0 && EmptyText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>The stop behind a Commute or Nearby result, which the star button adds to favorites.</summary>
+    /// <summary>The stop behind a board row, which the star button saves or removes.</summary>
     public IndexedStop? Saveable { get; } = saveable;
 
     public bool IsSaved { get; } = isSaved;
 
     public Visibility SaveVisibility => Saveable is null ? Visibility.Collapsed : Visibility.Visible;
 
-    public string SaveGlyph => IsSaved ? "" : ""; // FavoriteStarFill / FavoriteStar
+    public string SaveGlyph => IsSaved ? "" : ""; // FavoriteStarFill / FavoriteStar
 
     public string SaveLabel => IsSaved ? $"Remove {Title} from favorites" : $"Add {Title} to favorites";
 

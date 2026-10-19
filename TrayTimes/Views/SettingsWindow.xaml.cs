@@ -171,7 +171,7 @@ public sealed partial class SettingsWindow : WindowEx
         Button removeButton = new()
         {
             VerticalAlignment = VerticalAlignment.Bottom,
-            Content = new FontIcon { FontSize = 14, Glyph = "" }, // Delete
+            Content = new FontIcon { FontSize = 14, Glyph = "" }, // Delete
             Style = (Style)Application.Current.Resources["ToolbarButtonStyle"],
         };
         PlacePicker picker = new() { Place = existing?.Place };

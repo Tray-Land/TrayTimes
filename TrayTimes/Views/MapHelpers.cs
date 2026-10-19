@@ -15,10 +15,11 @@ using MapIcon = WinUIEx.Maps.MapIcon;
 
 namespace TrayTimes.Views;
 
-/// <summary>Map and route-color helpers shared by the flyout and the settings window.</summary>
+/// <summary>Map, route-color, and place-glyph helpers shared by the flyout and the settings window.</summary>
 internal static class MapHelpers
 {
     public const string BusEmoji = "🚍"; // Oncoming bus, in color so it stands out on the basemap
+    public const string SavedStopGlyph = ""; // FavoriteStarFill
     public const string StopGlyph = ""; // CircleFill
 
     private static readonly Color FallbackRouteColor = Color.FromArgb(255, 0, 90, 158);
@@ -56,6 +57,16 @@ internal static class MapHelpers
         double luminance = (0.2126 * Channel(background.R)) + (0.7152 * Channel(background.G)) + (0.0722 * Channel(background.B));
         return luminance > 0.179 ? Color.FromArgb(255, 0, 0, 0) : Color.FromArgb(255, 255, 255, 255);
     }
+
+    /// <summary>A favorite place's glyph, by its kind; with no place, wherever the rider is.</summary>
+    public static string PlaceGlyph(PlaceKind? kind) => kind switch
+    {
+        PlaceKind.Home => "", // HomeSolid
+        PlaceKind.Work => "", // Solid briefcase
+        PlaceKind.School => "", // Education
+        PlaceKind.Custom => "", // Pin
+        _ => "", // Location
+    };
 
     public static FontIcon CreateGlyph(string glyph, Color color, double size) => new()
     {

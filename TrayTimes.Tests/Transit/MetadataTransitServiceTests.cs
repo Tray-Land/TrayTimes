@@ -104,6 +104,91 @@ public sealed class MetadataTransitServiceTests
     }
 
     [TestMethod]
+    public async Task IsCurrentPlan_FreshPlanFromAboutTheSamePlace_IsTrueWithoutARequest()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripPlan plan = await scenario.Metadata.PlanTripAsync(Home, Work);
+
+        // Act
+        bool current = scenario.Metadata.IsCurrentPlan(new GeoPoint(Home.Lat + 0.0005, Home.Lon), Work, plan);
+
+        // Assert
+        Assert.IsTrue(current);
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task IsCurrentPlan_AfterThePlanLifetime_IsFalse()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripPlan plan = await scenario.Metadata.PlanTripAsync(Home, Work);
+
+        // Act
+        scenario.Clock.Advance(MetadataTransitService.PlanLifetime);
+
+        // Assert
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, Work, plan));
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task IsCurrentPlan_AfterAReplan_IsFalseForTheOldPlanOnly()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripPlan old = await scenario.Metadata.PlanTripAsync(Home, Work);
+
+        // Act
+        TripPlan replanned = await scenario.Metadata.ReplanTripAsync(Home, Work);
+
+        // Assert
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, Work, old));
+        Assert.IsTrue(scenario.Metadata.IsCurrentPlan(Home, Work, replanned));
+    }
+
+    [TestMethod]
+    public async Task ReplanTripAsync_FreshCachedPlan_PlansAgainAndCachesTheNewPlan()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripPlan cached = await scenario.Metadata.PlanTripAsync(Home, Work);
+
+        // Act
+        TripPlan replanned = await scenario.Metadata.ReplanTripAsync(Home, Work);
+        TripPlan later = await scenario.Metadata.PlanTripAsync(Home, Work);
+
+        // Assert
+        Assert.AreEqual(2, scenario.Handler.Attempts);
+        Assert.AreNotSame(cached, replanned);
+        Assert.AreSame(replanned, later);
+    }
+
+    [TestMethod]
+    public async Task ReplanTripAsync_TripStaysInfeasible_PlansAgainOncePerInterval()
+    {
+        // Arrange: every refresh finds the trip infeasible and asks again, from a drifting location fix.
+        Scenario scenario = new();
+        await scenario.Metadata.PlanTripAsync(Home, Work);
+        await scenario.Metadata.ReplanTripAsync(Home, Work);
+
+        // Act
+        scenario.Clock.Advance(TimeSpan.FromMinutes(5));
+        TripPlan held = await scenario.Metadata.ReplanTripAsync(new GeoPoint(Home.Lat + 0.0005, Home.Lon), Work);
+        scenario.Clock.Advance(TimeSpan.FromMinutes(9));
+        await scenario.Metadata.ReplanTripAsync(Home, Work);
+        int withinInterval = scenario.Handler.Attempts;
+        scenario.Clock.Advance(TimeSpan.FromMinutes(1));
+        TripPlan replanned = await scenario.Metadata.ReplanTripAsync(Home, Work);
+
+        // Assert
+        Assert.AreEqual(2, withinInterval);
+        Assert.AreEqual(3, scenario.Handler.Attempts);
+        Assert.AreNotSame(held, replanned);
+    }
+
+    [TestMethod]
     [DataRow("Main St", 1)]
     [DataRow("  main   st ", 1)]
     [DataRow("Main Ave", 2)]
@@ -177,7 +262,7 @@ public sealed class MetadataTransitServiceTests
 
         // Assert
         Assert.IsFalse(physical.IsCancellationRequested);
-        Assert.HasCount(1, plan.Options);
+        Assert.HasCount(1, plan.Itineraries);
     }
 
     [TestMethod]
@@ -207,7 +292,7 @@ public sealed class MetadataTransitServiceTests
 
         // Assert
         Assert.AreEqual(2, scenario.Handler.Attempts);
-        Assert.HasCount(1, plan.Options);
+        Assert.HasCount(1, plan.Itineraries);
     }
 
     [TestMethod]
@@ -326,11 +411,22 @@ public sealed class MetadataTransitServiceTests
         IReadOnlyList<TransitRoute> routes = await second.Metadata.GetRoutesNearAsync(Home);
         await second.Metadata.GetDeparturesAsync(["S:1"]);
 
-        // Assert: only the live departures were fetched, and without shapes.
+        // Assert: only the live departures were fetched, and without shapes. Legs say what kind they
+        // are, and paths are saved as encoded polylines, not point lists.
+        Assert.Contains("\"Kind\":\"walk\"", json);
+        Assert.Contains("\"Kind\":\"ride\"", json);
+        Assert.DoesNotContain("\"Path\":[", json);
         Assert.AreEqual(1, second.Handler.Attempts);
         Assert.AreEqual("false", RequestTestHandler.Query(second.Handler.Requests.Single(), "include_stops_and_shapes"));
         Assert.AreEqual("S:near", nearby.Lines.Single().Stop.Id);
-        Assert.AreEqual(TimeSpan.FromMinutes(25), plan.Options.Single().RideToDestination);
+        TripItinerary trip = plan.Itineraries.Single();
+        Assert.HasCount(3, ((WalkLeg)trip.Legs[0]).Path);
+        RideLine line = ((RideLeg)trip.Legs[1]).Lines.Single();
+        Assert.AreEqual("S:end", line.AlightAt!.Id);
+        Assert.AreEqual(1, line.Stops);
+        Assert.HasCount(3, line.Path);
+        Assert.AreEqual(new PlannedDeparture(RequestTestClock.Start.AddMinutes(5), RequestTestClock.Start.AddMinutes(30), true, "trip-1"), line.Departures.Single());
+        Assert.AreEqual(TimeSpan.FromMinutes(30), trip.Arrives - trip.Departs);
         Assert.AreEqual("North", details.Itineraries.Single().Direction.Name);
         Assert.HasCount(1, routes);
         Assert.HasCount(1, second.Metadata.GetCachedPatterns("R:1", "0"));
@@ -363,11 +459,13 @@ public sealed class MetadataTransitServiceTests
     {
         // Arrange
         Scenario scenario = new();
-        TransitCacheSnapshot wrongVersion = new(99, [new CachedAreaRoutes(Home, scenario.Clock.GetUtcNow(), [new TransitRoute("R", "R", "R", null)])], [], [], [], [], []);
+        DateTimeOffset now = scenario.Clock.GetUtcNow();
+        TransitCacheSnapshot wrongVersion = new(99, [new CachedAreaRoutes(Home, now, [new TransitRoute("R", "R", "R", null)])], [], [], [], [], []);
         TransitCacheSnapshot malformed = new(TransitCacheSnapshot.CurrentVersion,
-            [new CachedAreaRoutes(Home, scenario.Clock.GetUtcNow(), [new TransitRoute(" ", " ", "R", null)])],
-            [], [new CachedNearbyLines(Home, 1000, scenario.Clock.GetUtcNow(), [new NearbyLine(new TransitRoute("R", "R", "R", null), new TransitDirection("0", "N"), new TransitStop("S", "S", new GeoPoint(91, 0)), 10)])],
-            [], [new CachedShape("x", "R", "0", "garbage", scenario.Clock.GetUtcNow())], []);
+            [new CachedAreaRoutes(Home, now, [new TransitRoute(" ", " ", "R", null)])],
+            [], [new CachedNearbyLines(Home, 1000, now, [new NearbyLine(new TransitRoute("R", "R", "R", null), new TransitDirection("0", "N"), new TransitStop("S", "S", new GeoPoint(91, 0)), 10)])],
+            [new CachedTripPlan(Home, Work, now, [new TripItinerary([new RideLeg(now, now.AddMinutes(10), [])], now, now.AddMinutes(10))])],
+            [new CachedShape("x", "R", "0", "garbage", now)], []);
 
         // Act
         scenario.Metadata.Import(null);
@@ -375,10 +473,38 @@ public sealed class MetadataTransitServiceTests
         scenario.Metadata.Import(malformed);
         await scenario.Metadata.GetRoutesNearAsync(Home);
         await scenario.Metadata.GetNearbyLinesAsync(Home, 1000);
+        await scenario.Metadata.PlanTripAsync(Home, Work);
+
+        // Assert: a ride without lines can't be shown, so its plan is fetched again.
+        Assert.AreEqual(4, scenario.Handler.Attempts);
+        Assert.IsEmpty(scenario.Metadata.GetCachedPatterns("R"));
+    }
+
+    [TestMethod]
+    public async Task Import_SnapshotFromAnOlderBuild_KeepsItsOtherCachesAndSkipsItsPlans()
+    {
+        // Arrange: an older build saved each plan as first-ride options instead of whole trips.
+        string at = RequestTestClock.Start.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        string json = $$$"""
+            {"Version":1,"AreaRoutes":[],"RouteDetails":[],
+             "NearbyLines":[{"Point":{"Lat":43.0,"Lon":-88.0},"RadiusMeters":1000,"FetchedAt":"{{{at}}}","Lines":[
+               {"Route":{"Id":"R:1","DisplayId":"1","Name":"One","Color":null,"Mode":null},"Direction":{"Id":"0","Name":"Downtown"},
+                "Stop":{"Id":"S:near","Name":"Near","Location":{"Lat":43.0005,"Lon":-88.0}},"Meters":55}]}],
+             "TripPlans":[{"From":{"Lat":43.0,"Lon":-88.0},"To":{"Lat":43.1,"Lon":-88.0},"FetchedAt":"{{{at}}}","Options":[
+               {"BoardAt":{"Id":"S:board","Name":"Board","Location":{"Lat":43.002,"Lon":-88.0}},"Route":{"Id":"R:1","DisplayId":"1","Name":"One","Color":null,"Mode":null},
+                "Direction":{"Id":"0","Name":"Downtown"},"WalkMeters":300,"Walk":"00:05:00","Departs":"{{{at}}}","Arrives":"{{{at}}}","Transfers":0}]}],
+             "Shapes":[],"ShapeCoverage":[]}
+            """;
+        Scenario scenario = new();
+
+        // Act
+        scenario.Metadata.Import(JsonSerializer.Deserialize(json, TransitCacheJsonContext.Default.TransitCacheSnapshot));
+        NearbyLines nearby = await scenario.Metadata.GetNearbyLinesAsync(Home, 1000);
+        await scenario.Metadata.PlanTripAsync(Home, Work);
 
         // Assert
-        Assert.AreEqual(3, scenario.Handler.Attempts);
-        Assert.IsEmpty(scenario.Metadata.GetCachedPatterns("R"));
+        Assert.AreEqual("S:near", nearby.Lines.Single().Stop.Id);
+        Assert.AreEqual("/v4/public/plan", scenario.Handler.Requests.Single().RequestUri!.AbsolutePath);
     }
 
     [TestMethod]
@@ -409,16 +535,20 @@ public sealed class MetadataTransitServiceTests
           "itineraries":[{"direction_id":0,"headsign":"Downtown","internal_itinerary_id":"R:1:0:Downtown","shape":"{{Shape()}}"}]}]}]}
         """;
 
+    /// <summary>Walk 5 minutes, then ride one stop for 25 minutes; the walk and the ride both have paths.</summary>
     private static string PlanBody()
     {
         long t0 = RequestTestClock.Start.ToUnixTimeSeconds();
         return $$"""
-            {"results":[{"end_time":{{t0 + 1800}},"legs":[
-              {"leg_mode":"walk","duration":300,"distance":300,"end_time":{{t0 + 300}}},
-              {"leg_mode":"transit","end_time":{{t0 + 1800}},
-               "departures":[{"departure_time":{{t0 + 300}},"plan_details":{"global_route_id":"R:1","stop_schedule_items":[{"global_stop_id":"S:board"}]} }],
+            {"results":[{"start_time":{{t0}},"end_time":{{t0 + 1800}},"legs":[
+              {"leg_mode":"walk","start_time":{{t0}},"duration":300,"distance":300,"end_time":{{t0 + 300}},"polyline":"{{Shape()}}"},
+              {"leg_mode":"transit","start_time":{{t0 + 300}},"end_time":{{t0 + 1800}},
+               "departures":[{"departure_time":{{t0 + 300}},"is_real_time":true,"rt_trip_id":"trip-1",
+                 "plan_details":{"global_route_id":"R:1","stop_schedule_items":[{"global_stop_id":"S:board"},{"global_stop_id":"S:end"}]} }],
                "routes":[{"global_route_id":"R:1","route_short_name":"1","itineraries":[{"direction_id":0,"headsign":"Downtown","internal_itinerary_id":"R:1:0:Downtown",
-                 "stops":[{"global_stop_id":"S:board","stop_name":"Board","stop_lat":43.002,"stop_lon":-88.0}],"shape":"{{Shape()}}"}]}]}]}]}
+                 "plan_details":{"plan_shape":"{{Shape()}}"},
+                 "stops":[{"global_stop_id":"S:board","stop_name":"Board","stop_lat":43.002,"stop_lon":-88.0},
+                          {"global_stop_id":"S:end","stop_name":"End","stop_lat":43.03,"stop_lon":-88.0}],"shape":"{{Shape()}}"}]}]}]}]}
             """;
     }
 

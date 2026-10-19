@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -26,11 +25,10 @@ public partial class App : Application
     private const string MutexName = "Local\\TrayTimes_SingleInstance";
     private const string ShowEventName = "Local\\TrayTimes_ShowFlyout";
     private const string AppName = "Tray Times";
-    private const int MaxTooltipLength = 127; // NOTIFYICONDATA.szTip limit
     private static readonly TimeSpan FlyoutLifetimeAfterDismiss = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan IdleCollectDelay = TimeSpan.FromSeconds(5);
 
-    // How long a new departures batch waits for other tabs' stops, so opening the flyout costs one call.
+    // How long a new departures batch waits for the board's, the trip's, and the favorites' stops, so opening the flyout costs one call.
     private static readonly TimeSpan DeparturesCoalesceWindow = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExitSaveTimeout = TimeSpan.FromSeconds(2);
 
@@ -109,7 +107,7 @@ public partial class App : Application
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
         ThreadPool.RegisterWaitForSingleObject(_showEvent,
-            (_, _) => _dispatcher.TryEnqueue(ShowLaunchWindow), null, Timeout.Infinite, executeOnlyOnce: false);
+            (_, _) => _dispatcher.TryEnqueue(ShowFlyout), null, Timeout.Infinite, executeOnlyOnce: false);
 
         MigrateSavedData();
 
@@ -139,7 +137,8 @@ public partial class App : Application
         InitializeTrayIcon();
         if (!isStartupTask)
         {
-            ShowLaunchWindow();
+            // Even with nothing saved: the board near you needs no setup, and its card offers it.
+            ShowFlyout();
         }
     }
 
@@ -169,21 +168,6 @@ public partial class App : Application
         }
 
         SettingsService.DataVersion = SettingsService.CurrentDataVersion;
-    }
-
-    private void ShowLaunchWindow()
-    {
-        if (!SettingsService.HasShownLaunchWindow
-            && SettingsService.Stops.Count == 0 && SettingsService.Places.Count == 0)
-        {
-            ShowSettings();
-        }
-        else
-        {
-            ShowFlyout();
-        }
-
-        SettingsService.HasShownLaunchWindow = true;
     }
 
     public void ShowSettings()
@@ -262,6 +246,7 @@ public partial class App : Application
                 _flyoutCloseTimer?.Stop();
                 _flyoutCloseTimer?.Start();
             };
+            _flyout.SummaryChanged += (_, _) => UpdateTooltip();
         }
 
         return _flyout;
@@ -326,7 +311,8 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// The tracked bus, then (while the flyout is in use) the next arrivals, e.g.
+    /// The tracked bus, then (while the flyout is in use) the suggested trip, e.g. "Work: leave in
+    /// 6 min, 14 at 8:12", and as many of the saved stops near the board's center as fit, e.g.
     /// "14 Northbound: Due, 12 min". Times are dropped when the flyout is closed.
     /// </summary>
     private void UpdateTooltip()
@@ -337,35 +323,45 @@ public partial class App : Application
         }
 
         ArrivalsSnapshot snapshot = _monitor.Latest;
-        StringBuilder text = new(AppName);
         DateTimeOffset now = DateTimeOffset.Now;
+        List<string> lines = [AppName];
         if (_tracker?.Current is { } bus)
         {
-            int minutes = bus.MinutesAway(now);
-            text.AppendLine().Append($"Tracking {bus.RouteDisplayId} at {bus.StopName}: ")
-                .Append(minutes == 0 ? "Due" : $"{minutes.ToString(CultureInfo.CurrentCulture)} min");
+            lines.Add(AppStrings.Format("TooltipTrackingFormat", bus.RouteDisplayId, bus.StopName, Minutes([bus.MinutesAway(now)])));
         }
 
         if (snapshot.Error is not null && snapshot.FetchedAt is null)
         {
-            text.AppendLine().Append(snapshot.Error);
+            lines.Add(snapshot.Error);
         }
-        else if (snapshot.FetchedAt is not null)
+
+        if (_flyout?.TripSummary is { } trip)
         {
-            foreach (SavedStop stop in SettingsService.Stops.Take(3))
+            lines.Add(trip);
+        }
+
+        List<string> stops = [];
+        if (_flyout is not null && snapshot.FetchedAt is not null)
+        {
+            IReadOnlyList<SavedStop> saved = SettingsService.Stops;
+            foreach (SavedStop stop in _flyout.SavedStopIds.SelectMany(id => saved.Where(s => s.StopId == id)))
             {
-                string label = stop.AllRoutes ? stop.StopName : $"{stop.RouteDisplayId} {stop.DirectionName}";
-                string[] times = [.. snapshot.For(stop)
-                    .Where(a => a.Status != ArrivalStatus.Canceled)
-                    .Take(2)
-                    .Select(a => a.MinutesAway(now) == 0 ? "Due" : a.MinutesAway(now).ToString(CultureInfo.CurrentCulture))];
-                string when = times.Length == 0 ? "no arrivals" : times[^1] == "Due" ? string.Join(", ", times) : $"{string.Join(", ", times)} min";
-                text.AppendLine().Append(label).Append(": ").Append(when);
+                string label = stop.AllRoutes ? stop.StopName : AppStrings.Format("TooltipStopLineFormat", stop.RouteDisplayId, stop.DirectionName);
+                int[] minutes = [.. snapshot.For(stop).Where(a => a.Status != ArrivalStatus.Canceled).Take(2).Select(a => a.MinutesAway(now))];
+                string when = minutes.Length == 0 ? AppStrings.Get("TooltipNoArrivals") : Minutes(minutes);
+                stops.Add(AppStrings.Format("TooltipStopFormat", label, when));
             }
         }
 
-        string tooltip = text.ToString();
-        _trayIcon.Tooltip = tooltip.Length <= MaxTooltipLength ? tooltip : tooltip[..(MaxTooltipLength - 1)] + "…";
+        _trayIcon.Tooltip = TrayTooltip.Compose(lines, stops);
+    }
+
+    /// <summary>"4, 12 min", or "Due" when every figure is; the unit follows the last figure.</summary>
+    private static string Minutes(IReadOnlyList<int> minutes)
+    {
+        string due = AppStrings.Get("TooltipDue");
+        string figures = string.Join(", ", minutes.Select(m => m == 0 ? due : m.ToString(CultureInfo.CurrentCulture)));
+        return minutes[^1] == 0 ? figures : AppStrings.Format("TooltipMinutesFormat", figures);
     }
 
     private void ExitApp()

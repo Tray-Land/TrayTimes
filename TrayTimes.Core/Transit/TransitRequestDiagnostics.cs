@@ -8,7 +8,7 @@ public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking,
 
 public enum TransitTrigger
 {
-    Unspecified, Timer, FlyoutOpened, ModeChanged, ManualRefresh, StopsChanged, PlacesChanged,
+    Unspecified, Timer, FlyoutOpened, CenterChanged, ManualRefresh, StopsChanged, PlacesChanged,
     DestinationChanged, RefinedLocation, Retry, FavoritesLoading, FavoritesResult,
     PlaceResult, PlaceCompleted, Metadata, PickerSelection, VehicleSelected,
 }
@@ -75,7 +75,7 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
     {
         (TransitConsumer.Tracking, _) => TransitPriority.Urgent,
         (_, TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
-            or TransitTrigger.ModeChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
+            or TransitTrigger.CenterChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
             or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection or TransitTrigger.VehicleSelected) => TransitPriority.Manual,
         _ => TransitPriority.Automatic,
     };

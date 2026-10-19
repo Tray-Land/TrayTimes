@@ -35,13 +35,6 @@ internal static class SettingsService
     /// <summary>Raised after a favorite place is added, changed, or removed.</summary>
     public static event EventHandler? PlacesChanged;
 
-    /// <summary>Whether a manual launch has already opened the app's first window.</summary>
-    public static bool HasShownLaunchWindow
-    {
-        get => Get(nameof(HasShownLaunchWindow), false);
-        set => Set(nameof(HasShownLaunchWindow), value);
-    }
-
     /// <summary>Favorite places: the Home, Work, and School slots that are set, then custom places.</summary>
     public static IReadOnlyList<FavoritePlace> Places
     {
@@ -61,18 +54,6 @@ internal static class SettingsService
                 return [];
             }
         }
-    }
-
-    /// <summary>The flyout tab the user last chose.</summary>
-    public static FlyoutMode FlyoutMode
-    {
-        get
-        {
-            FlyoutMode mode = (FlyoutMode)Get(nameof(FlyoutMode), (int)FlyoutMode.Favorites);
-            return Enum.IsDefined(mode) ? mode : FlyoutMode.Favorites;
-        }
-
-        set => Set(nameof(FlyoutMode), (int)value);
     }
 
     /// <summary>Where the flyout's map was when it was last dismissed, so reopening picks up there.</summary>

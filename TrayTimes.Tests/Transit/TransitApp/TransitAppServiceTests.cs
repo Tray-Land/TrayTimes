@@ -182,28 +182,77 @@ public sealed class TransitAppServiceTests
     }
 
     [TestMethod]
-    public async Task PlanTripAsync_TransferTrip_BoardsAtFirstRideWithWalkAndArrival()
+    public async Task PlanTripAsync_Request_AsksForAWalkOnlyOptionAndRoutesAroundOutages()
     {
-        // Arrange: walk 5 min, ride line 2 (two departure options), transfer, ride, walk to the end.
+        // Arrange
+        RequestTestHandler handler = new();
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        await service.PlanTripAsync(new GeoPoint(43, -88), new GeoPoint(43.1, -88));
+
+        // Assert
+        HttpRequestMessage request = handler.Requests.Single();
+        Assert.AreEqual("/v4/public/plan", request.RequestUri!.AbsolutePath);
+        Assert.AreEqual("transit", RequestTestHandler.Query(request, "mode"));
+        Assert.AreEqual("3", RequestTestHandler.Query(request, "num_result"));
+        Assert.AreEqual("true", RequestTestHandler.Query(request, "should_update_realtime"));
+        Assert.AreEqual("true", RequestTestHandler.Query(request, "walk_fallback"));
+        Assert.AreEqual("true", RequestTestHandler.Query(request, "consider_downtimes"));
+    }
+
+    [TestMethod]
+    public async Task PlanTripAsync_TransferTrip_MapsEveryLegWithItsStopsTimesAndTrips()
+    {
+        // Arrange
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(TransferPlanBody())) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        TripPlan plan = await service.PlanTripAsync(new GeoPoint(43, -88), new GeoPoint(43.1, -88));
+
+        // Assert
+        TripItinerary trip = plan.Itineraries[0];
+        CollectionAssert.AreEqual(new[] { typeof(WalkLeg), typeof(RideLeg), typeof(WalkLeg), typeof(RideLeg), typeof(WalkLeg) }, trip.Legs.Select(l => l.GetType()).ToArray());
+        Assert.AreEqual(Now, trip.Departs);
+        Assert.AreEqual(Now.AddSeconds(2400), trip.Arrives);
+        Assert.AreEqual(1, trip.Transfers);
+
+        WalkLeg walk = (WalkLeg)trip.Legs[0];
+        Assert.AreEqual(350, walk.Meters);
+        Assert.AreEqual(TimeSpan.FromMinutes(5), walk.Duration);
+        Assert.HasCount(2, walk.Path);
+
+        RideLine first = ((RideLeg)trip.Legs[1]).Lines.Single();
+        Assert.AreEqual("STM:2", first.Route.Id);
+        Assert.AreEqual("Métro", first.Route.Mode);
+        Assert.AreEqual(new TransitDirection("0", "Côte-Vertu"), first.Direction);
+        Assert.AreEqual("Berri-UQAM", first.BoardAt.Name);
+        Assert.AreEqual("Lionel-Groulx", first.AlightAt!.Name);
+        Assert.AreEqual(2, first.Stops);
+        Assert.HasCount(2, first.Path);
+        CollectionAssert.AreEqual(
+            new[] { new PlannedDeparture(Now.AddSeconds(300), Now.AddSeconds(1200), true, "t-2a"), new PlannedDeparture(Now.AddSeconds(600), Now.AddSeconds(1500), false, "key-2b") },
+            first.Departures.ToArray());
+
+        RideLeg second = (RideLeg)trip.Legs[3];
+        Assert.AreEqual(Now.AddSeconds(1500), second.Starts);
+        RideLine fiftyOne = second.Lines.Single();
+        Assert.AreEqual("STM:transfer", fiftyOne.BoardAt.Id);
+        Assert.AreEqual("STM:end", fiftyOne.AlightAt!.Id);
+        Assert.AreEqual(3, fiftyOne.Stops);
+        Assert.AreEqual("t-51", fiftyOne.Departures.Single().TripId, "The canceled departure is left out.");
+        CollectionAssert.AreEquivalent(new[] { "STM:2", "STM:51" }, plan.Shapes.Select(s => s.RouteId).ToArray());
+    }
+
+    [TestMethod]
+    public async Task PlanTripAsync_WalkOnlyResult_MapsOneWalkLeg()
+    {
+        // Arrange
         long t0 = Now.ToUnixTimeSeconds();
         string body = $$"""
-            {"results":[{"end_time":{{t0 + 2400}},"legs":[
-              {"leg_mode":"walk","duration":300,"distance":350,"end_time":{{t0 + 300}},"polyline":"{{GeoMath.EncodePolyline([new GeoPoint(43, -88), new GeoPoint(43.002, -88)])}}"},
-              {"leg_mode":"transit","end_time":{{t0 + 1200}},
-               "departures":[
-                 {"departure_time":{{t0 + 300}},"plan_details":{"global_route_id":"STM:2","internal_itinerary_id":"i2",
-                   "arrival_schedule_item":{"departure_time":{{t0 + 1200}} },
-                   "stop_schedule_items":[{"global_stop_id":"STM:board","departure_time":{{t0 + 300}} }]} },
-                 {"departure_time":{{t0 + 600}},"plan_details":{"global_route_id":"STM:2","internal_itinerary_id":"i2",
-                   "arrival_schedule_item":{"departure_time":{{t0 + 1500}} } } }],
-               "routes":[{"global_route_id":"STM:2","route_short_name":"2","route_long_name":"Orange","route_color":"f37d00","mode_name":"Métro",
-                 "itineraries":[{"direction_id":0,"headsign":"Côte-Vertu","internal_itinerary_id":"i2",
-                   "shape":"{{GeoMath.EncodePolyline([new GeoPoint(43.002, -88), new GeoPoint(43.05, -88)])}}",
-                   "stops":[{"global_stop_id":"STM:board","stop_name":"Berri-UQAM","stop_lat":43.002,"stop_lon":-88.0}]}]}]},
-              {"leg_mode":"walk","duration":120,"end_time":{{t0 + 1320}}},
-              {"leg_mode":"transit","end_time":{{t0 + 2200}},"routes":[{"global_route_id":"STM:51","route_short_name":"51"}]},
-              {"leg_mode":"walk","duration":200,"end_time":{{t0 + 2400}}}]},
-              {"end_time":{{t0 + 1800}},"legs":[{"leg_mode":"walk","duration":1800}]}]}
+            {"results":[{"start_time":{{t0}},"end_time":{{t0 + 1500}},"legs":[
+              {"leg_mode":"walk","start_time":{{t0}},"end_time":{{t0 + 1500}},"duration":1500,"distance":1900}]}]}
             """;
         RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(body)) };
         TransitAppService service = handler.CreateService();
@@ -212,27 +261,34 @@ public sealed class TransitAppServiceTests
         TripPlan plan = await service.PlanTripAsync(new GeoPoint(43, -88), new GeoPoint(43.1, -88));
 
         // Assert
-        HttpRequestMessage request = handler.Requests.Single();
-        Assert.AreEqual("/v4/public/plan", request.RequestUri!.AbsolutePath);
-        Assert.AreEqual("transit", RequestTestHandler.Query(request, "mode"));
-        TripOption option = plan.Options.Single();
-        Assert.AreEqual("STM:board", option.BoardAt.Id);
-        Assert.AreEqual("Berri-UQAM", option.BoardAt.Name);
-        Assert.AreEqual("STM:2", option.Route.Id);
-        Assert.AreEqual("Métro", option.Route.Mode);
-        Assert.AreEqual("Côte-Vertu", option.Direction.Name);
-        Assert.AreEqual(TimeSpan.FromMinutes(5), option.Walk);
-        Assert.AreEqual(350, option.WalkMeters);
-        Assert.AreEqual(Now.AddSeconds(300), option.Departs);
-        Assert.AreEqual(Now.AddSeconds(2400), option.Arrives);
-        Assert.AreEqual(1, option.Transfers);
-        Assert.AreEqual("STM:2", plan.Shapes.Single().RouteId);
+        TripItinerary walk = plan.Itineraries.Single();
+        Assert.AreEqual(1900, ((WalkLeg)walk.Legs.Single()).Meters);
+        Assert.AreEqual(Now.AddSeconds(1500), walk.Arrives);
+        Assert.AreEqual(0, walk.Transfers);
+    }
+
+    [TestMethod]
+    public async Task PlanTripAsync_LegOfAnotherMode_LeavesOutThatTrip()
+    {
+        // Arrange
+        long t0 = Now.ToUnixTimeSeconds();
+        string body = $$"""
+            {"results":[{"start_time":{{t0}},"end_time":{{t0 + 600}},"legs":[{"leg_mode":"personal_bike","start_time":{{t0}},"end_time":{{t0 + 600}}}]}]}
+            """;
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(body)) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        TripPlan plan = await service.PlanTripAsync(new GeoPoint(43, -88), new GeoPoint(43.1, -88));
+
+        // Assert
+        Assert.IsEmpty(plan.Itineraries);
     }
 
     [TestMethod]
     public async Task PlanTripAsync_AbridgedStopList_FindsBoardingStopFromTheWalkThere()
     {
-        // Arrange: the itinerary's stops don't include where the leg boards.
+        // Arrange: the itinerary's stops don't include where the leg boards, and nothing says where it ends.
         long t0 = Now.ToUnixTimeSeconds();
         string body = $$"""
             {"results":[{"end_time":{{t0 + 900}},"legs":[
@@ -248,10 +304,73 @@ public sealed class TransitAppServiceTests
         TripPlan plan = await service.PlanTripAsync(new GeoPoint(43, -88), new GeoPoint(43.1, -88));
 
         // Assert
-        TripOption option = plan.Options.Single();
-        Assert.AreEqual("X:9", option.BoardAt.Id);
-        Assert.AreEqual(43.0007, option.BoardAt.Location.Lat, 1e-6);
-        Assert.AreEqual(string.Empty, option.BoardAt.Name);
+        TripItinerary trip = plan.Itineraries.Single();
+        Assert.AreEqual(Now, trip.Departs);
+        RideLine line = ((RideLeg)trip.Legs[1]).Lines.Single();
+        Assert.AreEqual("X:9", line.BoardAt.Id);
+        Assert.AreEqual(43.0007, line.BoardAt.Location.Lat, 1e-6);
+        Assert.AreEqual(string.Empty, line.BoardAt.Name);
+        Assert.IsNull(line.AlightAt);
+        Assert.AreEqual(0, line.Stops);
+    }
+
+    [TestMethod]
+    public async Task PlanTripAsync_RecordedMetroTransfer_GetsOffAtTheLastScheduledStop()
+    {
+        // Arrange: a recorded Transit plan from Côte-Vertu to Pie-IX (Orange line, then Green).
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RecordedPlanBody())) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        TripPlan plan = await service.PlanTripAsync(new GeoPoint(45.5143, -73.6829), new GeoPoint(45.5537, -73.5516));
+
+        // Assert
+        TripItinerary trip = plan.Itineraries[0];
+        Assert.HasCount(5, trip.Legs);
+        Assert.AreEqual(1, trip.Transfers);
+        Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1792380294), trip.Arrives);
+        Assert.IsLessThan(100, GeoMath.DistanceMeters(new GeoPoint(45.5143, -73.6829), ((WalkLeg)trip.Legs[0]).Path[0]));
+
+        RideLeg orangeLeg = (RideLeg)trip.Legs[1];
+        RideLine orange = orangeLeg.Lines.Single();
+        Assert.AreEqual("2", orange.Route.DisplayId);
+        Assert.AreEqual("Montmorency", orange.Direction.Name);
+        Assert.AreEqual("Côte-Vertu", orange.BoardAt.Name);
+        Assert.AreEqual("STM:104418", orange.AlightAt!.Id);
+        Assert.AreEqual("Lionel-Groulx", orange.AlightAt.Name);
+        Assert.AreEqual(10, orange.Stops);
+        Assert.IsGreaterThan(1, orange.Path.Count);
+        CollectionAssert.AreEqual(new[] { "299981452", "299981480", "299981548" }, orange.Departures.Select(d => d.TripId).ToArray());
+        Assert.AreEqual(orangeLeg.Ends, orange.Departures[0].Alights);
+
+        RideLine green = ((RideLeg)trip.Legs[3]).Lines.Single();
+        Assert.AreEqual("STM:104363", green.BoardAt.Id);
+        Assert.AreEqual("Pie-IX", green.AlightAt!.Name);
+        Assert.AreEqual(13, green.Stops);
+    }
+
+    [TestMethod]
+    public async Task PlanTripAsync_RecordedRideWithAlternativeBuses_KeepsEachLineAtItsOwnStop()
+    {
+        // Arrange: the second recorded trip starts on the 171 or the 121, which board at different stop IDs.
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RecordedPlanBody())) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        TripPlan plan = await service.PlanTripAsync(new GeoPoint(45.5143, -73.6829), new GeoPoint(45.5537, -73.5516));
+
+        // Assert
+        TripItinerary trip = plan.Itineraries[1];
+        IReadOnlyList<RideLine> buses = ((RideLeg)trip.Legs[1]).Lines;
+        CollectionAssert.AreEqual(new[] { "171", "121" }, buses.Select(l => l.Route.DisplayId).ToArray());
+        CollectionAssert.AreEqual(new[] { "STM:88345", "STM:99332" }, buses.Select(l => l.BoardAt.Id).ToArray());
+        Assert.HasCount(2, buses[0].Departures);
+        Assert.AreEqual(4, buses[0].Stops);
+
+        RideLine rem = ((RideLeg)trip.Legs[3]).Lines.Single();
+        Assert.HasCount(3, rem.Departures, "Departures on two REM itineraries from the same stop join one line.");
+        Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1792380360), rem.Departures[1].Alights, "Alighting uses the arrival time, not the departure time.");
+        Assert.AreEqual(2, trip.Transfers);
     }
 
     [TestMethod]
@@ -469,4 +588,54 @@ public sealed class TransitAppServiceTests
         // Assert
         CollectionAssert.AreEqual(new[] { "vehicles" }, endpoints);
     }
+
+    /// <summary>
+    /// Walk 5 min to Berri-UQAM, ride the 2 two stops (two departures), walk 2 min, ride the 51 three
+    /// stops (its earlier departure canceled), then walk to the end; plus a walk-only result.
+    /// </summary>
+    private static string TransferPlanBody()
+    {
+        long t0 = Now.ToUnixTimeSeconds();
+        return $$"""
+            {"results":[
+             {"start_time":{{t0}},"end_time":{{t0 + 2400}},"duration":2400,"legs":[
+              {"leg_mode":"walk","start_time":{{t0}},"end_time":{{t0 + 300}},"duration":300,"distance":350,"polyline":"{{GeoMath.EncodePolyline([new GeoPoint(43, -88), new GeoPoint(43.002, -88)])}}"},
+              {"leg_mode":"transit","start_time":{{t0 + 300}},"end_time":{{t0 + 1200}},"duration":900,
+               "departures":[
+                 {"departure_time":{{t0 + 300}},"is_real_time":true,"is_cancelled":false,"rt_trip_id":"t-2a","plan_details":{"global_route_id":"STM:2","internal_itinerary_id":"i2",
+                   "arrival_schedule_item":{"arrival_time":{{t0 + 1200}},"departure_time":{{t0 + 1230}} },
+                   "stop_schedule_items":[{"global_stop_id":"STM:board","departure_time":{{t0 + 300}} },{"global_stop_id":"STM:mid"},{"global_stop_id":"STM:change"}]} },
+                 {"departure_time":{{t0 + 600}},"is_real_time":false,"trip_search_key":"key-2b","plan_details":{"global_route_id":"STM:2","internal_itinerary_id":"i2",
+                   "arrival_schedule_item":{"arrival_time":{{t0 + 1500}} },
+                   "stop_schedule_items":[{"global_stop_id":"STM:board"},{"global_stop_id":"STM:mid"},{"global_stop_id":"STM:change"}]} }],
+               "routes":[{"global_route_id":"STM:2","route_short_name":"2","route_long_name":"Orange","route_color":"f37d00","mode_name":"Métro",
+                 "itineraries":[{"direction_id":0,"headsign":"Côte-Vertu",
+                   "plan_details":{"internal_itinerary_id":"i2","start_stop_offset":0,"end_stop_offset":2,"plan_shape":"{{GeoMath.EncodePolyline([new GeoPoint(43.002, -88), new GeoPoint(43.05, -88)])}}"},
+                   "shape":"{{GeoMath.EncodePolyline([new GeoPoint(43.002, -88), new GeoPoint(43.05, -88), new GeoPoint(43.07, -88)])}}",
+                   "stops":[{"global_stop_id":"STM:board","stop_name":"Berri-UQAM","stop_lat":43.002,"stop_lon":-88.0},
+                            {"global_stop_id":"STM:mid","stop_name":"Sherbrooke","stop_lat":43.03,"stop_lon":-88.0},
+                            {"global_stop_id":"STM:change","stop_name":"Lionel-Groulx","stop_lat":43.05,"stop_lon":-88.0}]}]}]},
+              {"leg_mode":"walk","start_time":{{t0 + 1200}},"end_time":{{t0 + 1320}},"duration":120,"distance":90,"polyline":"{{GeoMath.EncodePolyline([new GeoPoint(43.05, -88), new GeoPoint(43.0505, -88)])}}"},
+              {"leg_mode":"transit","start_time":{{t0 + 1500}},"end_time":{{t0 + 2200}},"duration":700,
+               "departures":[
+                 {"departure_time":{{t0 + 1440}},"is_cancelled":true,"rt_trip_id":"t-51-gone","plan_details":{"global_route_id":"STM:51","internal_itinerary_id":"i51"} },
+                 {"departure_time":{{t0 + 1500}},"is_real_time":true,"rt_trip_id":"t-51","plan_details":{"global_route_id":"STM:51","internal_itinerary_id":"i51",
+                   "arrival_schedule_item":{"arrival_time":{{t0 + 2200}} },
+                   "stop_schedule_items":[{"global_stop_id":"STM:transfer"},{"global_stop_id":"STM:a"},{"global_stop_id":"STM:b"},{"global_stop_id":"STM:end"}]} }],
+               "routes":[{"global_route_id":"STM:51","route_short_name":"51","route_long_name":"Édouard-Montpetit","mode_name":"Bus",
+                 "itineraries":[{"direction_id":1,"headsign":"Est","plan_details":{"internal_itinerary_id":"i51","start_stop_offset":1,"end_stop_offset":4},
+                   "shape":"{{GeoMath.EncodePolyline([new GeoPoint(43.0505, -88), new GeoPoint(43.09, -88)])}}",
+                   "stops":[{"global_stop_id":"STM:before","stop_name":"Before","stop_lat":43.04,"stop_lon":-88.0},
+                            {"global_stop_id":"STM:transfer","stop_name":"Lionel-Groulx","stop_lat":43.0505,"stop_lon":-88.0},
+                            {"global_stop_id":"STM:a","stop_name":"A","stop_lat":43.06,"stop_lon":-88.0},
+                            {"global_stop_id":"STM:b","stop_name":"B","stop_lat":43.07,"stop_lon":-88.0},
+                            {"global_stop_id":"STM:end","stop_name":"End","stop_lat":43.09,"stop_lon":-88.0}]}]}]},
+              {"leg_mode":"walk","start_time":{{t0 + 2200}},"end_time":{{t0 + 2400}},"duration":200,"distance":150}]},
+             {"start_time":{{t0}},"end_time":{{t0 + 1800}},"duration":1800,"legs":[{"leg_mode":"walk","start_time":{{t0}},"end_time":{{t0 + 1800}},"duration":1800,"distance":2100}]}]}
+            """;
+    }
+
+    /// <summary>Two trips from a recorded <c>plan</c> response, trimmed to the fields the client reads.</summary>
+    private static string RecordedPlanBody() =>
+        File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Transit", "TransitApp", "Fixtures", "plan-transfer-montreal.json"));
 }

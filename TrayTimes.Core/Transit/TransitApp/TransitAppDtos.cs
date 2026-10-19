@@ -115,6 +115,12 @@ internal sealed class ItineraryPlanDetailsDto
 {
     public double? StartStopOffset { get; set; }
 
+    /// <summary>-1 when the ride continues on another trip without getting off.</summary>
+    public double? EndStopOffset { get; set; }
+
+    /// <summary>The encoded shape of just the ridden part, from the start offset to the end offset.</summary>
+    public string? PlanShape { get; set; }
+
     public string? InternalItineraryId { get; set; }
 }
 
@@ -147,8 +153,10 @@ internal sealed class SchedulePlanDetailsDto
 
     public string? GlobalRouteId { get; set; }
 
+    /// <summary>The alighting stop's times.</summary>
     public ScheduleItemDto? ArrivalScheduleItem { get; set; }
 
+    /// <summary>Every stop the ride visits, from boarding to alighting (both included).</summary>
     public List<ScheduleItemDto>? StopScheduleItems { get; set; }
 }
 
@@ -191,6 +199,8 @@ internal sealed class VehicleDto
 
 internal sealed class PlanResultDto
 {
+    public double? StartTime { get; set; }
+
     public double? EndTime { get; set; }
 
     public List<LegDto>? Legs { get; set; }
@@ -199,6 +209,8 @@ internal sealed class PlanResultDto
 internal sealed class LegDto
 {
     public string? LegMode { get; set; }
+
+    public double? StartTime { get; set; }
 
     public double? EndTime { get; set; }
 

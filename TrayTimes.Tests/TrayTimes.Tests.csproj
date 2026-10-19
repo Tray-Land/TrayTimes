@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Transit\TransitApp\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TrayTimes.Core\TrayTimes.Core.csproj" />
     <Compile Include="..\TrayTimes\Services\ArrivalsMonitor.cs" Link="Services\ArrivalsMonitor.cs" />
     <Compile Include="..\TrayTimes\Services\BusTrackingService.cs" Link="Services\BusTrackingService.cs" />

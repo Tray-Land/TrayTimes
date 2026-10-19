@@ -3,6 +3,7 @@
     x:Class="TrayTimes.Views.TimesFlyoutWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:TrayTimes.Controls"
     xmlns:ex="using:WinUIEx"
     xmlns:map="using:WinUIEx.Maps"
     xmlns:views="using:TrayTimes.Views"
@@ -318,28 +319,33 @@
             </Button>
         </Grid>
 
-        <!--  What to list: favorite stops, buses to the likely next place, or stops near the device  -->
-        <SelectorBar
-            x:Name="ModeBar"
+        <!--  Where the board is centered; its menu jumps the board to a saved place or stop  -->
+        <DropDownButton
+            x:Name="PlaceChip"
+            x:Uid="PlaceChip"
             Grid.Row="1"
-            Margin="6,0"
-            SelectionChanged="ModeBar_SelectionChanged">
-            <SelectorBarItem Text="Favorites">
-                <SelectorBarItem.Icon>
-                    <FontIcon Glyph="&#xE734;" />
-                </SelectorBarItem.Icon>
-            </SelectorBarItem>
-            <SelectorBarItem Text="Commute">
-                <SelectorBarItem.Icon>
-                    <FontIcon Glyph="&#xE806;" />
-                </SelectorBarItem.Icon>
-            </SelectorBarItem>
-            <SelectorBarItem Text="Nearby">
-                <SelectorBarItem.Icon>
-                    <FontIcon Glyph="&#xE81D;" />
-                </SelectorBarItem.Icon>
-            </SelectorBarItem>
-        </SelectorBar>
+            Margin="10,0,10,6"
+            Padding="10,4"
+            AutomationProperties.AutomationId="PlaceChip">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon
+                    x:Name="PlaceChipGlyph"
+                    AutomationProperties.AccessibilityView="Raw"
+                    FontSize="14"
+                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                    Glyph="&#xE81D;" />
+                <TextBlock
+                    x:Name="PlaceChipText"
+                    MaxWidth="300"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+            <DropDownButton.Flyout>
+                <MenuFlyout
+                    x:Name="PlaceMenu"
+                    Opening="PlaceMenu_Opening"
+                    Placement="BottomEdgeAlignedLeft" />
+            </DropDownButton.Flyout>
+        </DropDownButton>
 
         <InfoBar
             x:Name="LocationPermissionBar"
@@ -431,49 +437,8 @@
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <!--  Commute: where the rider is likely headed, with a way to pick somewhere else  -->
-            <Grid
-                x:Name="CommuteHeader"
-                Padding="14,8,8,0"
-                ColumnSpacing="10"
-                Visibility="Collapsed">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <FontIcon
-                    x:Name="CommuteGlyph"
-                    VerticalAlignment="Center"
-                    AutomationProperties.AccessibilityView="Raw"
-                    FontSize="20"
-                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                    <TextBlock
-                        x:Name="CommuteTitle"
-                        AutomationProperties.LiveSetting="Polite"
-                        Style="{StaticResource BodyStrongTextBlockStyle}"
-                        TextTrimming="CharacterEllipsis" />
-                    <TextBlock
-                        x:Name="CommuteSubtitle"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-                <DropDownButton
-                    Grid.Column="2"
-                    VerticalAlignment="Center"
-                    AutomationProperties.Name="Choose where you're going"
-                    Content="Going to"
-                    ToolTipService.ToolTip="Going somewhere else?">
-                    <DropDownButton.Flyout>
-                        <MenuFlyout
-                            x:Name="DestinationMenu"
-                            Opening="DestinationMenu_Opening"
-                            Placement="BottomEdgeAlignedRight" />
-                    </DropDownButton.Flyout>
-                </DropDownButton>
-            </Grid>
+            <!--  The trip to where the rider is likely headed, with a way to pick somewhere else  -->
+            <controls:SuggestionCard x:Name="SuggestionCard" Visibility="Collapsed" />
 
             <InfoBar
                 x:Name="StatusBar"

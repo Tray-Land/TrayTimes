@@ -116,19 +116,52 @@ public sealed class TransitModelsTests
     }
 
     [TestMethod]
-    public void RideToDestination_TripOption_IsArrivalLessDeparture()
+    public void Transfers_TwoRidesWithWalks_IsOne()
     {
         // Arrange
-        TripOption option = new(new TransitStop("s", "Stop", new GeoPoint(0, 0)), new TransitRoute("r", "1", "One", null),
-            new TransitDirection("0", "North"), 200, TimeSpan.FromMinutes(3), Now, Now.AddMinutes(25), Transfers: 1);
+        TripItinerary trip = new([Walk(0, 3), Ride(3, 15), Walk(15, 17), Ride(20, 30), Walk(30, 32)], Now, Now.AddMinutes(32));
 
         // Act
-        TimeSpan ride = option.RideToDestination;
+        int transfers = trip.Transfers;
 
         // Assert
-        Assert.AreEqual(TimeSpan.FromMinutes(25), ride);
+        Assert.AreEqual(1, transfers);
+    }
+
+    [TestMethod]
+    public void Transfers_WalkOnly_IsZero()
+    {
+        // Arrange
+        TripItinerary trip = new([Walk(0, 20)], Now, Now.AddMinutes(20));
+
+        // Act
+        int transfers = trip.Transfers;
+
+        // Assert
+        Assert.AreEqual(0, transfers);
+    }
+
+    [TestMethod]
+    public void Duration_Leg_IsEndLessStart()
+    {
+        // Arrange
+        TripLeg leg = Ride(3, 15);
+
+        // Act
+        TimeSpan duration = leg.Duration;
+
+        // Assert
+        Assert.AreEqual(TimeSpan.FromMinutes(12), duration);
     }
 
     private static Arrival CreateArrival(DateTimeOffset predicted) =>
         new("1234", "14", "14", "0", "Downtown", predicted, TripId: "5501");
+
+    private static WalkLeg Walk(int fromMinute, int toMinute) => new(Now.AddMinutes(fromMinute), Now.AddMinutes(toMinute), 100, []);
+
+    private static RideLeg Ride(int fromMinute, int toMinute) => new(Now.AddMinutes(fromMinute), Now.AddMinutes(toMinute),
+    [
+        new RideLine(new TransitRoute("r", "1", "One", null), new TransitDirection("0", "North"), new TransitStop("s", "Stop", new GeoPoint(0, 0)), null, 4, [],
+            [new PlannedDeparture(Now.AddMinutes(fromMinute), Now.AddMinutes(toMinute), IsRealTime: true, "t")]),
+    ]);
 }

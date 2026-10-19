@@ -106,27 +106,55 @@ public sealed record RouteItinerary(TransitDirection Direction, IReadOnlyList<Tr
 
 public sealed record RouteDetails(TransitRoute Route, IReadOnlyList<RouteItinerary> Itineraries, IReadOnlyList<RoutePattern> Shapes);
 
-/// <summary>
-/// One way to make a trip: walk to <see cref="BoardAt"/>, ride <see cref="Route"/>, and (after any
-/// transfers) reach the destination at <see cref="Arrives"/> if leaving at <see cref="Departs"/>.
-/// </summary>
-public sealed record TripOption(
-    TransitStop BoardAt,
-    TransitRoute Route,
-    TransitDirection Direction,
-    double WalkMeters,
-    TimeSpan Walk,
-    DateTimeOffset Departs,
-    DateTimeOffset Arrives,
-    int Transfers)
+/// <summary>A trip planner's whole trips for one origin and destination, best first, and the shapes of the lines they ride.</summary>
+public sealed record TripPlan(IReadOnlyList<TripItinerary> Itineraries, IReadOnlyList<RoutePattern> Shapes);
+
+/// <summary>One way to make a trip, leg by leg: leave at <see cref="Departs"/>, arrive at <see cref="Arrives"/>.</summary>
+public sealed record TripItinerary(IReadOnlyList<TripLeg> Legs, DateTimeOffset Departs, DateTimeOffset Arrives)
 {
-    /// <summary>From boarding to the destination, including transfers and the walk at the end.</summary>
+    /// <summary>Changes from one ride to the next; a walk-only trip has none.</summary>
     [JsonIgnore]
-    public TimeSpan RideToDestination => Arrives - Departs;
+    public int Transfers => Math.Max(0, Legs.OfType<RideLeg>().Count() - 1);
 }
 
-/// <summary>A trip planner's options for one origin and destination, and the shapes of the lines they ride.</summary>
-public sealed record TripPlan(IReadOnlyList<TripOption> Options, IReadOnlyList<RoutePattern> Shapes);
+/// <summary>One part of a trip, from <see cref="Starts"/> to <see cref="Ends"/> as planned.</summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "Kind")]
+[JsonDerivedType(typeof(WalkLeg), "walk")]
+[JsonDerivedType(typeof(RideLeg), "ride")]
+public abstract record TripLeg(DateTimeOffset Starts, DateTimeOffset Ends)
+{
+    [JsonIgnore]
+    public TimeSpan Duration => Ends - Starts;
+}
+
+/// <summary>A walk of <see cref="Meters"/> along <see cref="Path"/> (empty when the plan has no path).</summary>
+public sealed record WalkLeg(
+    DateTimeOffset Starts,
+    DateTimeOffset Ends,
+    double Meters,
+    [property: JsonConverter(typeof(EncodedPathJsonConverter))] IReadOnlyList<GeoPoint> Path) : TripLeg(Starts, Ends);
+
+/// <summary>
+/// A ride on any of <see cref="Lines"/>, which the planner offers as alternatives, soonest first: the
+/// leg's planned times are for the first line's first departure.
+/// </summary>
+public sealed record RideLeg(DateTimeOffset Starts, DateTimeOffset Ends, IReadOnlyList<RideLine> Lines) : TripLeg(Starts, Ends);
+
+/// <summary>
+/// One line a ride can take: where it boards, where it gets off (null when the plan doesn't say), how
+/// many stops it goes (0 when unknown), the ridden part of its shape, and its departures, soonest first.
+/// </summary>
+public sealed record RideLine(
+    TransitRoute Route,
+    TransitDirection Direction,
+    TransitStop BoardAt,
+    TransitStop? AlightAt,
+    int Stops,
+    [property: JsonConverter(typeof(EncodedPathJsonConverter))] IReadOnlyList<GeoPoint> Path,
+    IReadOnlyList<PlannedDeparture> Departures);
+
+/// <summary>One of the plan's departures for a ride: when it leaves, when it gets you off, and its trip.</summary>
+public sealed record PlannedDeparture(DateTimeOffset Departs, DateTimeOffset Alights, bool IsRealTime, string? TripId);
 
 /// <summary>Raised when the transit service rejects a request (bad key, rate limit, and so on).</summary>
 public sealed class TransitApiException(string message, TransitApiFailureKind kind = TransitApiFailureKind.Other) : Exception(message)

@@ -58,7 +58,7 @@
     <value>Copy OAuth.resw.sample to OAuth.resw, paste your Transit API key into TransitApiKey, and rebuild.</value>
   </data>
   <data name="SettingsCommuteHeading.Text" xml:space="preserve">
-    <value>Your commute</value>
+    <value>Your places and stops</value>
   </data>
   <data name="SettingsPlacesExpander.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Favorite places</value>
@@ -70,7 +70,7 @@
     <value>Home, work, school, and the places you go most.</value>
   </data>
   <data name="SettingsPlacesHelp.Text" xml:space="preserve">
-    <value>The flyout's Commute tab uses these to guess where you're headed next: home when you're out, and work (or school) when you're home.</value>
+    <value>The flyout suggests a trip to where you're likely headed next: home when you're out, and work (or school) when you're home. You can also show departures near any of these places.</value>
   </data>
   <data name="SettingsHomePicker.Header" xml:space="preserve">
     <value>Home</value>
@@ -94,7 +94,7 @@
     <value>Favorite stops</value>
   </data>
   <data name="SettingsSavedStopsDescription.Text" xml:space="preserve">
-    <value>Drag to reorder. The first three appear in the tray tooltip.</value>
+    <value>Pinned to the top of the departures when you're near them, and a click away from anywhere. Drag to reorder.</value>
   </data>
   <data name="SettingsSavedStopsList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Favorite stops</value>
@@ -359,5 +359,238 @@
   </data>
   <data name="SettingsStartupManaged" xml:space="preserve">
     <value>This setting is managed by your organization.</value>
+  </data>
+  <data name="PlaceChip.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Show departures somewhere else</value>
+  </data>
+  <data name="PlaceChipNameFormat" xml:space="preserve">
+    <value>Where to show departures: {0}</value>
+    <comment>{0} is where the board is centered, such as "Near you".</comment>
+  </data>
+  <data name="CenterNearYou" xml:space="preserve">
+    <value>Near you</value>
+  </data>
+  <data name="CenterNearFormat" xml:space="preserve">
+    <value>Near {0}</value>
+    <comment>{0} is a favorite place's name, such as Work.</comment>
+  </data>
+  <data name="CenterAllSaved" xml:space="preserve">
+    <value>All saved stops</value>
+  </data>
+  <data name="JumpStopFormat" xml:space="preserve">
+    <value>{0} · {1}</value>
+    <comment>{0} is a saved stop's name; {1} its next departure, such as "14 in 4 min".</comment>
+  </data>
+  <data name="JumpNextFormat" xml:space="preserve">
+    <value>{0} in {1} min</value>
+    <comment>{0} is a route, {1} the minutes until it leaves.</comment>
+  </data>
+  <data name="JumpNextDueFormat" xml:space="preserve">
+    <value>{0} due</value>
+    <comment>{0} is a route that's leaving now.</comment>
+  </data>
+  <data name="ManageFavorites" xml:space="preserve">
+    <value>Manage favorites…</value>
+  </data>
+  <data name="ApiKeyNeededTitle" xml:space="preserve">
+    <value>API key needed</value>
+  </data>
+  <data name="ApiKeyNeededText" xml:space="preserve">
+    <value>Add your Transit API key (TransitApiKey) to OAuth.resw and rebuild.</value>
+  </data>
+  <data name="TransitUnreachableFormat" xml:space="preserve">
+    <value>Can't reach {0} right now. Retrying shortly.</value>
+    <comment>{0} is the transit data provider, such as Transit.</comment>
+  </data>
+  <data name="Offline" xml:space="preserve">
+    <value>No internet connection. Times will update when you're back online.</value>
+  </data>
+  <data name="LocationUnknownTitle" xml:space="preserve">
+    <value>Can't find your location</value>
+  </data>
+  <data name="LocationUnknownText" xml:space="preserve">
+    <value>Try again in a moment.</value>
+  </data>
+  <data name="TryAgain" xml:space="preserve">
+    <value>Try again</value>
+  </data>
+  <data name="NoStopsNearbyTitle" xml:space="preserve">
+    <value>No stops nearby</value>
+  </data>
+  <data name="NoStopsNearYouFormat" xml:space="preserve">
+    <value>Transit has no stops within {0} of you.</value>
+    <comment>{0} is a distance, such as "1.0 km".</comment>
+  </data>
+  <data name="NoStopsNearFormat" xml:space="preserve">
+    <value>Transit has no stops within {0} of {1}.</value>
+    <comment>{0} is a distance, such as "1.0 km"; {1} a favorite place or saved stop.</comment>
+  </data>
+  <data name="NoSavedStopsTitle" xml:space="preserve">
+    <value>No favorite stops</value>
+  </data>
+  <data name="NoSavedStopsText" xml:space="preserve">
+    <value>Star a stop to save it here.</value>
+  </data>
+  <data name="AddAStop" xml:space="preserve">
+    <value>Add a stop</value>
+  </data>
+  <data name="FindingStops" xml:space="preserve">
+    <value>Finding stops…</value>
+  </data>
+  <data name="NoUpcomingArrivals" xml:space="preserve">
+    <value>No upcoming arrivals.</value>
+  </data>
+  <data name="UpdatedFormat" xml:space="preserve">
+    <value>Updated {0}</value>
+    <comment>{0} is a time of day.</comment>
+  </data>
+  <data name="Loading" xml:space="preserve">
+    <value>Loading…</value>
+  </data>
+  <data name="CantLoadArrivals" xml:space="preserve">
+    <value>Can't load arrivals</value>
+  </data>
+  <data name="ShowingEarlierTimes" xml:space="preserve">
+    <value>Showing earlier times</value>
+  </data>
+  <data name="StopWalkFormat" xml:space="preserve">
+    <value>{0} · {1} min walk</value>
+    <comment>{0} is a distance, such as "250 m"; {1} the minutes it takes to walk.</comment>
+  </data>
+  <data name="MoreLinesFormat" xml:space="preserve">
+    <value>{0} +{1}</value>
+    <comment>{0} lists the first routes at a stop; {1} is how many more there are.</comment>
+  </data>
+  <data name="AllRoutes" xml:space="preserve">
+    <value>All routes</value>
+  </data>
+  <data name="SuggestionTripButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Show this trip's first ride on the map</value>
+  </data>
+  <data name="SuggestionPlanningRing.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Planning a trip</value>
+  </data>
+  <data name="DestinationButton.Content" xml:space="preserve">
+    <value>Going to</value>
+  </data>
+  <data name="DestinationButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Choose where you're going</value>
+  </data>
+  <data name="DestinationButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Going somewhere else?</value>
+  </data>
+  <data name="DestinationLikely" xml:space="preserve">
+    <value>Where I'm likely headed</value>
+  </data>
+  <data name="DestinationEditPlaces" xml:space="preserve">
+    <value>Edit places…</value>
+  </data>
+  <data name="SuggestionTitleFormat" xml:space="preserve">
+    <value>To {0} · {1}</value>
+    <comment>{0} is a favorite place's name; {1} when to leave, such as "leave in 6 min", or how long the walk is.</comment>
+  </data>
+  <data name="SuggestionLeaveInFormat" xml:space="preserve">
+    <value>leave in {0} min</value>
+  </data>
+  <data name="SuggestionLeaveNow" xml:space="preserve">
+    <value>leave now</value>
+  </data>
+  <data name="SuggestionWalkFormat" xml:space="preserve">
+    <value>walk {0} min</value>
+  </data>
+  <data name="SuggestionArriveFormat" xml:space="preserve">
+    <value>arrive {0}</value>
+    <comment>{0} is a time of day.</comment>
+  </data>
+  <data name="SuggestionArriveTransfersFormat" xml:space="preserve">
+    <value>arrive {0} · {1}</value>
+    <comment>{0} is a time of day; {1} the number of transfers, such as "1 transfer".</comment>
+  </data>
+  <data name="SuggestionOneTransfer" xml:space="preserve">
+    <value>1 transfer</value>
+  </data>
+  <data name="SuggestionTransfersFormat" xml:space="preserve">
+    <value>{0} transfers</value>
+  </data>
+  <data name="SuggestionNoTransfers" xml:space="preserve">
+    <value>no transfers</value>
+  </data>
+  <data name="SuggestionTripNameFormat" xml:space="preserve">
+    <value>To {0}, {1}, arrive {2}, {3}</value>
+    <comment>Read by screen readers. {0} is a place; {1} when to leave, such as "leave in 6 minutes"; {2} a time of day; {3} the transfers, such as "1 transfer".</comment>
+  </data>
+  <data name="SuggestionLeaveInMinutesFormat" xml:space="preserve">
+    <value>leave in {0} minutes</value>
+  </data>
+  <data name="SuggestionLeaveInOneMinute" xml:space="preserve">
+    <value>leave in 1 minute</value>
+  </data>
+  <data name="SuggestionWalkNameFormat" xml:space="preserve">
+    <value>To {0}, walk {1} minutes, arrive {2}</value>
+    <comment>Read by screen readers. {0} is a place; {2} a time of day.</comment>
+  </data>
+  <data name="SuggestionNameWithNoteFormat" xml:space="preserve">
+    <value>{0}. {1}</value>
+    <comment>Read by screen readers: the trip, then a caveat about it.</comment>
+  </data>
+  <data name="SuggestionGuessedFormat" xml:space="preserve">
+    <value>From {0} · guessed from the time of day</value>
+    <comment>{0} is a favorite place's name. Shown when the device's location is unknown.</comment>
+  </data>
+  <data name="SuggestionPlanning" xml:space="preserve">
+    <value>Planning a trip…</value>
+  </data>
+  <data name="SuggestionErrorTitle" xml:space="preserve">
+    <value>Can't plan a trip right now</value>
+  </data>
+  <data name="SuggestionSetUpTitle" xml:space="preserve">
+    <value>Add home and work to see your next trip</value>
+  </data>
+  <data name="SuggestionSetUpButton" xml:space="preserve">
+    <value>Set up places</value>
+  </data>
+  <data name="SuggestionAtPlaceFormat" xml:space="preserve">
+    <value>You're at {0}</value>
+    <comment>{0} is a favorite place's name.</comment>
+  </data>
+  <data name="SuggestionAtPlaceText" xml:space="preserve">
+    <value>Pick somewhere else with Going to.</value>
+  </data>
+  <data name="SuggestionNoTripFormat" xml:space="preserve">
+    <value>No trip to {0} right now</value>
+    <comment>{0} is a favorite place's name.</comment>
+  </data>
+  <data name="SuggestionNoTripText" xml:space="preserve">
+    <value>Transit couldn't find a way there by transit.</value>
+  </data>
+  <data name="TooltipTripFormat" xml:space="preserve">
+    <value>{0}: {1}, {2} at {3}</value>
+    <comment>The tray tooltip. {0} is a place; {1} when to leave, such as "leave in 6 min"; {2} a route; {3} a time of day.</comment>
+  </data>
+  <data name="TooltipWalkFormat" xml:space="preserve">
+    <value>{0}: walk {1} min, arrive {2}</value>
+    <comment>The tray tooltip. {0} is a place; {2} a time of day.</comment>
+  </data>
+  <data name="TooltipTrackingFormat" xml:space="preserve">
+    <value>Tracking {0} at {1}: {2}</value>
+    <comment>The tray tooltip. {0} is a route; {1} a stop; {2} when it leaves, such as "4 min".</comment>
+  </data>
+  <data name="TooltipStopLineFormat" xml:space="preserve">
+    <value>{0} {1}</value>
+    <comment>The tray tooltip. {0} is a route; {1} its direction, such as Northbound.</comment>
+  </data>
+  <data name="TooltipStopFormat" xml:space="preserve">
+    <value>{0}: {1}</value>
+    <comment>The tray tooltip. {0} is a stop or route; {1} its next departures, such as "4, 12 min".</comment>
+  </data>
+  <data name="TooltipNoArrivals" xml:space="preserve">
+    <value>no arrivals</value>
+  </data>
+  <data name="TooltipDue" xml:space="preserve">
+    <value>Due</value>
+  </data>
+  <data name="TooltipMinutesFormat" xml:space="preserve">
+    <value>{0} min</value>
+    <comment>{0} lists minutes, such as "4, 12".</comment>
   </data>
 </root>
