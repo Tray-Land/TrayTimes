@@ -8,10 +8,10 @@ public sealed class TransitModelsTests
     private static readonly DateTimeOffset Now = new(2026, 9, 25, 8, 0, 0, TimeSpan.Zero);
 
     [TestMethod]
-    public void MinutesAway_WhenDue_ReturnsZero()
+    public void MinutesAway_UnderAMinute_ReturnsZero()
     {
         // Arrange
-        Arrival arrival = CreateArrival(Now.AddMinutes(5), isDue: true);
+        Arrival arrival = CreateArrival(Now.AddSeconds(50));
 
         // Act
         int minutes = arrival.MinutesAway(Now);
@@ -34,7 +34,7 @@ public sealed class TransitModelsTests
     }
 
     [TestMethod]
-    public void MinutesAway_PredictionInThePast_ReturnsZero()
+    public void MinutesAway_DepartureInThePast_ReturnsZero()
     {
         // Arrange
         Arrival arrival = CreateArrival(Now.AddMinutes(-3));
@@ -44,6 +44,49 @@ public sealed class TransitModelsTests
 
         // Assert
         Assert.AreEqual(0, minutes);
+    }
+
+    [TestMethod]
+    public void IsDelayed_RealTimeTwoMinutesBehindTimetable_IsTrue()
+    {
+        // Arrange
+        Arrival arrival = CreateArrival(Now.AddMinutes(12)) with { ScheduledTime = Now.AddMinutes(10) };
+
+        // Act
+        bool delayed = arrival.IsDelayed;
+
+        // Assert
+        Assert.IsTrue(delayed);
+        Assert.AreEqual(TimeSpan.FromMinutes(2), arrival.Delay);
+    }
+
+    [TestMethod]
+    [DataRow(1, true)]
+    [DataRow(-3, true)]
+    [DataRow(5, false)]
+    public void IsDelayed_SlightlyLateEarlyOrScheduledOnly_IsFalse(int minutesLate, bool realTime)
+    {
+        // Arrange
+        Arrival arrival = CreateArrival(Now.AddMinutes(10 + minutesLate)) with { ScheduledTime = Now.AddMinutes(10), IsRealTime = realTime };
+
+        // Act
+        bool delayed = arrival.IsDelayed;
+
+        // Assert
+        Assert.IsFalse(delayed);
+    }
+
+    [TestMethod]
+    public void Delay_NoTimetableTime_IsNull()
+    {
+        // Arrange
+        Arrival arrival = CreateArrival(Now.AddMinutes(10));
+
+        // Act
+        TimeSpan? delay = arrival.Delay;
+
+        // Assert
+        Assert.IsNull(delay);
     }
 
     [TestMethod]
@@ -72,6 +115,20 @@ public sealed class TransitModelsTests
         Assert.AreEqual("14", text);
     }
 
-    private static Arrival CreateArrival(DateTimeOffset predicted, bool isDue = false) =>
-        new("1234", "14", "14", "NORTH", "Downtown", "5501", predicted, isDue, false, false, ArrivalStatus.Scheduled);
+    [TestMethod]
+    public void RideToDestination_TripOption_IsArrivalLessDeparture()
+    {
+        // Arrange
+        TripOption option = new(new TransitStop("s", "Stop", new GeoPoint(0, 0)), new TransitRoute("r", "1", "One", null),
+            new TransitDirection("0", "North"), 200, TimeSpan.FromMinutes(3), Now, Now.AddMinutes(25), Transfers: 1);
+
+        // Act
+        TimeSpan ride = option.RideToDestination;
+
+        // Assert
+        Assert.AreEqual(TimeSpan.FromMinutes(25), ride);
+    }
+
+    private static Arrival CreateArrival(DateTimeOffset predicted) =>
+        new("1234", "14", "14", "0", "Downtown", predicted, TripId: "5501");
 }

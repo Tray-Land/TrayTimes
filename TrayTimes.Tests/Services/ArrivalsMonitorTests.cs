@@ -4,7 +4,7 @@ using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Tests.Transit;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 
 namespace TrayTimes.Tests.Services;
 
@@ -16,203 +16,198 @@ public sealed class ArrivalsMonitorTests
     public void Initialize()
     {
         SettingsService.Reset();
-        SettingsService.Stops = [new SavedStop("1", "Fixture stop", 0, 0, "14", "14", null, "N", "North", false)];
-        ApiUsageService.Reset();
+        SettingsService.Stops = [new SavedStop("1", "Fixture stop", 0, 0, "14", "14", null, "0", "North", false)];
+        ApiUsageService.StartOver();
     }
 
     [TestCleanup]
     public void Cleanup() => SettingsService.Reset();
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task Loaded_FirstFeedAndReloadWithStaleLiveSnapshot_AddsScheduleWithoutHttpOrChangingFreshness(bool empty)
+    public async Task IsForeground_FirstOpen_FetchesEveryFavoriteInOneRequest()
     {
-        Fixture f = new(empty);
+        // Arrange
+        SettingsService.Stops = [.. SettingsService.Stops, SettingsService.Stops[0] with { StopId = "2" }, SettingsService.Stops[0] with { StopId = "3" }];
+        Fixture f = new();
+        f.Handler.RespondAsync = (request, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(RequestTestHandler.StopIds(request))));
+
+        // Act
         await f.OpenAsync();
-        DateTimeOffset? fetched = f.Monitor.Latest.FetchedAt;
-        f.Clock.Advance(TimeSpan.FromSeconds(35));
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-
+        // Assert
         Assert.AreEqual(1, f.Handler.Attempts);
-        Assert.AreEqual(fetched, f.Monitor.Latest.FetchedAt);
-        Assert.IsNull(f.Monitor.Latest.Error);
-        Assert.IsFalse(f.Monitor.IsLoading);
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
-        Assert.AreEqual(empty ? 2 : 1, f.Monitor.Latest.Arrivals.Count(a => !a.IsRealTime));
-
-        // Replay the platform disk-reload boundary with a newly parsed copy of the same feed.
-        f.Schedule.Timetable = null;
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals); // Merge raw data, never previously merged rows.
-        Assert.AreEqual(fetched, f.Monitor.Latest.FetchedAt);
-        Assert.AreEqual(1, f.Handler.Attempts);
+        CollectionAssert.AreEquivalent(new[] { "1", "2", "3" }, RequestTestHandler.StopIds(f.Handler.Requests.Single()));
+        Assert.HasCount(3, f.Monitor.Latest.Arrivals);
         Assert.AreEqual(1, ApiUsageService.GetSummary().Total.Today);
-
-        await f.Monitor.RefreshAsync(TransitTrigger.Timer);
-        Assert.AreEqual(2, f.Handler.Attempts); // Local enrichment did not extend the cache age.
-        await f.Monitor.RefreshAsync(TransitTrigger.ManualRefresh);
-        Assert.AreEqual(3, f.Handler.Attempts);
     }
 
     [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task Loaded_FailedLiveRefreshWithLastGoodSnapshot_PreservesErrorTimestampAndRawData(bool empty)
+    [DataRow(59, 1)]
+    [DataRow(60, 2)]
+    public async Task IsForeground_Reopen_ReusesDataYoungerThanTheBrowsingInterval(int secondsLater, int expectedAttempts)
     {
-        Fixture f = new(empty);
+        // Arrange
+        Fixture f = new();
         await f.OpenAsync();
-        DateTimeOffset? fetched = f.Monitor.Latest.FetchedAt;
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("unavailable", HttpStatusCode.ServiceUnavailable));
-        await f.Monitor.RefreshAsync(TransitTrigger.Timer);
-        string? error = f.Monitor.Latest.Error;
-        Assert.IsNotNull(error);
+        f.Monitor.IsForeground = false;
+        f.Clock.Advance(TimeSpan.FromSeconds(secondsLater));
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
+        // Act
+        if (expectedAttempts == 1)
+        {
+            f.Monitor.IsForeground = true;
+        }
+        else
+        {
+            await f.OpenAsync();
+        }
 
-        Assert.AreEqual(2, f.Handler.Attempts);
-        Assert.AreEqual(fetched, f.Monitor.Latest.FetchedAt);
-        Assert.AreEqual(error, f.Monitor.Latest.Error);
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
-        Assert.AreEqual(empty ? 2 : 1, f.Monitor.Latest.Arrivals.Count(a => !a.IsRealTime));
+        // Assert
+        Assert.AreEqual(expectedAttempts, f.Handler.Attempts);
+        Assert.HasCount(1, f.Monitor.Latest.Arrivals);
     }
 
     [TestMethod]
-    public async Task Loaded_WhileTimedRefreshIsPending_EnrichesImmediatelyWithoutResettingLoadingOrReplacingRequest()
+    public async Task RefreshAsync_FailureAfterGoodData_KeepsLastGoodArrivalsAndTimestampWithError()
     {
+        // Arrange
         Fixture f = new();
         await f.OpenAsync();
         DateTimeOffset? fetched = f.Monitor.Latest.FetchedAt;
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
-        TaskCompletionSource<HttpResponseMessage> pending = new();
-        f.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
-        Task refresh = f.Monitor.RefreshAsync(TransitTrigger.Timer);
-        Assert.IsTrue(f.Monitor.IsLoading);
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
+        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("unavailable", HttpStatusCode.ServiceUnavailable));
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
+        // Act
+        await f.Monitor.RefreshAsync(TransitTrigger.Timer);
 
-        Assert.IsTrue(f.Monitor.IsLoading);
-        Assert.IsFalse(refresh.IsCompleted);
+        // Assert
         Assert.AreEqual(fetched, f.Monitor.Latest.FetchedAt);
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
-        Assert.AreEqual(2, f.Handler.Attempts);
-        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await refresh;
+        Assert.HasCount(1, f.Monitor.Latest.Arrivals);
+        Assert.AreEqual("Can't reach Transit right now. Retrying shortly.", f.Monitor.Latest.Error);
         Assert.IsFalse(f.Monitor.IsLoading);
-        Assert.AreEqual(f.Clock.GetLocalNow(), f.Monitor.Latest.FetchedAt);
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
     }
 
     [TestMethod]
-    public async Task Loaded_NoSuccessfulSnapshot_RetriesNormallyWithoutConvertingFailureToEmptySuccess()
+    public async Task RefreshAsync_RejectedQuery_ShowsTheProvidersMessage()
     {
+        // Arrange
         Fixture f = new();
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("unavailable", HttpStatusCode.ServiceUnavailable));
+        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("{}", HttpStatusCode.Unauthorized));
+
+        // Act
         await f.OpenAsync();
+
+        // Assert
         Assert.IsNull(f.Monitor.Latest.FetchedAt);
-        Assert.IsNotNull(f.Monitor.Latest.Error);
-        TaskCompletionSource<HttpResponseMessage> pending = new();
-        f.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
-
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        f.Schedule.RaiseLoaded();
-
-        Assert.AreEqual(2, f.Handler.Attempts);
-        Assert.IsTrue(f.Monitor.IsLoading);
-        Assert.IsNotNull(f.Monitor.Latest.Error);
-        Task completed = f.WaitAsync(() => pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody)));
-        await completed;
-        Assert.IsNotNull(f.Monitor.Latest.FetchedAt);
-        Assert.IsNull(f.Monitor.Latest.Error);
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
+        Assert.Contains("rejected the API key", f.Monitor.Latest.Error!);
     }
 
     [TestMethod]
-    public async Task Loaded_StopChangeDuringPendingFetch_DoesNotRemergeIncompatibleSnapshotOrRepeatRequest()
+    public async Task RefreshAsync_NoKey_ExplainsWithoutHttp()
     {
+        // Arrange
+        Fixture f = new(new TransitAppService(null, http: new HttpClient(new RequestTestHandler())));
+
+        // Act
+        await f.OpenAsync();
+
+        // Assert
+        Assert.Contains("TransitApiKey", f.Monitor.Latest.Error!);
+        Assert.AreEqual(0, f.Handler.Attempts);
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_StopChangeDuringPendingFetch_PublishesOnlyTheNewStops()
+    {
+        // Arrange
         Fixture f = new();
         await f.OpenAsync();
         SettingsService.Stops = [SettingsService.Stops[0] with { StopId = "2" }];
         TaskCompletionSource<HttpResponseMessage> pending = new();
         f.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
+
+        // Act
         Task changed = f.Monitor.RefreshAsync(TransitTrigger.StopsChanged);
-
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-
-        Assert.AreEqual(2, f.Handler.Attempts);
-        Assert.IsTrue(f.Monitor.IsLoading);
-        Assert.IsTrue(f.Monitor.Latest.Arrivals.All(a => a.IsRealTime)); // Old snapshot was not locally enriched.
-        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody.Replace("\"stpid\":\"1\"", "\"stpid\":\"2\"", StringComparison.Ordinal)));
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["2"])));
         await changed;
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
-        Assert.IsTrue(f.Monitor.Latest.Arrivals.All(a => a.StopId == "2"));
-        f.Schedule.RaiseLoaded();
+
+        // Assert
         Assert.AreEqual(2, f.Handler.Attempts);
         Assert.IsTrue(f.Monitor.Latest.Arrivals.All(a => a.StopId == "2"));
     }
 
     [TestMethod]
-    public async Task Loaded_HiddenThenFreshReopen_EnrichesOnReopenWithoutHttp()
+    public async Task Clear_ThenReopen_ReusesTheAppLifetimeCoordinatorsData()
     {
+        // Arrange
         Fixture f = new();
         await f.OpenAsync();
-        DateTimeOffset? fetched = f.Monitor.Latest.FetchedAt;
-        f.Monitor.IsForeground = false;
-        f.Clock.Advance(TimeSpan.FromSeconds(2));
-        int updates = 0;
-        f.Monitor.Updated += (_, _) => ++updates;
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        Assert.AreEqual(0, updates);
+        // Act
+        f.Monitor.Clear();
+        Assert.AreEqual(ArrivalsSnapshot.Empty, f.Monitor.Latest);
+        await f.Monitor.RefreshAsync();
+        Assert.AreEqual(1, f.Handler.Attempts); // Hidden: no work.
+        await f.OpenAsync();
+
+        // Assert
+        Assert.HasCount(1, f.Monitor.Latest.Arrivals);
         Assert.AreEqual(1, f.Handler.Attempts);
+    }
+
+    [TestMethod]
+    [DataRow(0, 60)]
+    [DataRow(40, 180)]
+    [DataRow(60, 300)]
+    public void RefreshInterval_CallBudget_SetsTheTimer(int usedToday, int expectedSeconds)
+    {
+        // Arrange: today's share of 1,500 calls on October 6 is 57.
+        Fixture f = new(usage: new TransitUsage(usedToday, usedToday));
+
+        // Act
         f.Monitor.IsForeground = true;
 
-        Assert.AreEqual(1, updates);
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
-        Assert.AreEqual(fetched, f.Monitor.Latest.FetchedAt);
-        Assert.AreEqual(1, f.Handler.Attempts);
+        // Assert
+        Assert.AreEqual(TimeSpan.FromSeconds(expectedSeconds), f.Monitor.RefreshInterval);
+        Assert.AreEqual(f.Monitor.RefreshInterval, f.Dispatcher.Timers.Single().Interval);
     }
 
     [TestMethod]
-    public async Task Clear_ThenTimetableLoaded_DoesNotPublishOrFetchWhileHidden()
+    public async Task RefreshAsync_TimerAfterTodaysShareIsUsed_IsRefusedWithAnExplanationButManualStillWorks()
     {
-        Fixture f = new();
+        // Arrange
+        Fixture f = new(usage: new TransitUsage(60, 60));
         await f.OpenAsync();
-        f.Monitor.Clear();
+        Assert.AreEqual(1, f.Handler.Attempts); // Opening the flyout is something the rider did.
+        f.Clock.Advance(TimeSpan.FromMinutes(5));
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
+        // Act
+        await f.Monitor.RefreshAsync(TransitTrigger.Timer);
+        string? timerError = f.Monitor.Latest.Error;
+        await f.Monitor.RefreshAsync(TransitTrigger.ManualRefresh);
 
-        Assert.AreEqual(ArrivalsSnapshot.Empty, f.Monitor.Latest);
-        Assert.AreEqual(1, f.Handler.Attempts);
-        await f.OpenAsync(); // Normal refresh may reuse the app-lifetime coordinator's raw data.
-        Assert.HasCount(2, f.Monitor.Latest.Arrivals);
-        Assert.AreEqual(1, f.Handler.Attempts);
+        // Assert
+        Assert.Contains("paused for today", timerError!);
+        Assert.IsNull(f.Monitor.Latest.Error);
+        Assert.AreEqual(2, f.Handler.Attempts);
     }
 
     private sealed class Fixture
     {
-        public Fixture(bool empty = false)
+        public Fixture(TransitAppService? service = null, TransitUsage? usage = null)
         {
-            Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(empty ? RequestTestHandler.EmptyBody : RequestTestHandler.LiveBody));
-            BusTimeTransitService service = Handler.CreateService(new TransitRequestDiagnostics(Clock));
-            service.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
-            Schedule = new ScheduleService(Clock);
-            Monitor = new ArrivalsMonitor(service, Schedule, new DispatcherQueue(), Clock);
+            Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
+            TransitAppService client = service ?? Handler.CreateService(new TransitRequestDiagnostics(Clock));
+            client.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
+            TransitBudget? budget = usage is { } fixedUsage ? new TransitBudget(() => fixedUsage, timeProvider: Clock) : null;
+            ITransitService transit = new MetadataTransitService(new CooldownTransitService(client, Clock, budget: budget), Clock);
+            PredictionCoordinator predictions = new(transit, Clock, budget is null ? null : () => budget.ReuseAge);
+            Monitor = new ArrivalsMonitor(transit, Dispatcher, Clock, predictions, budget);
         }
 
         public RequestTestClock Clock { get; } = new();
         public RequestTestHandler Handler { get; } = new();
-        public ScheduleService Schedule { get; }
+        public DispatcherQueue Dispatcher { get; } = new();
         public ArrivalsMonitor Monitor { get; }
 
         public Task OpenAsync() => WaitAsync(() => Monitor.IsForeground = true);

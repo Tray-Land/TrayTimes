@@ -3,12 +3,12 @@ using System.Globalization;
 namespace TrayTimes.Transit;
 
 /// <summary>
-/// Per-day, per-endpoint tally of transit API calls, kept for <see cref="RetainedDays"/> days.
-/// Not thread-safe; callers serialize access.
+/// Per-day, per-endpoint tally of transit API calls, kept for <see cref="RetainedDays"/> days so the
+/// current calendar month is always covered. Not thread-safe; callers serialize access.
 /// </summary>
 public sealed class ApiCallLog
 {
-    public const int RetainedDays = 14;
+    public const int RetainedDays = 62;
 
     private const string DayFormat = "yyyyMMdd";
 
@@ -43,13 +43,18 @@ public sealed class ApiCallLog
 
         return new ApiCallSummary(
             Count(today, null),
-            [.. byEndpoint.OrderByDescending(e => e.Value.Last14Days).ThenBy(e => e.Key, StringComparer.Ordinal)]);
+            [.. byEndpoint.OrderByDescending(e => e.Value.ThisMonth).ThenBy(e => e.Key, StringComparer.Ordinal)]);
     }
+
+    /// <summary>Every endpoint's calls today and so far this calendar month, for the call budget.</summary>
+    public TransitUsage Usage(DateOnly today) => new(CountSince(today, today, null), CountSince(MonthStart(today), today, null));
+
+    private static DateOnly MonthStart(DateOnly day) => new(day.Year, day.Month, 1);
 
     private static string DayKey(DateOnly day) => day.ToString(DayFormat, CultureInfo.InvariantCulture);
 
     private ApiCallCounts Count(DateOnly today, string? endpoint) =>
-        new(CountSince(today, today, endpoint), CountSince(today.AddDays(-6), today, endpoint), CountSince(today.AddDays(-13), today, endpoint));
+        new(CountSince(today, today, endpoint), CountSince(today.AddDays(-6), today, endpoint), CountSince(MonthStart(today), today, endpoint));
 
     private int CountSince(DateOnly first, DateOnly last, string? endpoint)
     {

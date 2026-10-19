@@ -1,6 +1,5 @@
 using TrayTimes.Models;
 using TrayTimes.Transit;
-using TrayTimes.Transit.Gtfs;
 
 // Only platform boundaries are doubled: tests compile the production monitor, tracker, and tally.
 namespace Microsoft.UI.Dispatching
@@ -76,23 +75,6 @@ namespace TrayTimes.Services
             KeepAwakeWhileTracking = false;
             Windows.Win32.PInvoke.ExecutionStates.Clear();
         }
-    }
-
-    internal sealed class ScheduleService(TimeProvider? timeProvider = null)
-    {
-        public event EventHandler? Loaded;
-
-        public GtfsTimetable? Timetable { get; set; }
-
-        public IReadOnlyList<Arrival> AddScheduled(IReadOnlyList<Arrival> live, IReadOnlyCollection<string> stopIds)
-        {
-            DateTimeOffset now = (timeProvider ?? TimeProvider.System).GetLocalNow();
-            return Timetable is { } timetable
-                ? ArrivalMerge.WithSchedule(live, timetable.GetArrivals(stopIds, now, now.AddHours(3)))
-                : live;
-        }
-
-        public void RaiseLoaded() => Loaded?.Invoke(this, EventArgs.Empty);
     }
 
     internal static class ConnectivityService

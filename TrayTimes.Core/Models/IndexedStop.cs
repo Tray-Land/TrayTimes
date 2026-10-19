@@ -6,7 +6,7 @@ namespace TrayTimes.Models;
 /// <summary>A route and direction that serve a stop.</summary>
 public sealed record StopRouteInfo(string RouteId, string RouteDisplayId, string? RouteColor, string DirectionId, string DirectionName);
 
-/// <summary>A stop in the agency-wide directory, with every route/direction that serves it.</summary>
+/// <summary>A stop found near a place, with the route directions it's listed for there.</summary>
 public sealed record IndexedStop(string Id, string Name, double Lat, double Lon, List<StopRouteInfo> Routes)
 {
     [JsonIgnore]
@@ -14,7 +14,7 @@ public sealed record IndexedStop(string Id, string Name, double Lat, double Lon,
 }
 
 /// <summary>
-/// A directory stop and its distance from a point. <see cref="WalkSeconds"/> and <see cref="WalkMeters"/>
+/// A stop and its distance from a point. <see cref="WalkSeconds"/> and <see cref="WalkMeters"/>
 /// come from a walking route when one was looked up; otherwise only the straight-line <see cref="Meters"/> is known.
 /// </summary>
 public sealed record NearbyStop(IndexedStop Stop, double Meters, double? WalkSeconds = null, double? WalkMeters = null)
@@ -31,19 +31,4 @@ public sealed record NearbyStop(IndexedStop Stop, double Meters, double? WalkSec
         .OrderBy(n => n.WalkSeconds is null)
         .ThenBy(n => n.WalkSeconds ?? 0)
         .ThenBy(n => n.Meters)];
-
-    /// <summary>
-    /// Stops within <paramref name="radiusMeters"/>, closest first. If none are that close, the
-    /// nearest few within <paramref name="fallbackRadiusMeters"/> instead.
-    /// </summary>
-    public static IReadOnlyList<NearbyStop> Find(IReadOnlyList<IndexedStop> stops, GeoPoint origin, int max, double radiusMeters = 800, double fallbackRadiusMeters = 2000)
-    {
-        List<NearbyStop> sorted = stops
-            .Select(s => new NearbyStop(s, GeoMath.DistanceMeters(origin, s.Location)))
-            .Where(n => n.Meters <= fallbackRadiusMeters)
-            .OrderBy(n => n.Meters)
-            .ToList();
-        List<NearbyStop> close = sorted.Where(n => n.Meters <= radiusMeters).Take(max).ToList();
-        return close.Count > 0 ? close : sorted.Take(Math.Min(max, 4)).ToList();
-    }
 }

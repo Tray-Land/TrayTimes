@@ -10,14 +10,15 @@ public sealed record PlaceContext(FlyoutMode Mode, IReadOnlyList<FavoritePlace> 
 public sealed record PlaceLocation(GeoPoint? Point, Task<GeoPoint?>? Refined = null, string? Error = null);
 
 /// <summary>Validated discovery metadata, independent of the age of live predictions.</summary>
+/// <param name="Lines">The line directions each stop lists; null lists every route at the stop.</param>
+/// <param name="Trips">For a commute, how each listed line gets to the destination.</param>
 public sealed record PlaceStops(
     GeoPoint? Origin,
     IReadOnlyList<NearbyStop> Stops,
     PlaceNotice EmptyNotice,
     CommuteLeg? Leg = null,
-    IReadOnlySet<RouteDirection>? DirectRoutes = null,
-    IReadOnlyDictionary<string, double>? DestinationWalks = null,
-    DateTimeOffset? DirectoryBuiltAt = null)
+    IReadOnlySet<StopLine>? Lines = null,
+    IReadOnlyDictionary<StopLine, TripTiming>? Trips = null)
 {
     public static PlaceStops Unavailable(PlaceNotice notice, CommuteLeg? leg = null) => new(null, [], notice, leg);
 }
@@ -81,7 +82,7 @@ public sealed class PlaceArrivalsMonitor(
     }
 
     /// <summary>Invalidate incompatible discovery before rendering, including guessed-trip changes.</summary>
-    public void Configure(PlaceContext context, DateTimeOffset? directoryBuiltAt)
+    public void Configure(PlaceContext context)
     {
         if (context.Mode is not (FlyoutMode.Commute or FlyoutMode.Nearby))
         {
@@ -93,8 +94,7 @@ public sealed class PlaceArrivalsMonitor(
                 || (_context.DestinationId == context.DestinationId && _context.Places.SequenceEqual(context.Places)));
         if (same && Discovery is { } found)
         {
-            same = found.DirectoryBuiltAt == directoryBuiltAt
-                && (context.Mode != FlyoutMode.Commute || found.Leg == Plan(context, _resolvedLocation));
+            same = context.Mode != FlyoutMode.Commute || found.Leg == Plan(context, _resolvedLocation);
         }
 
         _context = context with { Places = context.Places.ToArray() };
@@ -112,26 +112,6 @@ public sealed class PlaceArrivalsMonitor(
             RegisterStops();
             Updated?.Invoke(this, EventArgs.Empty);
         }
-    }
-
-    /// <summary>
-    /// Republish applicable raw predictions for local schedule/ETA enrichment. Without a snapshot,
-    /// use the normal shared refresh path; an already loading path will publish when it completes.
-    /// </summary>
-    public Task RefreshTimetableAsync()
-    {
-        if (!_isForeground || _context is null)
-        {
-            return Task.CompletedTask;
-        }
-
-        if (Discovery is not null && Snapshot is not null)
-        {
-            Updated?.Invoke(this, EventArgs.Empty);
-            return Task.CompletedTask;
-        }
-
-        return IsLoading ? Task.CompletedTask : RefreshAsync(checkLocation: false);
     }
 
     /// <summary>
@@ -287,7 +267,7 @@ public sealed class PlaceArrivalsMonitor(
         try
         {
             Task<PredictionSnapshot> pending = predictions.GetAsync(
-                [.. found.Stops.Select(n => n.Stop.Id)], PredictionCoordinator.BrowsingInterval,
+                [.. found.Stops.Select(n => n.Stop.Id)], predictions.BrowsingInterval,
                 force, combineBrowsing: true, cancellationToken: cancellation.Token);
             previous?.Cancel();
             PredictionSnapshot snapshot = await pending;

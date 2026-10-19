@@ -21,6 +21,5 @@
     <Compile Include="..\TrayTimes\Services\BusTrackingService.cs" Link="Services\BusTrackingService.cs" />
     <Compile Include="..\TrayTimes\Services\ApiUsageService.cs" Link="Services\ApiUsageService.cs" />
     <Compile Include="..\TrayTimes\Services\LocationService.cs" Link="Services\LocationService.cs" />
-    <Compile Include="..\TrayTimes\Services\StopIndexService.cs" Link="Services\StopIndexService.cs" />
   </ItemGroup>
 </Project>

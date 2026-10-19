@@ -149,110 +149,18 @@ public sealed class CommutePlannerTests
     }
 
     [TestMethod]
-    public void SharedRoutes_ReturnsRouteDirectionsServingBothEnds_IgnoringCase()
+    public void RouteDirection_SameIdsInDifferentCase_AreEqual()
     {
         // Arrange
-        IndexedStop[] origin = [Stop("o1", 43.010, ("10", "NORTHBOUND"), ("12", "EAST"))];
-        IndexedStop[] destination = [Stop("d1", 43.080, ("10", "northbound"), ("12", "WEST"))];
+        RouteDirection upper = new("GRE", "NORTH");
+        RouteDirection lower = new("gre", "north");
 
         // Act
-        IReadOnlySet<RouteDirection> shared = CommutePlanner.SharedRoutes(origin, destination);
+        bool equal = upper == lower && upper.GetHashCode() == lower.GetHashCode();
 
         // Assert
-        Assert.HasCount(1, shared);
-        Assert.IsTrue(shared.Contains(new RouteDirection("10", "NORTHBOUND")));
-    }
-
-    [TestMethod]
-    public void DirectRoutes_TwoWayRoute_KeepsOnlyDirectionTowardDestination()
-    {
-        // Arrange: route 10 serves both ends in both directions, from opposite sides of the street.
-        IndexedStop[] origin = [Stop("o-nb", 43.010, ("10", "NB")), Stop("o-sb", 43.010, ("10", "SB"))];
-        IndexedStop[] destination = [Stop("d-nb", 43.080, ("10", "NB")), Stop("d-sb", 43.080, ("10", "SB"))];
-        Dictionary<string, IReadOnlyList<RoutePattern>> patterns = new() { ["10"] = [Line("10", "NB", northbound: true), Line("10", "SB", northbound: false)] };
-
-        // Act
-        IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(origin, destination, patterns);
-
-        // Assert
-        Assert.HasCount(1, direct);
-        Assert.IsTrue(direct.Contains(new RouteDirection("10", "NB")));
-    }
-
-    [TestMethod]
-    public void DirectRoutes_ShapeUnknown_DoesNotConfirmSharedRoute()
-    {
-        // Arrange
-        IndexedStop[] origin = [Stop("o", 43.010, ("10", "NB"))];
-        IndexedStop[] destination = [Stop("d", 43.080, ("10", "NB"))];
-
-        // Act
-        IReadOnlySet<RouteDirection> direct = CommutePlanner.DirectRoutes(origin, destination, new Dictionary<string, IReadOnlyList<RoutePattern>>());
-
-        // Assert
-        Assert.HasCount(0, direct);
-    }
-
-    [TestMethod]
-    public void RunsFromTo_BoardingPointOffTheLine_ReturnsFalse()
-    {
-        // Arrange: about 800 m east of the line.
-        GeoPoint offRoute = new(43.010, Lon + 0.01);
-
-        // Act
-        bool runs = CommutePlanner.RunsFromTo(Line("10", "NB", northbound: true), [offRoute], [new GeoPoint(43.080, Lon)]);
-
-        // Assert
-        Assert.IsFalse(runs);
-    }
-
-    [TestMethod]
-    public void ArrivalAtDestination_SeveralStops_PicksEarliestIncludingTheWalk()
-    {
-        // Arrange: getting off at "near" is 2 minutes sooner on the bus but a 10 minute walk; "far" is a 1 minute walk.
-        TripStop[] downstream = [new("near", Morning.AddMinutes(20)), new("far", Morning.AddMinutes(22))];
-        Dictionary<string, double> walks = new() { ["near"] = 600, ["far"] = 60 };
-
-        // Act
-        DateTimeOffset? eta = CommutePlanner.ArrivalAtDestination(downstream, walks);
-
-        // Assert
-        Assert.AreEqual(Morning.AddMinutes(23), eta);
-    }
-
-    [TestMethod]
-    public void ArrivalAtDestination_StopWithoutKnownWalk_IsIgnored()
-    {
-        // Arrange
-        TripStop[] downstream = [new("unknown", Morning.AddMinutes(10)), new("known", Morning.AddMinutes(30))];
-        Dictionary<string, double> walks = new() { ["known"] = 120 };
-
-        // Act
-        DateTimeOffset? eta = CommutePlanner.ArrivalAtDestination(downstream, walks);
-
-        // Assert
-        Assert.AreEqual(Morning.AddMinutes(32), eta);
-    }
-
-    [TestMethod]
-    public void ArrivalAtDestination_BusNeverReachesANearStop_ReturnsNull()
-    {
-        // Act
-        DateTimeOffset? eta = CommutePlanner.ArrivalAtDestination([], new Dictionary<string, double> { ["near"] = 60 });
-
-        // Assert
-        Assert.IsNull(eta);
+        Assert.IsTrue(equal);
     }
 
     private static FavoritePlace Fixed(PlaceKind kind, double lat) => FavoritePlace.ForKind(kind, new Place(kind.ToString(), lat, Lon));
-
-    private static IndexedStop Stop(string id, double lat, params (string Route, string Direction)[] routes) =>
-        new(id, id, lat, Lon, routes.Select(r => new StopRouteInfo(r.Route, r.Route, null, r.Direction, r.Direction)).ToList());
-
-    /// <summary>A straight north-south shape through 43.000–43.100, a point every ~110 m.</summary>
-    private static RoutePattern Line(string routeId, string directionId, bool northbound)
-    {
-        IEnumerable<int> steps = northbound ? Enumerable.Range(0, 101) : Enumerable.Range(0, 101).Reverse();
-        return new RoutePattern($"{routeId}-{directionId}", routeId, directionId, steps.Select(i => new GeoPoint(43.000 + (i * 0.001), Lon)).ToList());
-    }
 }

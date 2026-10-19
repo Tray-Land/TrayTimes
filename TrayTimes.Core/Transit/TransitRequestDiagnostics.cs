@@ -2,15 +2,15 @@ using System.Globalization;
 
 namespace TrayTimes.Transit;
 
-public enum TransitEndpoint { Routes, Directions, Stops, Predictions, Vehicles, Patterns }
+public enum TransitEndpoint { Departures, NearbyRoutes, Plan, SearchStops, Networks, Routes, RouteDetails, Vehicles }
 
-public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings, StopDirectory }
+public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings }
 
 public enum TransitTrigger
 {
     Unspecified, Timer, FlyoutOpened, ModeChanged, ManualRefresh, StopsChanged, PlacesChanged,
-    DestinationChanged, TimetableLoaded, RefinedLocation, Retry, FavoritesLoading, FavoritesResult,
-    PlaceResult, PlaceCompleted, Metadata, PickerSelection, DirectoryBuild,
+    DestinationChanged, RefinedLocation, Retry, FavoritesLoading, FavoritesResult,
+    PlaceResult, PlaceCompleted, Metadata, PickerSelection, VehicleSelected,
 }
 
 public enum TransitRequestPhase { Started, Completed, CacheReuse, InFlightReuse, Suppressed }
@@ -36,7 +36,7 @@ public sealed record TransitRequestObservation(
 }
 
 /// <summary>
-/// Bounded, in-memory BusTime diagnostics. Scope labels flow across awaits without changing request
+/// Bounded, in-memory transit request diagnostics. Scope labels flow across awaits without changing request
 /// lifetime or scheduling. Physical attempts remain counted exclusively by EndpointCalled.
 /// </summary>
 public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
@@ -69,6 +69,16 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
 
     /// <summary>The consumer and trigger labelling requests made from the current async flow.</summary>
     public static (TransitConsumer Consumer, TransitTrigger Trigger) CurrentScope => Context.Value;
+
+    /// <summary>Tracking is urgent; anything the rider just did is manual; timers and the rest are automatic.</summary>
+    public static TransitPriority CurrentPriority => Context.Value switch
+    {
+        (TransitConsumer.Tracking, _) => TransitPriority.Urgent,
+        (_, TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
+            or TransitTrigger.ModeChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
+            or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection or TransitTrigger.VehicleSelected) => TransitPriority.Manual,
+        _ => TransitPriority.Automatic,
+    };
 
     /// <summary>Observe a request that was held back by a failure cooldown; this never raises EndpointCalled.</summary>
     public void RecordSuppressed(TransitEndpoint endpoint, int batchSize = 0)

@@ -71,5 +71,5 @@ public sealed class ArrivalsSnapshotTests
     }
 
     private static Arrival CreateArrival(string stopId, string routeId, string directionId) =>
-        new(stopId, routeId, routeId, directionId, "Downtown", null, DateTimeOffset.Now, false, false, false, ArrivalStatus.Scheduled);
+        new(stopId, routeId, routeId, directionId, "Downtown", DateTimeOffset.Now);
 }

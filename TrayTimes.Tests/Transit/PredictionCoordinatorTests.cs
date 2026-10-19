@@ -1,19 +1,21 @@
 using System.Globalization;
 using System.Net;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 
 namespace TrayTimes.Tests.Transit;
 
 [TestClass]
 public sealed class PredictionCoordinatorTests
 {
+    private static readonly TimeSpan Window = TimeSpan.FromMilliseconds(750);
+
     [TestMethod]
     [DataRow(0, 0)]
     [DataRow(1, 1)]
-    [DataRow(10, 1)]
-    [DataRow(11, 2)]
-    [DataRow(25, 3)]
+    [DataRow(100, 1)]
+    [DataRow(101, 2)]
+    [DataRow(250, 3)]
     public async Task GetAsync_StopCountBoundary_FetchesEveryStopInSafeBatches(int count, int expected)
     {
         // Arrange
@@ -21,14 +23,14 @@ public sealed class PredictionCoordinatorTests
         string[] ids = Ids(count);
 
         // Act
-        PredictionSnapshot result = await scenario.Coordinator.GetAsync(ids, PredictionCoordinator.BrowsingInterval);
+        PredictionSnapshot result = await scenario.Coordinator.GetAsync(ids, TimeSpan.FromSeconds(30));
 
         // Assert
         Assert.AreEqual(expected, scenario.Handler.Attempts);
         Assert.AreEqual(expected, scenario.Tally.Summarize(DateOnly.FromDateTime(scenario.Clock.GetUtcNow().Date)).Total.Today);
         CollectionAssert.AreEquivalent(ids, scenario.Batches.SelectMany(b => b).ToArray());
         CollectionAssert.AreEquivalent(ids, result.Arrivals.Select(a => a.StopId).ToArray());
-        Assert.IsTrue(scenario.Batches.All(b => b.Length <= 10));
+        Assert.IsTrue(scenario.Batches.All(b => b.Length <= TransitAppService.MaxStopIdsPerRequest));
         Assert.AreEqual(scenario.Clock.GetUtcNow(), result.FetchedAt);
     }
 
@@ -43,7 +45,7 @@ public sealed class PredictionCoordinatorTests
         // Act
         Task<PredictionSnapshot> first = scenario.Coordinator.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
         Task<PredictionSnapshot> second = scenario.Coordinator.GetAsync(["2", "1", "2"], TimeSpan.FromSeconds(30), force: true);
-        pending.SetResult(RequestTestHandler.Response(Body(["1", "2", "999"])));
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1", "2", "999"])));
         PredictionSnapshot[] results = await Task.WhenAll(first, second);
 
         // Assert
@@ -54,9 +56,9 @@ public sealed class PredictionCoordinatorTests
 
     [TestMethod]
     [DataRow(8, 1)]
-    [DataRow(10, 1)]
-    [DataRow(11, 2)]
-    [DataRow(25, 3)]
+    [DataRow(100, 1)]
+    [DataRow(101, 2)]
+    [DataRow(250, 3)]
     public async Task GetAsync_DisjointKnownBrowsingStops_SharesUnionAndScopesConsumers(int count, int expected)
     {
         // Arrange
@@ -65,20 +67,20 @@ public sealed class PredictionCoordinatorTests
         string[] place = Ids(count).Except(favorites).ToArray();
         scenario.Coordinator.SetBrowsingStops(TransitConsumer.Favorites, favorites);
         scenario.Coordinator.SetBrowsingStops(TransitConsumer.Nearby, place);
-        List<TaskCompletionSource<HttpResponseMessage>> responses = [];
-        scenario.Handler.RespondAsync = (_, token) =>
+        List<(HttpRequestMessage Request, TaskCompletionSource<HttpResponseMessage> Response)> responses = [];
+        scenario.Handler.RespondAsync = (request, token) =>
         {
             TaskCompletionSource<HttpResponseMessage> response = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            responses.Add(response);
+            responses.Add((request, response));
             return response.Task.WaitAsync(token);
         };
 
         // Act
         Task<PredictionSnapshot> first = scenario.Coordinator.GetAsync(favorites, TimeSpan.FromSeconds(30), combineBrowsing: true);
         Task<PredictionSnapshot> second = scenario.Coordinator.GetAsync(place, TimeSpan.FromSeconds(30), combineBrowsing: true);
-        for (int i = 0; i < responses.Count; ++i)
+        foreach ((HttpRequestMessage request, TaskCompletionSource<HttpResponseMessage> response) in responses)
         {
-            responses[i].SetResult(RequestTestHandler.Response(Body(scenario.Batches[i])));
+            response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(RequestTestHandler.StopIds(request))));
         }
 
         PredictionSnapshot[] results = await Task.WhenAll(first, second);
@@ -106,8 +108,8 @@ public sealed class PredictionCoordinatorTests
         // Act
         Task<PredictionSnapshot> first = scenario.Coordinator.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
         Task<PredictionSnapshot> second = scenario.Coordinator.GetAsync(["2", "3"], TimeSpan.FromSeconds(30));
-        responses[1].SetResult(RequestTestHandler.Response(Body(["3"])));
-        responses[0].SetResult(RequestTestHandler.Response(Body(["1", "2", "999"])));
+        responses[1].SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["3"])));
+        responses[0].SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1", "2", "999"])));
         PredictionSnapshot[] result = await Task.WhenAll(first, second);
 
         // Assert
@@ -158,17 +160,35 @@ public sealed class PredictionCoordinatorTests
 
         // Act
         await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(10));
-        Assert.AreEqual(2, scenario.Handler.Attempts);
+        Assert.AreEqual(1, scenario.Handler.Attempts);
         scenario.Clock.Advance(TimeSpan.FromMilliseconds(1));
         await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(10));
-        Assert.AreEqual(3, scenario.Handler.Attempts);
+        Assert.AreEqual(2, scenario.Handler.Attempts);
         scenario.Clock.Advance(TimeSpan.FromSeconds(20));
         await scenario.Coordinator.GetAsync(browsing, TimeSpan.FromSeconds(30), combineBrowsing: true);
 
         // Assert
-        Assert.AreEqual(4, scenario.Handler.Attempts);
-        CollectionAssert.AreEqual(new[] { "1" }, scenario.Batches[2]);
-        CollectionAssert.AreEquivalent(browsing.Skip(1).ToArray(), scenario.Batches[3]);
+        Assert.AreEqual(3, scenario.Handler.Attempts);
+        CollectionAssert.AreEqual(new[] { "1" }, scenario.Batches[1]);
+        CollectionAssert.AreEquivalent(browsing.Skip(1).ToArray(), scenario.Batches[2]);
+    }
+
+    [TestMethod]
+    [DataRow(29, false)]
+    [DataRow(31, true)]
+    public async Task GetAsync_BrowsingStopOlderThanHalfTheInterval_RidesAlongSoTabsShareOneCall(int secondsLater, bool ridesAlong)
+    {
+        // Arrange: Favorites fetched; then Nearby's own timer, out of phase, asks for its stops.
+        Scenario scenario = new();
+        scenario.Coordinator.SetBrowsingStops(TransitConsumer.Favorites, ["fav"]);
+        await scenario.Coordinator.GetAsync(["fav"], PredictionCoordinator.DefaultBrowsingInterval, combineBrowsing: true);
+        scenario.Clock.Advance(TimeSpan.FromSeconds(secondsLater));
+
+        // Act
+        await scenario.Coordinator.GetAsync(["near"], PredictionCoordinator.DefaultBrowsingInterval, combineBrowsing: true);
+
+        // Assert
+        Assert.AreEqual(ridesAlong, scenario.Batches[1].Contains("fav"));
     }
 
     [TestMethod]
@@ -177,16 +197,16 @@ public sealed class PredictionCoordinatorTests
         // Arrange
         Scenario scenario = new();
         TaskCompletionSource<HttpResponseMessage> pending = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        scenario.Handler.RespondAsync = (_, token) => scenario.Handler.Attempts == 1
+        scenario.Handler.RespondAsync = (request, token) => scenario.Handler.Attempts == 1
             ? pending.Task.WaitAsync(token)
-            : Task.FromResult(RequestTestHandler.Response(Body(["1"])));
+            : Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(RequestTestHandler.StopIds(request))));
         Task<PredictionSnapshot> browsing = scenario.Coordinator.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
         scenario.Clock.Advance(TimeSpan.FromSeconds(9));
         Task<PredictionSnapshot> tracking = scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(10));
 
         // Act
         scenario.Clock.Advance(TimeSpan.FromSeconds(2));
-        pending.SetResult(RequestTestHandler.Response(Body(["1", "2"])));
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1", "2"])));
         await browsing;
         PredictionSnapshot result = await tracking;
 
@@ -209,7 +229,7 @@ public sealed class PredictionCoordinatorTests
         Task<PredictionSnapshot> manual = scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30), force: true);
         Task<PredictionSnapshot> timer = scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30));
         Task<PredictionSnapshot> manualAgain = scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30), force: true);
-        pending.SetResult(RequestTestHandler.Response(Body(["1"])));
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1"])));
         await Task.WhenAll(manual, timer, manualAgain);
 
         // Assert
@@ -238,7 +258,7 @@ public sealed class PredictionCoordinatorTests
         {
             pending.SetResult(outcome == TransitRequestOutcome.HttpFailure
                 ? RequestTestHandler.Response("error", HttpStatusCode.TooManyRequests)
-                : RequestTestHandler.Response("""{"bustime-response":{"error":[{"msg":"Invalid parameter"}]}}"""));
+                : RequestTestHandler.Response("""{"error":"Invalid stop"}""", HttpStatusCode.BadRequest));
         }
 
         await Assert.ThrowsAsync<Exception>(() => first);
@@ -251,6 +271,23 @@ public sealed class PredictionCoordinatorTests
         Assert.IsEmpty(retry.Arrivals);
         CollectionAssert.AreEqual(new[] { outcome, TransitRequestOutcome.Success },
             scenario.Service.Diagnostics.Snapshot.Where(o => o.Phase == TransitRequestPhase.Completed).Select(o => o.Outcome).ToArray());
+    }
+
+    [TestMethod]
+    public async Task GetAsync_StopWithNoDeparturesInBatch_IsReusedAsSuccessfulEmpty()
+    {
+        // Arrange: the response lists stop 2 only; stop 1 has nothing coming.
+        Scenario scenario = new();
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["2"])));
+
+        // Act
+        PredictionSnapshot result = await scenario.Coordinator.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
+        PredictionSnapshot empty = await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(10));
+
+        // Assert
+        Assert.HasCount(1, result.Arrivals);
+        Assert.IsEmpty(empty.Arrivals);
+        Assert.AreEqual(1, scenario.Handler.Attempts);
     }
 
     [TestMethod]
@@ -273,7 +310,7 @@ public sealed class PredictionCoordinatorTests
         cancellation.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(() => browsing);
         Assert.IsFalse(physicalToken.IsCancellationRequested);
-        pending.SetResult(RequestTestHandler.Response(Body(["1", "2"])));
+        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1", "2"])));
         PredictionSnapshot result = await tracking;
 
         // Assert
@@ -308,45 +345,12 @@ public sealed class PredictionCoordinatorTests
         secondCancellation.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(() => second);
         await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(Body(["1"])));
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1"])));
         PredictionSnapshot replacement = await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30));
 
         // Assert
         Assert.AreEqual(2, scenario.Handler.Attempts);
         Assert.HasCount(1, replacement.Arrivals);
-    }
-
-    [TestMethod]
-    [DataRow(true)]
-    [DataRow(false)]
-    public async Task GetAsync_PartialPredictionError_DistinguishesBenignEmptyFromFailedStop(bool benign)
-    {
-        // Arrange
-        Scenario scenario = new();
-        string message = benign ? "No arrival times" : "Invalid parameter";
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
-            $$$"""{"bustime-response":{"prd":[{"stpid":"2","rt":"14","prdtm":"20261006 20:24"}],"error":[{"stpid":"1","msg":"{{{message}}}"}]}}"""));
-
-        // Act
-        if (benign)
-        {
-            PredictionSnapshot result = await scenario.Coordinator.GetAsync(["1", "2"], TimeSpan.FromSeconds(30));
-            Assert.HasCount(1, result.Arrivals);
-            PredictionSnapshot empty = await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(10));
-            Assert.IsEmpty(empty.Arrivals);
-        }
-        else
-        {
-            await Assert.ThrowsExactlyAsync<TransitApiException>(() => scenario.Coordinator.GetAsync(["1", "2"], TimeSpan.FromSeconds(30)));
-            scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(Body(["1"])));
-            PredictionSnapshot retry = await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(10));
-            Assert.HasCount(1, retry.Arrivals);
-        }
-
-        // Assert
-        Assert.AreEqual(benign ? 1 : 2, scenario.Handler.Attempts);
-        Assert.AreEqual(benign ? TransitRequestOutcome.Success : TransitRequestOutcome.ApiFailure,
-            scenario.Service.Diagnostics.Snapshot.First(o => o.Phase == TransitRequestPhase.Completed).Outcome);
     }
 
     [TestMethod]
@@ -369,7 +373,7 @@ public sealed class PredictionCoordinatorTests
         cancellation.Cancel();
         await Assert.ThrowsAsync<OperationCanceledException>(() => stale);
         scenario.Clock.Advance(TimeSpan.FromSeconds(1));
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(Body(["1"])));
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["1"])));
 
         // Act
         PredictionSnapshot fresh = await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30));
@@ -404,6 +408,63 @@ public sealed class PredictionCoordinatorTests
     }
 
     [TestMethod]
+    public async Task GetAsync_SecondConsumerWithinCoalesceWindow_JoinsTheUnsentBatch()
+    {
+        // Arrange
+        Scenario scenario = new(Window);
+
+        // Act
+        Task<PredictionSnapshot> favorites = scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(60));
+        scenario.Clock.Advance(TimeSpan.FromMilliseconds(300));
+        Task<PredictionSnapshot> nearby = scenario.Coordinator.GetAsync(["2", "3"], TimeSpan.FromSeconds(60));
+        Assert.AreEqual(0, scenario.Handler.Attempts);
+        scenario.Clock.Advance(Window);
+        PredictionSnapshot[] results = await Task.WhenAll(favorites, nearby);
+
+        // Assert
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+        CollectionAssert.AreEquivalent(new[] { "1", "2", "3" }, scenario.Batches[0]);
+        CollectionAssert.AreEquivalent(new[] { "1" }, results[0].Arrivals.Select(a => a.StopId).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "2", "3" }, results[1].Arrivals.Select(a => a.StopId).ToArray());
+    }
+
+    [TestMethod]
+    public async Task GetAsync_StopsRegisteredWhileBatchWaits_RideAlongAndAreReused()
+    {
+        // Arrange
+        Scenario scenario = new(Window);
+        Task<PredictionSnapshot> favorites = scenario.Coordinator.GetAsync(["fav"], TimeSpan.FromSeconds(60), combineBrowsing: true);
+
+        // Act: another tab's discovery finishes while the batch waits.
+        scenario.Coordinator.SetBrowsingStops(TransitConsumer.Nearby, ["near"]);
+        scenario.Clock.Advance(Window);
+        await favorites;
+        PredictionSnapshot nearby = await scenario.Coordinator.GetAsync(["near"], TimeSpan.FromSeconds(60), combineBrowsing: true);
+
+        // Assert
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+        CollectionAssert.AreEquivalent(new[] { "fav", "near" }, scenario.Batches[0]);
+        Assert.HasCount(1, nearby.Arrivals);
+    }
+
+    [TestMethod]
+    public async Task GetAsync_EveryWaiterLeavesBeforeWindowEnds_SendsNothing()
+    {
+        // Arrange
+        Scenario scenario = new(Window);
+        using CancellationTokenSource cancellation = new();
+        Task<PredictionSnapshot> abandoned = scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(60), cancellationToken: cancellation.Token);
+
+        // Act
+        cancellation.Cancel();
+        await Assert.ThrowsAsync<OperationCanceledException>(() => abandoned);
+        scenario.Clock.Advance(Window);
+
+        // Assert
+        Assert.AreEqual(0, scenario.Handler.Attempts);
+    }
+
+    [TestMethod]
     public async Task GetAsync_ManySuccessfulStops_KeepsOnlyBoundedSnapshots()
     {
         // Arrange
@@ -412,7 +473,7 @@ public sealed class PredictionCoordinatorTests
         int before = scenario.Handler.Attempts;
 
         // Act
-        await scenario.Coordinator.GetAsync(["129"], TimeSpan.FromSeconds(30));
+        await scenario.Coordinator.GetAsync([(PredictionCoordinator.RetainedStops + 1).ToString(CultureInfo.InvariantCulture)], TimeSpan.FromSeconds(30));
         Assert.AreEqual(before, scenario.Handler.Attempts);
         await scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30));
 
@@ -428,8 +489,9 @@ public sealed class PredictionCoordinatorTests
 
         // Act & Assert
         Assert.ThrowsExactly<ArgumentNullException>(() => new PredictionCoordinator(null!));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => new PredictionCoordinator(scenario.Service, coalesceWindow: TimeSpan.FromSeconds(-1)));
         Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => scenario.Coordinator.SetBrowsingStops(TransitConsumer.Tracking, ["1"]));
-        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => scenario.Coordinator.SetBrowsingStops(TransitConsumer.Favorites, Ids(129)));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => scenario.Coordinator.SetBrowsingStops(TransitConsumer.Favorites, Ids(PredictionCoordinator.RetainedStops + 1)));
         await Assert.ThrowsExactlyAsync<ArgumentException>(() => scenario.Coordinator.GetAsync([" "], TimeSpan.FromSeconds(30)));
         await Assert.ThrowsExactlyAsync<ArgumentOutOfRangeException>(() => scenario.Coordinator.GetAsync(["1"], TimeSpan.Zero));
         await Assert.ThrowsAsync<OperationCanceledException>(() => scenario.Coordinator.GetAsync(["1"], TimeSpan.FromSeconds(30), cancellationToken: new CancellationToken(true)));
@@ -438,19 +500,14 @@ public sealed class PredictionCoordinatorTests
 
     private static string[] Ids(int count) => Enumerable.Range(1, count).Select(i => i.ToString(CultureInfo.InvariantCulture)).ToArray();
 
-    private static string Body(IEnumerable<string> ids) =>
-        """{"bustime-response":{"prd":[""" +
-        string.Join(',', ids.Select(id => $$"""{"stpid":"{{id}}","rt":"14","rtdir":"N","vid":"5501","prdtm":"20261006 20:24","dyn":0}""")) +
-        "]}}";
-
     private sealed class Scenario
     {
-        public Scenario()
+        public Scenario(TimeSpan coalesceWindow = default)
         {
             Service = Handler.CreateService(new TransitRequestDiagnostics(Clock));
             Service.EndpointCalled += (_, endpoint) => Tally.Record(endpoint, DateOnly.FromDateTime(Clock.GetUtcNow().Date));
-            Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(Body(Batches.Last())));
-            Coordinator = new PredictionCoordinator(Service, Clock);
+            Handler.RespondAsync = (request, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(RequestTestHandler.StopIds(request))));
+            Coordinator = new PredictionCoordinator(Service, Clock, coalesceWindow: coalesceWindow);
             // Capture only fixture stop IDs, never retain/log the request URL or key.
             Handler.CaptureIds = ids => Batches.Add(ids);
         }
@@ -459,7 +516,7 @@ public sealed class PredictionCoordinatorTests
         public RequestTestHandler Handler { get; } = new();
         public List<string[]> Batches { get; } = [];
         public ApiCallLog Tally { get; } = new();
-        public BusTimeTransitService Service { get; }
+        public TransitAppService Service { get; }
         public PredictionCoordinator Coordinator { get; }
     }
 }

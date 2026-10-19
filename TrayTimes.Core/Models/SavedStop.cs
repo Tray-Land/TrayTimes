@@ -22,7 +22,9 @@ public sealed record SavedStop(
     public string Key => $"{StopId}|{RouteId}|{DirectionId}";
 
     [JsonIgnore]
-    public string Description => AllRoutes ? $"All routes (added from route {RouteDisplayId})" : $"Route {RouteDisplayId} · {DirectionName}";
+    public string Description => !AllRoutes ? $"Route {RouteDisplayId} · {DirectionName}"
+        : RouteDisplayId.Length > 0 ? $"All routes (added from route {RouteDisplayId})"
+        : "All routes";
 
     /// <summary>Number of distinct stop IDs, which the arrivals request is limited by.</summary>
     public static int DistinctStopCount(IEnumerable<SavedStop> stops) => stops.Select(s => s.StopId).Distinct().Count();
