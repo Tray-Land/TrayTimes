@@ -1,5 +1,7 @@
 # Transit API optimization plan
 
+> **Superseded (2026-10-15).** This plan optimized the MCTS BusTime build. That provider, its GTFS timetable, and the stop-directory crawl were replaced by the Transit API; see [transit-app-migration.md](transit-app-migration.md). The request-sharing, cooldown, and cancellation designs below were carried over. The BusTime-specific steps and measurements are kept as history.
+
 ## Purpose and operating rules
 
 Reduce transit API requests and time-to-useful-arrivals without losing arrival freshness, tracking alerts, bus locations, or the Favorites tray tooltip. Implement one step per session/request. This file is the persistent source of truth; a fresh session must not depend on the previous conversation or session-local todos.
