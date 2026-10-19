@@ -121,14 +121,14 @@ public static class PlaceBoard
     /// Where every ride of the plan's first <see cref="TripOptions"/> transit trips boards, transfers and
     /// alternative lines included, so watching these stops keeps those whole trips live.
     /// </summary>
-    public static IReadOnlyList<string> BoardingStopIds(TripPlan plan)
+    public static IReadOnlyList<string> BoardingStopIds(TripPlan plan, Func<TripItinerary, bool>? include = null)
     {
         ArgumentNullException.ThrowIfNull(plan);
         return [.. plan.Itineraries
-            .Select(i => i.Legs.OfType<RideLeg>().ToArray())
-            .Where(rides => rides.Length > 0)
+            .Where(i => i.Legs.OfType<RideLeg>().Any())
             .Take(TripOptions)
-            .SelectMany(rides => rides)
+            .Where(i => include?.Invoke(i) ?? true)
+            .SelectMany(i => i.Legs.OfType<RideLeg>())
             .SelectMany(r => r.Lines)
             .Select(l => l.BoardAt.Id)
             .Distinct(StringComparer.Ordinal)];

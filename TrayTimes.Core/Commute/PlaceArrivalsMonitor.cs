@@ -6,16 +6,18 @@ namespace TrayTimes.Commute;
 public sealed record PlaceNotice(string Title, string Text, string? Button = null, Action? Action = null);
 
 /// <summary>What the trip suggestion plans for: the saved places, and the destination the rider picked (null to guess).</summary>
-public sealed record SuggestionContext(IReadOnlyList<FavoritePlace> Places, string? DestinationId)
+public sealed record SuggestionContext(IReadOnlyList<FavoritePlace> Places, string? DestinationId, FavoritePlace? TemporaryDestination = null)
 {
     /// <summary>The trip to suggest from <paramref name="here"/> (null when unknown); see <see cref="CommutePlanner.Plan"/>.</summary>
     public CommuteLeg? Leg(GeoPoint? here, DateTimeOffset now) =>
-        CommutePlanner.Plan(Places, here, now, Places.FirstOrDefault(p => p.Id == DestinationId));
+        CommutePlanner.Plan(Places, here, now, TemporaryDestination ?? Places.FirstOrDefault(p => p.Id == DestinationId));
+
+    public TripDestination Target(FavoritePlace place) => new(place.Location, place.StopId, Persist: TemporaryDestination is null);
 
     public bool Equals(SuggestionContext? other) =>
-        other is not null && DestinationId == other.DestinationId && Places.SequenceEqual(other.Places);
+        other is not null && DestinationId == other.DestinationId && TemporaryDestination == other.TemporaryDestination && Places.SequenceEqual(other.Places);
 
-    public override int GetHashCode() => HashCode.Combine(DestinationId, Places.Count);
+    public override int GetHashCode() => HashCode.Combine(DestinationId, TemporaryDestination, Places.Count);
 }
 
 public sealed record PlaceLocation(GeoPoint? Point, Task<GeoPoint?>? Refined = null, string? Error = null);
@@ -37,13 +39,14 @@ public sealed record PlaceStops(
     TripPlan? Plan = null,
     IReadOnlySet<string>? EveryLineAt = null,
     BoardCenter? Center = null,
-    int Revision = 0)
+    int Revision = 0,
+    IReadOnlyList<string>? WatchedStops = null)
 {
     /// <summary>
     /// The stops whose departures to keep fresh: the listed stops, plus where every ride of the plan's
     /// trip options boards, so a whole trip stays live from the shared batch.
     /// </summary>
-    public IReadOnlyList<string> StopIds => [.. Stops
+    public IReadOnlyList<string> StopIds => WatchedStops ?? [.. Stops
         .Select(n => n.Stop.Id)
         .Concat(Plan is null ? [] : PlaceBoard.BoardingStopIds(Plan))
         .Distinct(StringComparer.Ordinal)];
@@ -116,7 +119,7 @@ public sealed class PlaceArrivalsMonitor<TContext>(
 {
     private const double MovedMeters = 25;
 
-    private readonly TransitConsumer _consumer = consumer is TransitConsumer.Commute or TransitConsumer.Nearby
+    private readonly TransitConsumer _consumer = consumer is TransitConsumer.Commute or TransitConsumer.Nearby or TransitConsumer.Trip
         ? consumer
         : throw new ArgumentOutOfRangeException(nameof(consumer));
 

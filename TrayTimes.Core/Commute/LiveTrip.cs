@@ -17,8 +17,30 @@ public sealed record LiveRide(RideLeg Ride, RideLine Line, DateTimeOffset Starts
 /// to change), which stays good for hours; the shared departures batch supplies the times.
 /// </summary>
 /// <param name="LeaveBy">When to leave the origin: the first ride's departure less the walk to it.</param>
-public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Legs, DateTimeOffset LeaveBy, DateTimeOffset Arrives)
+public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Legs, DateTimeOffset LeaveBy, DateTimeOffset Arrives, bool IsLive = true)
 {
+    /// <summary>Preserves a future plan's leg times instead of moving its walks or boarding a bus running now.</summary>
+    public static LiveTrip Scheduled(TripItinerary itinerary)
+    {
+        ArgumentNullException.ThrowIfNull(itinerary);
+        List<LiveLeg> legs = [];
+        foreach (TripLeg leg in itinerary.Legs)
+        {
+            if (leg is WalkLeg walk)
+            {
+                legs.Add(new LiveWalk(walk, walk.Starts, walk.Ends));
+            }
+            else if (leg is RideLeg ride)
+            {
+                RideLine line = ride.Lines.FirstOrDefault(l => l.Departures.Any(d => d.Departs == ride.Starts && d.Alights == ride.Ends))
+                    ?? ride.Lines[0];
+                legs.Add(new LiveRide(ride, line, ride.Starts, ride.Ends, null));
+            }
+        }
+
+        return new LiveTrip(itinerary, legs, itinerary.Departs, itinerary.Arrives, IsLive: false);
+    }
+
     /// <summary>
     /// Times <paramref name="itinerary"/> from <paramref name="now"/>, leg by leg. Each ride takes the
     /// departure, of any of its lines, that gets off soonest once the rider can be at that line's stop:
@@ -90,6 +112,35 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
             .ThenByDescending(t => t.LeaveBy)
             .FirstOrDefault();
         return ride ?? (plan.Itineraries.FirstOrDefault(i => !i.Legs.OfType<RideLeg>().Any()) is { } walk ? Compute(walk, batch, now) : null);
+    }
+
+    /// <summary>
+    /// The first ride's chosen departure and later departures of that line for tracking chips.
+    /// Planned fallbacks retain their trip IDs but are scheduled-only; canceled or superseded trips
+    /// known to the batch are never restored from the plan.
+    /// </summary>
+    public IReadOnlyList<Arrival> FirstRideDepartures(IEnumerable<Arrival> arrivals, int maxDepartures)
+    {
+        ArgumentNullException.ThrowIfNull(arrivals);
+        ArgumentOutOfRangeException.ThrowIfNegative(maxDepartures);
+        if (!IsLive || Legs.OfType<LiveRide>().FirstOrDefault() is not { } ride)
+        {
+            return [];
+        }
+
+        RideLine line = ride.Line;
+        Arrival[] known = [.. arrivals.Where(a => StopLine.Of(a) == new StopLine(line.BoardAt.Id, line.Route.Id, line.Direction.Id))];
+        Arrival Scheduled(PlannedDeparture d) => new(line.BoardAt.Id, line.Route.Id, line.Route.DisplayId, line.Direction.Id,
+            line.Direction.Name, d.Departs, IsRealTime: false, TripId: d.TripId, ScheduledTime: d.Departs, RouteColor: line.Route.Color, Mode: line.Route.Mode);
+        Arrival first = ride.Departure ?? Scheduled(new PlannedDeparture(ride.Starts, ride.Ends, false,
+            line.Departures.FirstOrDefault(d => d.Departs == ride.Starts)?.TripId));
+        IEnumerable<Arrival> planned = line.Departures.Where(d => !known.Any(a =>
+            d.TripId is not null && a.TripId is not null ? d.TripId == a.TripId : d.Departs == (a.ScheduledTime ?? a.PredictedTime))).Select(Scheduled);
+        return [.. known.Concat(planned).Prepend(first)
+            .Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ride.Starts)
+            .DistinctBy(a => a.TripId ?? $"t{a.PredictedTime.ToUnixTimeSeconds()}")
+            .OrderBy(a => a.PredictedTime)
+            .Take(maxDepartures)];
     }
 
     /// <summary>The departure of any of the ride's lines, at or after <paramref name="ready"/>, that gets off soonest.</summary>

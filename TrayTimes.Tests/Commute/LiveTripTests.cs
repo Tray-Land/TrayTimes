@@ -280,6 +280,67 @@ public sealed class LiveTripTests
         Assert.IsNull(best);
     }
 
+    [TestMethod]
+    public void FirstRideDepartures_LiveAndPlannedTrips_KeepsLiveTimesAndScheduledFallbackIds()
+    {
+        // Arrange
+        TripItinerary itinerary = OneRide(Planned(5, 20, "14-1"), Planned(20, 35, "14-2"), Planned(35, 50, "14-3"));
+        Arrival live = Live("a", Fourteen, 7, "14-1");
+        Arrival canceled = Live("a", Fourteen, 20, "14-2", ArrivalStatus.Canceled);
+        LiveTrip trip = LiveTrip.Compute(itinerary, [live, canceled], Now)!;
+
+        // Act
+        IReadOnlyList<Arrival> departures = trip.FirstRideDepartures([live, canceled], 6);
+
+        // Assert
+        Assert.HasCount(2, departures);
+        Assert.AreSame(live, departures[0]);
+        Assert.AreEqual("14-3", departures[1].TripId);
+        Assert.IsFalse(departures[1].IsRealTime);
+        Assert.AreEqual(At(35), departures[1].ScheduledTime);
+    }
+
+    [TestMethod]
+    public void FirstRideDepartures_LiveTripMovedEarlier_DoesNotRestoreItsOldPlannedTime()
+    {
+        // Arrange
+        TripItinerary itinerary = OneRide(Planned(10, 25, "14-1"), Planned(20, 35, "14-2"));
+        Arrival[] batch = [Live("a", Fourteen, 2, "14-1")];
+        LiveTrip trip = LiveTrip.Compute(itinerary, batch, Now)!;
+
+        // Act
+        IReadOnlyList<Arrival> departures = trip.FirstRideDepartures(batch, 6);
+
+        // Assert
+        Assert.AreEqual("14-2", departures.Single().TripId);
+        Assert.AreEqual(At(20), departures[0].PredictedTime);
+    }
+
+    [TestMethod]
+    public void FirstRideDepartures_NoBatch_UsesScheduledTimesWithThePlansTripIds()
+    {
+        // Arrange
+        LiveTrip trip = LiveTrip.Compute(OneRide(Planned(5, 20, "14-1"), Planned(20, 35, "14-2")), [], Now)!;
+
+        // Act
+        IReadOnlyList<Arrival> departures = trip.FirstRideDepartures([], 1);
+
+        // Assert
+        Assert.AreEqual("14-1", departures.Single().TripId);
+        Assert.IsFalse(departures[0].IsRealTime);
+        Assert.AreEqual("a", departures[0].StopId);
+    }
+
+    [TestMethod]
+    public void FirstRideDepartures_WalkOnly_ReturnsNoChips()
+    {
+        // Arrange
+        LiveTrip trip = LiveTrip.Compute(new TripItinerary([Walk(0, 20)], Now, At(20)), [], Now)!;
+
+        // Act / Assert
+        Assert.IsEmpty(trip.FirstRideDepartures([], 6));
+    }
+
     /// <summary>
     /// Walk 5 minutes to "a", ride the 14 (8:05 or 8:20, 15 minutes), walk 2 minutes to "b", ride the
     /// 30 (8:25 or 8:40, 10 minutes), and walk 3 minutes: as planned, 8:00 to 8:38.
