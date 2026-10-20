@@ -4,17 +4,20 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using TrayTimes.Commute;
+using TrayTimes.Services;
 using TrayTimes.Tracking;
 using TrayTimes.Transit;
 using TrayTimes.Views;
 
 namespace TrayTimes.Controls;
 
-/// <summary>A trip's live options and walking/ride legs. It presents existing data and never requests any.</summary>
+/// <summary>
+/// A trip's live options and walking/ride legs, with when to travel and Go in its header. It presents
+/// existing data and never requests any; Go is raised for the flyout to start the trip.
+/// </summary>
 public sealed partial class TripView : UserControl
 {
     private readonly ObservableCollection<TripLegItem> _legs = [];
-    private string? _legsSignature;
     private bool _updating;
     private TripTime _time;
     private TripTimeMode _editingMode;
@@ -31,20 +34,31 @@ public sealed partial class TripView : UserControl
 
     public event EventHandler<TripTime>? TimeRequested;
 
+    /// <summary>Raised when the rider presses Go to start the selected option at the chosen time.</summary>
+    public event EventHandler? GoRequested;
+
     public void FocusBack() => BackButton.Focus(FocusState.Programmatic);
 
     public void Show(CommuteLeg leg, TripSelection selection, IReadOnlyList<Arrival> arrivals, TrackedBus? tracked,
         DateTimeOffset now, DataTemplate timeTemplate, bool isReplanning, string? error, TripTime time = default)
     {
         _time = time;
-        TimeButtonText.Text = time.Mode == TripTimeMode.Now ? AppStrings.Get("TripLeaveNow/Text")
-            : AppStrings.Format(time.Mode == TripTimeMode.LeaveAt ? "TripLeaveAtFormat" : "TripArriveByFormat",
-                time.At.ToLocalTime().ToString("g", CultureInfo.CurrentCulture));
-        AutomationProperties.SetName(TimeButton, TimeButtonText.Text);
+        TimeButtonText.Text = TripMessages.TimeLabel(time, now);
+        string timeName = TripMessages.TimeName(time);
+        AutomationProperties.SetName(TimeButton, timeName);
+        ToolTipService.SetToolTip(TimeButton, timeName);
         HeadingText.Text = AppStrings.Format("TripHeadingFormat", leg.To.Name);
+        ToolTipService.SetToolTip(HeadingText, HeadingText.Text);
         LiveTrip? trip = selection.Selected;
-        ArrivalText.Text = trip is null ? string.Empty : AppStrings.Format("SuggestionArriveFormat",
-            trip.Arrives.ToLocalTime().ToString(time.Mode == TripTimeMode.Now ? "t" : "g", CultureInfo.CurrentCulture));
+        ArrivalText.Text = trip is null ? string.Empty : TripMessages.Arrival(leg, trip.Arrives, now);
+        GoButton.IsEnabled = trip is not null && !isReplanning;
+        if (trip is not null)
+        {
+            string go = TripMessages.GoName(trip, leg, now);
+            AutomationProperties.SetName(GoButton, go);
+            ToolTipService.SetToolTip(GoButton, go);
+        }
+
         DestinationFooter.Visibility = trip is null ? Visibility.Collapsed : Visibility.Visible;
         DestinationGlyph.Glyph = MapHelpers.PlaceGlyph(leg.To.Kind);
         DestinationText.Text = trip is null ? string.Empty : AppStrings.Format("TripDestinationFormat", leg.To.Name, Clock(trip.Arrives));
@@ -122,29 +136,7 @@ public sealed partial class TripView : UserControl
             }
         }
 
-        string signature = string.Join('\n', items.Select(i => i.Signature));
-        if (_legsSignature == signature)
-        {
-            return;
-        }
-
-        _legsSignature = signature;
-        for (int i = 0; i < items.Count; i++)
-        {
-            if (i >= _legs.Count)
-            {
-                _legs.Add(items[i]);
-            }
-            else if (_legs[i].Signature != items[i].Signature)
-            {
-                _legs[i] = items[i];
-            }
-        }
-
-        while (_legs.Count > items.Count)
-        {
-            _legs.RemoveAt(_legs.Count - 1);
-        }
+        TripLegItem.Sync(_legs, items);
     }
 
     private static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
@@ -165,7 +157,7 @@ public sealed partial class TripView : UserControl
         TravelClockPicker.SelectedTime = new TimeSpan(at.Hour, (at.Minute / 5) * 5, 0);
         TimeEditorHeading.Text = AppStrings.Get(mode == TripTimeMode.LeaveAt ? "TripLeaveAt/Text" : "TripArriveBy/Text");
         TimeValidationText.Visibility = Visibility.Collapsed;
-        DispatcherQueue.TryEnqueue(() => TimeEditorFlyout.ShowAt(TimeAnchor));
+        DispatcherQueue.TryEnqueue(() => TimeEditorFlyout.ShowAt(TimeButton));
     }
 
     private void TimeApply_Click(object sender, RoutedEventArgs e)
@@ -207,6 +199,8 @@ public sealed partial class TripView : UserControl
     private void TimeCancel_Click(object sender, RoutedEventArgs e) => TimeEditorFlyout.Hide();
 
     private void BackButton_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
+
+    private void GoButton_Click(object sender, RoutedEventArgs e) => GoRequested?.Invoke(this, EventArgs.Empty);
 
     private void OptionsBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {

@@ -33,9 +33,10 @@ namespace TrayTimes.Views;
 /// <summary>
 /// Borderless arrivals popup shown next to the tray icon. It shows one departures board, centered
 /// near the device (or a saved place or stop the rider jumps to), with saved stops pinned first,
-/// and a card above it suggesting the trip to wherever the rider is likely headed next. It
-/// light-dismisses when focus leaves. Hiding keeps it warm for a quick reopen; the app closes it
-/// for good (<see cref="CloseWindow"/>) a minute later.
+/// and a card above it suggesting the trip to wherever the rider is likely headed next. During a
+/// trip (<see cref="ActiveTripService"/>), every open shows the trip's progress instead, and the
+/// card is the trip. It light-dismisses when focus leaves. Hiding keeps it warm for a quick
+/// reopen; the app closes it for good (<see cref="CloseWindow"/>) a minute later.
 /// </summary>
 public sealed partial class TimesFlyoutWindow : WindowEx
 {
@@ -59,6 +60,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly HWND _hwnd;
     private readonly ArrivalsMonitor _monitor;
     private readonly BusTrackingService _tracker;
+    private readonly ActiveTripService _trips;
     private readonly TransitBudget _budget;
     private readonly VehiclePositionsMonitor _vehiclePositions;
     private readonly SharedLocation _location;
@@ -106,6 +108,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private bool _isShowing;
     private bool _allowClose;
     private bool _mapRevealStarted;
+    private bool _frameWhenMapSized;
     private bool _locationPermissionRequired;
     private bool _locationPermissionPending;
     private bool _isRequestingLocationPermission;
@@ -146,6 +149,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private TripView? _tripView;
     private CommuteLeg? _tripLeg;
     private bool IsTripOpen => _tripLeg is not null;
+    private TripProgressView? _progressView;
+    private bool IsProgressOpen => ProgressHost.Visibility == Visibility.Visible;
+    private bool _progressMapInitialized;
+    private bool IsTripShown => IsTripOpen || IsProgressOpen; // A trip, not the board, owns the map.
 
     // Motion state: which rows have already animated in, so a refresh only animates what's new or changed.
     private readonly HashSet<string> _shownRows = [];
@@ -161,11 +168,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private bool _captionShown;
     private int _captionVersion;
 
-    internal TimesFlyoutWindow(ArrivalsMonitor monitor, BusTrackingService tracker, TransitBudget budget)
+    internal TimesFlyoutWindow(ArrivalsMonitor monitor, BusTrackingService tracker, ActiveTripService trips, TransitBudget budget)
     {
         InitializeComponent();
         _monitor = monitor;
         _tracker = tracker;
+        _trips = trips;
         _budget = budget;
         _vehiclePositions = new VehiclePositionsMonitor(_monitor.Service, UpdateVehicles, log: DiagnosticLogService.Write);
         _location = new SharedLocation(LocatePlaceAsync);
@@ -222,10 +230,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             MapHelpers.ApplyBasemap(Map, Root, MapCover);
             MapHelpers.ApplyStopColor(_stopGlyph, Root);
             UpdateVehicleArrows();
-            if (IsTripOpen)
+            if (IsTripShown)
             {
                 _tripMap.Invalidate();
                 RenderTrip(DateTimeOffset.Now);
+                RenderProgress(DateTimeOffset.Now);
             }
         };
         MapHelpers.ApplyBasemap(Map, Root, MapCover);
@@ -286,15 +295,37 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         RevealMapOnFirstShow();
         Motion.Enter(Toolbar, step: 0, rise: 10);
         Motion.Enter(PlaceChip, step: 1, rise: 10);
+        StartShowing();
+    }
 
+    /// <summary>
+    /// What every open shows, however the window appeared: the board near you, guessing the next trip afresh,
+    /// and during a trip, its progress (or its Resume card) over the board. Back from it shows the board.
+    /// </summary>
+    private void StartShowing()
+    {
         _monitor.IsForeground = true; // The saved stops' times, for the jump menu and the tooltip.
         _center = new NearYou(); // Each open starts near you...
         _destinationId = null; // ...and guesses the next trip afresh.
         _temporaryDestination = null;
         CloseSearch(focusDestination: false);
         CloseTrip(focusCard: false);
-        // Open where the map was left; only frame the stops when there's no previous view.
+        if (_trips.Current is null)
+        {
+            CloseProgress(focusCard: false);
+        }
+
+        // Only while shown: the service outlives this window, which a subscription would keep alive.
+        _trips.Changed -= OnTripsChanged;
+        _trips.Changed += OnTripsChanged;
+        if (_trips.Current is not null)
+        {
+            OpenProgress();
+        }
+
+        // Load the board beneath progress without replacing the trip's camera or map layers.
         EnterBoard(reframe: SettingsService.FlyoutMapView is null, TransitTrigger.FlyoutOpened);
+        _ = RefreshVehiclesAsync(TransitTrigger.FlyoutOpened);
         _vehicleTimer.Start();
         _clockTimer.Start();
     }
@@ -307,6 +338,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _isPopupVisible = false;
+        _trips.Changed -= OnTripsChanged;
         _destinationSearch?.Cancel();
         _locationPermissionPending = false;
         _vehiclePositions.IsForeground = false;
@@ -337,6 +369,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         SuggestionCard.SearchRequested -= SuggestionCard_SearchRequested;
         SuggestionCard.SaveDestinationRequested -= SuggestionCard_SaveDestinationRequested;
         _tracker.Changed -= OnTrackingChanged;
+        _trips.Changed -= OnTripsChanged;
         _monitor.Metadata.PatternsChanged -= OnPatternsChanged;
         SettingsService.StopsChanged -= OnStopsChanged;
         SettingsService.PlacesChanged -= OnPlacesChanged;
@@ -452,10 +485,22 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (SettingsService.FlyoutMapView is { } view)
         {
-            Map.Center = MapHelpers.ToGeopoint(new GeoPoint(view.Lat, view.Lon));
-            Map.ZoomLevel = view.Zoom;
+            RestoreMapView(view);
         }
     }
+
+    private void RestoreMapView(MapView view)
+    {
+        _frameWhenMapSized = false;
+        Map.Center = MapHelpers.ToGeopoint(new GeoPoint(view.Lat, view.Lon));
+        Map.ZoomLevel = view.Zoom;
+        Map.Heading = view.Heading;
+        Map.Pitch = view.Pitch;
+    }
+
+    private MapView? CurrentMapView() => Map.Center is { } center
+        ? new MapView(center.Position.Latitude, center.Position.Longitude, Map.ZoomLevel, Map.Heading, Map.Pitch)
+        : null;
 
     /// <summary>
     /// Keeps the map's view for the next open, which starts near you: a view of somewhere else is
@@ -463,13 +508,33 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// </summary>
     private void SaveMapView()
     {
-        if (IsTripOpen || _shownPlace?.Center is not NearYou)
+        if (IsProgressOpen)
+        {
+            SaveProgressMapView();
+        }
+        else if (IsTripOpen || _shownPlace?.Center is not NearYou)
         {
             SettingsService.FlyoutMapView = null;
         }
-        else if (Map.Center is { } center)
+        else
         {
-            SettingsService.FlyoutMapView = new MapView(center.Position.Latitude, center.Position.Longitude, Map.ZoomLevel);
+            SettingsService.FlyoutMapView = CurrentMapView();
+        }
+    }
+
+    private void SaveProgressMapView()
+    {
+        if (_trips.Current is not null && _progressMapInitialized && !_frameWhenMapSized)
+        {
+            _trips.MapView = CurrentMapView();
+        }
+    }
+
+    private void Map_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_frameWhenMapSized && Map.ActualWidth > 0 && Map.ActualHeight > 0)
+        {
+            _ = FrameListedStopsAsync(MapAnimationKind.None);
         }
     }
 
@@ -488,10 +553,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _lastMinutes.Clear();
         _stripOffsets.Clear();
         _keepListScroll = false;
-        ClearVehicles();
-        _routeLayer.MapElements.Clear();
-        ResetRoutes();
-        _placeLayer.MapElements.Clear();
+        if (!IsTripShown)
+        {
+            ClearVehicles();
+            _routeLayer.MapElements.Clear();
+            ResetRoutes();
+            _placeLayer.MapElements.Clear();
+        }
 
         ConfigurePlaces();
         _shownPlace = null; // Entering cleared the map layers, not the valid discovery.
@@ -827,7 +895,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _placeNotice = null;
             _shownPlace = null;
             _shownPlaceSnapshot = null;
-            if (!IsTripOpen)
+            if (!IsTripShown)
             {
                 _stopLayer.MapElements.Clear();
                 _stopPins.Clear();
@@ -855,14 +923,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (changed)
         {
             _shownPlace = found;
-            if (!IsTripOpen)
+            if (!IsTripShown)
             {
                 RebuildStopPins();
                 ShowCenterMarker(found);
             }
         }
 
-        if (_placeReframe && changed && !IsTripOpen)
+        if (_placeReframe && changed && !IsTripShown)
         {
             _ = FrameListedStopsAsync(MapAnimationKind.None);
         }
@@ -988,7 +1056,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         HashSet<RouteDirection> wanted = [.. _placeArrivals
             .Where(a => a.Status != ArrivalStatus.Canceled && listed(StopLine.Of(a)))
             .Select(a => new RouteDirection(a.RouteId, a.DirectionId))];
-        if (_allowClose || IsTripOpen || (_drawnRoutes?.SetEquals(wanted) ?? false))
+        if (_allowClose || IsTripShown || (_drawnRoutes?.SetEquals(wanted) ?? false))
         {
             return;
         }
@@ -1058,16 +1126,20 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         // Only near you needs the device's location; a board elsewhere, or a fallback, doesn't.
-        bool needsLocation = _center is NearYou && _locationPermissionRequired;
-        if (needsLocation && _placeStops.Count == 0)
+        bool showLocationHint = _center is NearYou && _locationPermissionRequired;
+        if (showLocationHint && _placeStops.Count == 0)
         {
             busy = false;
             empty = new Notice(AppStrings.Get("LocationPermissionEmptyTitle"), AppStrings.Get("LocationPermissionEmptyText"));
         }
 
-        LocationPermissionBar.IsOpen = needsLocation;
-        LocationPermissionBar.Visibility = LocationPermissionBar.IsOpen ? Visibility.Visible : Visibility.Collapsed;
-        LocationPermissionBar.Message = _locationPermissionError ?? AppStrings.Get("LocationPermissionBar/Message");
+        LocationPermissionButton.Visibility = showLocationHint ? Visibility.Visible : Visibility.Collapsed;
+        LocationPermissionMessage.Text = _locationPermissionError ?? AppStrings.Get("LocationPermissionMessage/Text");
+        if (!showLocationHint)
+        {
+            LocationPermissionFlyout.Hide();
+        }
+
         GrantLocationPermissionButton.IsEnabled = !_isRequestingLocationPermission;
         LoadingRing.IsActive = loading;
         LiveDot.Opacity = error is null ? 1 : 0.35;
@@ -1091,6 +1163,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         RenderPlaceChip();
         RenderSuggestion(now);
         RenderTrip(now);
+        RenderProgress(now);
         ShowList(groups);
         UpdateSummary(savedIds);
 
@@ -1173,16 +1246,24 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _suggestion = SuggestionItem(now);
         SuggestionCard.Visibility = _suggestion is null ? Visibility.Collapsed : Visibility.Visible;
         SuggestionCard.DestinationId = _destinationId;
-        SuggestionCard.ShowSaveDestination(_temporaryDestination is not null, _suggestionMonitor.IsLoading || _isReplanning);
+        SuggestionCard.ShowSaveDestination(_temporaryDestination is not null && _trips.Current is null, _suggestionMonitor.IsLoading || _isReplanning);
         if (_suggestion is not null)
         {
             SuggestionCard.Show(_suggestion);
         }
     }
 
-    /// <summary>The card's contents, read from the suggestion's discovery each time (its plan can be replaced); null hides it.</summary>
+    /// <summary>
+    /// The card's contents, read from the suggestion's discovery each time (its plan can be replaced); null hides it.
+    /// During a trip, the card is the trip.
+    /// </summary>
     private SuggestionCardItem? SuggestionItem(DateTimeOffset now)
     {
+        if (_trips.Current is { } active)
+        {
+            return SuggestionCardItem.ForActiveTrip(active, _trips.Step, now);
+        }
+
         if (!_monitor.Service.IsConfigured)
         {
             return null; // The board says what's missing.
@@ -1337,7 +1418,14 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private Task FrameListedStopsAsync(MapAnimationKind animation)
     {
-        if (IsTripOpen)
+        // A new flyout has no viewport yet; fitting its bounds then would use a near-world zoom.
+        _frameWhenMapSized = Map.ActualWidth <= 0 || Map.ActualHeight <= 0;
+        if (_frameWhenMapSized)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (IsTripShown)
         {
             return MapHelpers.FrameAsync(Map, _tripMap.Points, animation);
         }
@@ -1388,9 +1476,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// </summary>
     private async Task RefreshVehiclesAsync(TransitTrigger trigger, bool force = false)
     {
-        using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Nearby, trigger);
+        using IDisposable scope = TransitRequestDiagnostics.BeginScope(IsProgressOpen ? TransitConsumer.ActiveTrip : TransitConsumer.Nearby, trigger);
         if (!_monitor.Service.IsConfigured || !_isPopupVisible || _selectedLine is not { } line
-            || (trigger == TransitTrigger.Timer && _budget.Level != TransitBudgetLevel.Normal))
+            || ((IsProgressOpen || trigger == TransitTrigger.Timer) && _budget.Level != TransitBudgetLevel.Normal))
         {
             return;
         }
@@ -1548,9 +1636,45 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _ = RefreshVehiclesAsync(TransitTrigger.VehicleSelected);
     }
 
+    /// <summary>
+    /// During a trip, shows the vehicle of the upcoming or current ride, through the tracking path
+    /// (only that trip's vehicle), without moving the map. Only while the call budget is at Normal, and only
+    /// for a ride with a trip ID to match; otherwise no vehicle is shown or fetched.
+    /// </summary>
+    private void FollowRide(ActiveTrip trip, TripStep? step, DateTimeOffset now)
+    {
+        if (step is not { CanFollowVehicle: true }
+            || (step.Kind == TripStepKind.GetReady && step.ActionAt - now > TripTime.LiveWindow)
+            || _budget.Level != TransitBudgetLevel.Normal || trip.Progress.Rides[step.Ride].TripId is not { } tripId)
+        {
+            if (_selectedLine is not null)
+            {
+                ClearVehicles();
+            }
+
+            return;
+        }
+
+        RideLine ride = trip.Progress.Trip.Legs.OfType<LiveRide>().ElementAt(step.Ride).Line;
+        RouteDirection line = new(ride.Route.Id, ride.Direction.Id);
+        if (_selectedLine == line && _onlyTripId == tripId)
+        {
+            return;
+        }
+
+        ClearVehicles();
+        _selectedLine = line;
+        _selectedLineLabel = LineLabel(ride.Route.Mode, ride.Route.DisplayId);
+        _selectedTripId = tripId;
+        _onlyTripId = tripId;
+        _ = RefreshVehiclesAsync(TransitTrigger.VehicleSelected);
+    }
+
     /// <summary>"Bus 14", or "Route 14" when the feed doesn't name the mode.</summary>
-    private static string LineLabel(Arrival arrival) =>
-        arrival.Mode is { Length: > 0 } mode ? $"{mode} {arrival.RouteDisplayId}" : $"Route {arrival.RouteDisplayId}";
+    private static string LineLabel(string? mode, string displayId) =>
+        mode is { Length: > 0 } ? $"{mode} {displayId}" : $"Route {displayId}";
+
+    private static string LineLabel(Arrival arrival) => LineLabel(arrival.Mode, arrival.RouteDisplayId);
 
     private void VehicleLayer_Tapped(object? sender, MapElementTappedEventArgs args)
     {
@@ -1770,7 +1894,23 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
-        StartTracking(item);
+        TrackOrAsk(item, (FrameworkElement)sender);
+    }
+
+    /// <summary>Starts tracking <paramref name="item"/>; during a trip, first asks whether to end it, as one thing is tracked at a time (D1).</summary>
+    private void TrackOrAsk(BusTimeItem item, FrameworkElement anchor)
+    {
+        if (_trips.Current is not { } trip)
+        {
+            StartTracking(item);
+            return;
+        }
+
+        ConfirmFlyout.Show(anchor, TripMessages.TrackInstead(trip), AppStrings.Get("TrackInsteadConfirm"), AppStrings.Get("TrackInsteadCancel"), () =>
+        {
+            _trips.End();
+            StartTracking(item);
+        });
     }
 
     private void StartTracking(BusTimeItem item)
@@ -1808,9 +1948,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             item.Click += (_, _) =>
             {
                 SettingsService.HeadOutMinutes = minutes;
-                if (arrival is { IsTracked: false })
+                if (arrival is { IsTracked: false } && sender is FrameworkElement chip)
                 {
-                    StartTracking(arrival);
+                    TrackOrAsk(arrival, chip);
                     return;
                 }
 
@@ -1875,20 +2015,25 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void EmptyButton_Click(object sender, RoutedEventArgs e) => _emptyAction?.Invoke();
 
-    private void RefreshButton_Click(object sender, RoutedEventArgs e) => Refresh();
+    private void RefreshMenuItem_Click(object sender, RoutedEventArgs e) => Refresh();
 
     private void Refresh()
     {
-        Motion.Spin(RefreshIcon);
         _ = RefreshVehiclesAsync(TransitTrigger.ManualRefresh, force: true);
         // The saved stops' times (for the jump menu and the tooltip) join the board's batch: one call.
         _ = _monitor.RefreshAsync();
         _ = LoadPlaceAsync(reframe: false, TransitTrigger.ManualRefresh);
     }
 
-    /// <summary>Opens the trip using only the plan and departures already shown by the card.</summary>
+    /// <summary>Opens the trip using only the plan and departures already shown by the card; during a trip, its progress.</summary>
     private void SuggestionCard_TripInvoked(object? sender, EventArgs e)
     {
+        if (_trips.Current is not null)
+        {
+            OpenProgress();
+            return;
+        }
+
         if (_suggestion is not { Trip: { } trip, Leg: { } leg } || _suggestionMonitor.Discovery?.Plan is not { } plan)
         {
             return;
@@ -1900,6 +2045,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _tripView.BackRequested += TripPanel_BackRequested;
             _tripView.OptionChosen += TripPanel_OptionChosen;
             _tripView.TimeRequested += TripPanel_TimeRequested;
+            _tripView.GoRequested += TripPanel_GoRequested;
             TripHost.Content = _tripView;
         }
 
@@ -1967,6 +2113,27 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void TripPanel_BackRequested(object? sender, EventArgs e) => CloseTrip(focusCard: true);
 
+    /// <summary>
+    /// Go: follows the selected option at the chosen time, from the departures it was timed with (no request),
+    /// then shows its progress. A trip over 99 minutes away is scheduled.
+    /// </summary>
+    private void TripPanel_GoRequested(object? sender, EventArgs e)
+    {
+        if (_tripLeg is not { } leg || _tripSelection.Selected is not { } trip)
+        {
+            return;
+        }
+
+        IPlaceArrivalsMonitor monitor = _tripTime.Mode == TripTimeMode.Now ? _suggestionMonitor : _timedTripMonitor;
+        string started = TripMessages.Started(trip, leg, DateTimeOffset.Now);
+        MapView? view = CurrentMapView();
+        _trips.Start(trip, leg, SuggestionContext.Target(leg.To), _tripTime, monitor.Snapshot);
+        _trips.MapView = view;
+        CloseTrip(focusCard: false, restoreBoard: false);
+        OpenProgress();
+        ShowMapCaption(started);
+    }
+
     private void TripPanel_TimeRequested(object? sender, TripTime time)
     {
         if (_tripLeg is not { } leg)
@@ -2018,7 +2185,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             || !found.StopIds.SequenceEqual(PlaceBoard.BoardingStopIds(plan, i => context.Time.UsesLiveTimes(i, DateTimeOffset.Now))));
 
     /// <summary>Restores the board and its map without discovery or a departures request.</summary>
-    private void CloseTrip(bool focusCard)
+    private void CloseTrip(bool focusCard, bool restoreBoard = true)
     {
         if (!IsTripOpen)
         {
@@ -2031,6 +2198,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _tripTime = default;
         _timedTripError = null;
         TripHost.Visibility = Visibility.Collapsed;
+        if (restoreBoard)
+        {
+            ShowBoardAgain(focusCard);
+        }
+    }
+
+    /// <summary>Puts the board and its map back from what's already loaded, after a trip view or the trip's progress.</summary>
+    private void ShowBoardAgain(bool focusCard)
+    {
         ArrivalsPane.Visibility = Visibility.Visible;
         PlaceChip.Visibility = Visibility.Visible;
         _vehiclePositions.Invalidate();
@@ -2054,11 +2230,109 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
+    /// <summary>
+    /// Shows the active trip's progress (or its Resume card) over the board, drawing the trip on the map. It
+    /// reads the trip from <see cref="ActiveTripService"/> and requests nothing; the board keeps loading beneath.
+    /// </summary>
+    private void OpenProgress()
+    {
+        if (IsProgressOpen)
+        {
+            RenderProgress(DateTimeOffset.Now);
+            _progressView?.FocusBack();
+            return;
+        }
+
+        if (_progressView is null)
+        {
+            _progressView = new TripProgressView();
+            _progressView.BackRequested += (_, _) => CloseProgress(focusCard: true);
+            _progressView.EndRequested += (_, _) => _trips.End();
+            _progressView.MissedRequested += (_, _) => _ = _trips.MissedAsync();
+            _progressView.ResumeRequested += (_, _) => _ = _trips.ResumeAsync();
+            ProgressHost.Content = _progressView;
+        }
+
+        _tripMap.Invalidate();
+        _progressMapInitialized = false;
+        _vehiclePositions.Invalidate();
+        ClearVehicles();
+        HideMapCaption(animate: false);
+        ResetRoutes();
+        ArrivalsPane.Visibility = Visibility.Collapsed;
+        PlaceChip.Visibility = Visibility.Collapsed;
+        ProgressHost.Visibility = Visibility.Visible;
+        SetFitLabel(isTrip: true);
+        RenderProgress(DateTimeOffset.Now);
+        _progressView.FocusBack();
+    }
+
+    /// <summary>Back to the board, where the card shows the trip (the trip goes on); also when the trip ends.</summary>
+    private void CloseProgress(bool focusCard)
+    {
+        if (!IsProgressOpen)
+        {
+            return;
+        }
+
+        SaveProgressMapView();
+        _progressMapInitialized = false;
+        ProgressHost.Visibility = Visibility.Collapsed;
+        ShowBoardAgain(focusCard);
+    }
+
+    /// <summary>The trip's progress at <paramref name="now"/>, its map with the current leg bold, and the current ride's vehicle.</summary>
+    private void RenderProgress(DateTimeOffset now)
+    {
+        if (!IsProgressOpen || _progressView is null)
+        {
+            return;
+        }
+
+        if (_trips.Current is not { } trip)
+        {
+            CloseProgress(focusCard: true);
+            return;
+        }
+
+        TripStep? step = _trips.Step; // Null while the trip waits to be resumed.
+        _progressView.Show(trip, step, now);
+        if (_tripMap.Draw(trip.Progress.Trip, trip.Leg))
+        {
+            _vehiclePositions.Invalidate();
+            ClearVehicles();
+            if (!_progressMapInitialized)
+            {
+                _progressMapInitialized = true;
+                if (_trips.MapView is { } view)
+                {
+                    RestoreMapView(view);
+                }
+                else
+                {
+                    _ = FrameListedStopsAsync(MapAnimationKind.None);
+                }
+            }
+        }
+
+        _tripMap.Emphasize(step?.Leg ?? -1);
+        FollowRide(trip, step, now);
+    }
+
+    /// <summary>The trip started, moved on, ended, or was resumed: the progress view and the board's card follow it.</summary>
+    private void OnTripsChanged(object? sender, EventArgs e)
+    {
+        if (_isPopupVisible && !_allowClose)
+        {
+            Render();
+        }
+    }
+
     private void SetFitLabel(bool isTrip)
     {
         string label = AppStrings.Get(isTrip ? "TripFitLabel" : "BoardFitLabel");
-        AutomationProperties.SetName(FitButton, label);
-        ToolTipService.SetToolTip(FitButton, label);
+        FitMenuItem.Text = label;
+        AutomationProperties.SetName(FitMenuItem, label);
     }
 
     private sealed record TimedTripContext(CommuteLeg Leg, TripDestination Destination, TripTime Time);
@@ -2124,11 +2398,18 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         SuggestionCard.FocusDestination();
     }
 
-    private void FitButton_Click(object sender, RoutedEventArgs e)
+    private void FitMenuItem_Click(object sender, RoutedEventArgs e) => FitMap();
+
+    private void FitMap()
     {
         DeselectVehicle();
-        Motion.Pop(FitIcon, 1.4f);
         _ = FrameListedStopsAsync(MapAnimationKind.Default);
+    }
+
+    private void Fit_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        FitMap();
     }
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
@@ -2154,6 +2435,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             CloseTrip(focusCard: true);
         }
+        else if (IsProgressOpen)
+        {
+            CloseProgress(focusCard: true);
+        }
         else
         {
             HidePopup();
@@ -2166,6 +2451,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             args.Handled = true;
             CloseTrip(focusCard: true);
+        }
+        else if (IsProgressOpen)
+        {
+            args.Handled = true;
+            CloseProgress(focusCard: true);
         }
     }
 

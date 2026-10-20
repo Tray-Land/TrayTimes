@@ -461,7 +461,7 @@ public sealed class TrackedBusTests
         TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), tripId: null), "Stop", Lead, Now);
 
         // Act
-        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10) + TrackedBus.MatchTolerance + TimeSpan.FromMinutes(1))]);
+        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10) + TripMatch.Tolerance + TimeSpan.FromMinutes(1))]);
 
         // Assert
         Assert.IsNull(match);

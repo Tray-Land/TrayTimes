@@ -14,7 +14,10 @@ using MapPolyline = WinUIEx.Maps.MapPolyline;
 
 namespace TrayTimes.Views;
 
-/// <summary>Draws only the selected itinerary's ridden shapes, walks, and boarding/alighting pins.</summary>
+/// <summary>
+/// Draws only the selected itinerary's ridden shapes, walks, and boarding/alighting pins. During a trip, the
+/// leg the rider is on can be drawn bolder and the rest fainter (<see cref="Emphasize"/>).
+/// </summary>
 internal sealed class TripMapRenderer(
     MapElementsLayer routes,
     MapElementsLayer stops,
@@ -22,9 +25,16 @@ internal sealed class TripMapRenderer(
     FontIcon stopGlyph,
     Dictionary<MapIcon, string> stopPins)
 {
+    private const double RideThickness = 6;
+    private const double WalkThickness = 3;
+    private const double EmphasisExtra = 3;
+    private const byte FadedAlpha = 110;
+
+    private readonly List<(MapPolyline Line, int Leg, Color Color, double Thickness)> _paths = [];
     private TripItinerary? _itinerary;
     private RideLine[] _lines = [];
     private CommuteLeg? _leg;
+    private int _emphasized = -1;
 
     public IReadOnlyList<GeoPoint> Points { get; private set; } = [];
 
@@ -42,21 +52,23 @@ internal sealed class TripMapRenderer(
         _itinerary = trip.Itinerary;
         _lines = lines;
         _leg = leg;
+        _emphasized = -1;
+        _paths.Clear();
         routes.MapElements.Clear();
         stops.MapElements.Clear();
         places.MapElements.Clear();
         stopPins.Clear();
         List<GeoPoint> points = [leg.Origin, leg.To.Location];
         Color walkColor = ((SolidColorBrush)Application.Current.Resources["TextFillColorSecondaryBrush"]).Color;
-        foreach (LiveLeg part in trip.Legs)
+        for (int index = 0; index < trip.Legs.Count; index++)
         {
-            if (part is LiveWalk walk)
+            if (trip.Legs[index] is LiveWalk walk)
             {
-                AddPath(walk.Walk.Path, walkColor, 3, dashed: true);
+                AddPath(index, walk.Walk.Path, walkColor, WalkThickness, dashed: true);
             }
-            else if (part is LiveRide ride)
+            else if (trip.Legs[index] is LiveRide ride)
             {
-                AddPath(ride.Line.Path, MapHelpers.ParseRouteColor(ride.Departure?.RouteColor ?? ride.Line.Route.Color), 6, dashed: false);
+                AddPath(index, ride.Line.Path, MapHelpers.ParseRouteColor(ride.Departure?.RouteColor ?? ride.Line.Route.Color), RideThickness, dashed: false);
                 AddStop(ride.Line.BoardAt);
                 if (ride.Line.AlightAt is { } alight)
                 {
@@ -70,18 +82,20 @@ internal sealed class TripMapRenderer(
         Points = points;
         return true;
 
-        void AddPath(IReadOnlyList<GeoPoint> path, Color color, double thickness, bool dashed)
+        void AddPath(int index, IReadOnlyList<GeoPoint> path, Color color, double thickness, bool dashed)
         {
             points.AddRange(path);
             if (path.Count >= 2)
             {
-                routes.MapElements.Add(new MapPolyline
+                MapPolyline line = new()
                 {
                     Path = new Geopath(path.Select(p => new BasicGeoposition { Latitude = p.Lat, Longitude = p.Lon })),
                     StrokeColor = color,
                     StrokeThickness = thickness,
                     StrokeDashed = dashed,
-                });
+                };
+                _paths.Add((line, index, color, thickness));
+                routes.MapElements.Add(line);
             }
         }
 
@@ -97,6 +111,31 @@ internal sealed class TripMapRenderer(
         {
             FontIcon icon = MapHelpers.CreatePlaceIcon(kind, 26);
             places.MapElements.Add(new MapIcon(icon, MapHelpers.ToGeopoint(point)) { NormalizedAnchorPoint = new Point(0.5, 0.5) });
+        }
+    }
+
+    /// <summary>
+    /// Draws the leg at <paramref name="leg"/> (an index in the drawn trip's legs) bolder and the others fainter;
+    /// a leg with no path drawn (or -1) draws them all alike.
+    /// </summary>
+    public void Emphasize(int leg)
+    {
+        if (!_paths.Any(p => p.Leg == leg))
+        {
+            leg = -1;
+        }
+
+        if (leg == _emphasized)
+        {
+            return;
+        }
+
+        _emphasized = leg;
+        foreach ((MapPolyline line, int index, Color color, double thickness) in _paths)
+        {
+            bool current = index == leg;
+            line.StrokeThickness = current ? thickness + EmphasisExtra : thickness;
+            line.StrokeColor = leg < 0 || current ? color : Color.FromArgb(Math.Min(color.A, FadedAlpha), color.R, color.G, color.B);
         }
     }
 }

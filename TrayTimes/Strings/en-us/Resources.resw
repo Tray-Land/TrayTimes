@@ -12,23 +12,30 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms</value>
   </resheader>
-  <data name="LocationPermissionBar.Title" xml:space="preserve">
-    <value>Location permission needed</value>
+  <data name="LocationPermissionButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Location access is off. Show location options.</value>
+    <comment>Accessible name of the optional location hint in the flyout header.</comment>
   </data>
-  <data name="LocationPermissionBar.Message" xml:space="preserve">
-    <value>Allow location access to find stops near this device.</value>
+  <data name="LocationPermissionButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Location access is off (optional)</value>
+  </data>
+  <data name="LocationPermissionHeading.Text" xml:space="preserve">
+    <value>Location is optional</value>
+  </data>
+  <data name="LocationPermissionMessage.Text" xml:space="preserve">
+    <value>Allow location access to find stops near this device. You can keep using saved places without it.</value>
   </data>
   <data name="GrantLocationPermissionButton.Content" xml:space="preserve">
-    <value>Grant Location Permission</value>
+    <value>Allow location access</value>
   </data>
   <data name="GrantLocationPermissionButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
-    <value>Grant Location Permission</value>
+    <value>Allow location access</value>
   </data>
   <data name="LocationPermissionEmptyTitle" xml:space="preserve">
     <value>Find nearby stops</value>
   </data>
   <data name="LocationPermissionEmptyText" xml:space="preserve">
-    <value>Use the banner above to allow location access.</value>
+    <value>Use the header's location options to allow access, or choose a saved place.</value>
   </data>
   <data name="LocationAccessOff" xml:space="preserve">
     <value>Location access is off. Turn it on in Windows Settings &gt; Privacy &amp; security &gt; Location.</value>
@@ -190,10 +197,10 @@
     <value>Time to head out</value>
   </data>
   <data name="SettingsHeadOutDescription.Text" xml:space="preserve">
-    <value>Notify me this many minutes before my ride leaves.</value>
+    <value>Notify me this many minutes before I need to leave on a trip, or before a tracked ride leaves.</value>
   </data>
   <data name="SettingsHeadOutBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.HelpText" xml:space="preserve">
-    <value>Number of minutes before the ride leaves to send a notification.</value>
+    <value>Number of minutes before you need to leave on a trip, or before a tracked ride leaves, to send a notification.</value>
   </data>
   <data name="SettingsKeepAwakeTitle.Text" xml:space="preserve">
     <value>Keep awake while tracking</value>
@@ -358,7 +365,7 @@
     <value>Cancel changing the trip time</value>
   </data>
   <data name="TripFutureScheduled" xml:space="preserve">
-    <value>Scheduled times. Live updates and tracking become available within 30 minutes of departure.</value>
+    <value>Scheduled times. Live times appear within 30 minutes of departure.</value>
   </data>
   <data name="TripTimeRequired" xml:space="preserve">
     <value>Choose a travel date and time.</value>
@@ -524,7 +531,7 @@
   <data name="AllRoutes" xml:space="preserve">
     <value>All routes</value>
   </data>
-  <data name="SuggestionTripButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+  <data name="SuggestionTripTooltip" xml:space="preserve">
     <value>Show trip options and every leg</value>
   </data>
   <data name="SuggestionPlanningRing.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
@@ -653,11 +660,17 @@
     <value>{0} min</value>
     <comment>{0} lists minutes, such as "4, 12".</comment>
   </data>
-  <data name="BoardFitButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+  <data name="BoardFitMenuItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Show all listed stops on the map</value>
   </data>
-  <data name="BoardFitButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+  <data name="BoardFitMenuItem.Text" xml:space="preserve">
     <value>Show all listed stops on the map</value>
+  </data>
+  <data name="RefreshMapMenuItem.Text" xml:space="preserve">
+    <value>Refresh arrival times</value>
+  </data>
+  <data name="RefreshMapMenuItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Refresh arrival times</value>
   </data>
   <data name="BoardFitLabel" xml:space="preserve">
     <value>Show all listed stops on the map</value>
@@ -861,5 +874,387 @@
   </data>
   <data name="SaveDestinationButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Save this destination as a favorite place</value>
+  </data>
+  <data name="NotificationStopTracking" xml:space="preserve">
+    <value>Stop tracking</value>
+    <comment>A notification button.</comment>
+  </data>
+  <data name="NotificationMissedIt" xml:space="preserve">
+    <value>I missed it</value>
+    <comment>A notification button: the rider missed the bus or train they were heading to.</comment>
+  </data>
+  <data name="NotificationEndTrip" xml:space="preserve">
+    <value>End trip</value>
+    <comment>A notification button.</comment>
+  </data>
+  <data name="NotificationResumeTrip" xml:space="preserve">
+    <value>Resume</value>
+    <comment>A notification button: go on following a trip saved before the app restarted.</comment>
+  </data>
+  <data name="TrayShowTrip" xml:space="preserve">
+    <value>Show trip</value>
+    <comment>The tray icon's menu.</comment>
+  </data>
+  <data name="TrayMissedIt" xml:space="preserve">
+    <value>I missed it</value>
+    <comment>The tray icon's menu: the rider missed the bus or train they were heading to.</comment>
+  </data>
+  <data name="TrayEndTrip" xml:space="preserve">
+    <value>End trip</value>
+    <comment>The tray icon's menu.</comment>
+  </data>
+  <data name="TripInMinutesFormat" xml:space="preserve">
+    <value>in {0} min</value>
+    <comment>{0} is a number of minutes. Used inside other trip texts, such as "leave in 6 min".</comment>
+  </data>
+  <data name="TripNow" xml:space="preserve">
+    <value>now</value>
+    <comment>Used inside other trip texts in place of "in 6 min", such as "leave now".</comment>
+  </data>
+  <data name="TripStopUnnamed" xml:space="preserve">
+    <value>your stop</value>
+    <comment>Stands in for a stop whose name the trip planner didn't give.</comment>
+  </data>
+  <data name="TripTooltipLeaveFormat" xml:space="preserve">
+    <value>Trip to {0}: leave {1} ({2})</value>
+    <comment>The tray tooltip. {0} is a place; {1} "in 6 min" or "now"; {2} a time of day.</comment>
+  </data>
+  <data name="TripTooltipBoardFormat" xml:space="preserve">
+    <value>Trip to {0}: the {1} leaves {2} {3} ({4})</value>
+    <comment>The tray tooltip. {0} is a place; {1} a route; {2} a stop; {3} "in 3 min" or "now"; {4} a time of day.</comment>
+  </data>
+  <data name="TripTooltipGetOffFormat" xml:space="preserve">
+    <value>Trip to {0}: get off at {1} {2} ({3})</value>
+    <comment>The tray tooltip. {0} is a place; {1} a stop; {2} "in 9 min" or "now"; {3} a time of day.</comment>
+  </data>
+  <data name="TripTooltipArriveFormat" xml:space="preserve">
+    <value>Trip to {0}: arrive {1}</value>
+    <comment>The tray tooltip. {0} is a place; {1} a time of day.</comment>
+  </data>
+  <data name="TripTooltipArrivedFormat" xml:space="preserve">
+    <value>Trip to {0}: arrived</value>
+    <comment>The tray tooltip. {0} is a place.</comment>
+  </data>
+  <data name="TripTooltipReplanFormat" xml:space="preserve">
+    <value>Trip to {0}: looking for another way</value>
+    <comment>The tray tooltip, while no bus or train can make the trip and a new plan is due. {0} is a place.</comment>
+  </data>
+  <data name="TripReplanWaitTitleFormat" xml:space="preserve">
+    <value>Looking for another way to {0}</value>
+    <comment>A notification's title after "I missed it" when no other bus or train can make the trip. {0} is a place.</comment>
+  </data>
+  <data name="TripReplanWaitTextFormat" xml:space="preserve">
+    <value>Tray Times can plan the trip again at {0}. Until then, it keeps the last times.</value>
+    <comment>{0} is a time of day. Planning is limited to once every 15 minutes to save Transit calls.</comment>
+  </data>
+  <data name="TripTooltipResumeFormat" xml:space="preserve">
+    <value>Trip to {0}: resume or end it?</value>
+    <comment>The tray tooltip, for a trip saved before the app restarted. {0} is a place.</comment>
+  </data>
+  <data name="TripHeadOutTitleFormat" xml:space="preserve">
+    <value>Leave {0} for {1}</value>
+    <comment>A notification's title. {0} is "in 5 min"; {1} a place.</comment>
+  </data>
+  <data name="TripLeaveNowTitleFormat" xml:space="preserve">
+    <value>Leave now for {0}</value>
+    <comment>A notification's title. {0} is a place.</comment>
+  </data>
+  <data name="TripRideChangedTitleFormat" xml:space="preserve">
+    <value>The {0} now leaves at {1}</value>
+    <comment>A notification's title. {0} is a route; {1} a time of day.</comment>
+  </data>
+  <data name="TripConnectionChangedTitleFormat" xml:space="preserve">
+    <value>Take the {0} at {1} instead</value>
+    <comment>A notification's title, when the trip moves to another bus or train. {0} is a route; {1} a time of day.</comment>
+  </data>
+  <data name="TripWalkRestTitle" xml:space="preserve">
+    <value>Walk the rest of the way</value>
+    <comment>A notification's title, when no ride is left in the trip.</comment>
+  </data>
+  <data name="TripGetOffSoonTitleFormat" xml:space="preserve">
+    <value>Get off at {0} {1}</value>
+    <comment>A notification's title. {0} is a stop; {1} "in 2 min" or "now".</comment>
+  </data>
+  <data name="TripNoConnectionTitleFormat" xml:space="preserve">
+    <value>No way to {0} right now</value>
+    <comment>A notification's title, when planning the trip again found nothing. {0} is a place.</comment>
+  </data>
+  <data name="TripNoConnectionText" xml:space="preserve">
+    <value>Transit found no other connection from here. The trip keeps its last times until you end it.</value>
+  </data>
+  <data name="TripResumeTitleFormat" xml:space="preserve">
+    <value>Resume your trip to {0}?</value>
+    <comment>A notification's title after the app restarted during a trip. {0} is a place.</comment>
+  </data>
+  <data name="TripResumeText" xml:space="preserve">
+    <value>Tray Times closed while you were on your way.</value>
+  </data>
+  <data name="TripWalkToRideFormat" xml:space="preserve">
+    <value>Walk {0} min to {1} for the {2} at {3}.</value>
+    <comment>{0} is minutes; {1} a stop; {2} a route; {3} a time of day.</comment>
+  </data>
+  <data name="TripCatchRideFormat" xml:space="preserve">
+    <value>Catch the {0} from {1} at {2}.</value>
+    <comment>{0} is a route; {1} a stop; {2} a time of day.</comment>
+  </data>
+  <data name="TripWalkToPlaceFormat" xml:space="preserve">
+    <value>Walk {0} min to {1}, arriving {2}.</value>
+    <comment>{0} is minutes; {1} a place; {2} a time of day.</comment>
+  </data>
+  <data name="TripRideLeavesFormat" xml:space="preserve">
+    <value>It leaves {0} {1}. You'll arrive at {2} at {3}.</value>
+    <comment>{0} is a stop; {1} "in 6 min" or "now"; {2} a place; {3} a time of day.</comment>
+  </data>
+  <data name="TripThenWalkToRideFormat" xml:space="preserve">
+    <value>Then walk {0} to the {1} at {2}</value>
+    <comment>After getting off, in a notification and the trip's status. {0} is how long, such as "1 min" (TripDurationFormat); {1} a route; {2} a time of day.</comment>
+  </data>
+  <data name="TripThenCatchRideFormat" xml:space="preserve">
+    <value>Then catch the {0} at {1}</value>
+    <comment>After getting off, in a notification and the trip's status. {0} is a route; {1} a time of day.</comment>
+  </data>
+  <data name="TripThenWalkToPlaceFormat" xml:space="preserve">
+    <value>Then walk {0} to {1}, arriving {2}</value>
+    <comment>After getting off, in a notification and the trip's status. {0} is how long, such as "3 min" (TripDurationFormat); {1} a place; {2} a time of day.</comment>
+  </data>
+  <data name="TripArriveAtFormat" xml:space="preserve">
+    <value>You'll arrive at {0} at {1}</value>
+    <comment>After getting off the last ride, in a notification and the trip's status. {0} is a place; {1} a time of day.</comment>
+  </data>
+  <data name="TripLeaveShortFormat" xml:space="preserve">
+    <value>Leave {0}</value>
+    <comment>The trip view's time dropdown. {0} is a time of day, or a day and time such as "Tue 8:00 AM" (TripDayTimeFormat).</comment>
+  </data>
+  <data name="TripDayTimeFormat" xml:space="preserve">
+    <value>{0} {1}</value>
+    <comment>{0} is a short day, such as "Tue" or "Oct 28"; {1} a time of day.</comment>
+  </data>
+  <data name="GoButton.Content" xml:space="preserve">
+    <value>Go</value>
+    <comment>Starts following the selected trip.</comment>
+  </data>
+  <data name="GoButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Start trip</value>
+  </data>
+  <data name="GoNameFormat" xml:space="preserve">
+    <value>Start trip to {0}, leaving {1}</value>
+    <comment>Go's name and tooltip. {0} is a place; {1} a time of day, a day and time, or "now".</comment>
+  </data>
+  <data name="GoNameFromFormat" xml:space="preserve">
+    <value>Start trip from {0} to {1}, leaving {2}</value>
+    <comment>Go's name and tooltip when the start was guessed from the time of day. {0} and {1} are places; {2} a time of day, a day and time, or "now".</comment>
+  </data>
+  <data name="TripFromArrivalFormat" xml:space="preserve">
+    <value>from {0} · {1}</value>
+    <comment>Under a trip's heading when its start was guessed. {0} is a place; {1} when it arrives, such as "arrive 6:00 PM".</comment>
+  </data>
+  <data name="TripStartedFormat" xml:space="preserve">
+    <value>Following your trip to {0}. Tray Times will tell you when to leave.</value>
+    <comment>Shown after Go. {0} is a place.</comment>
+  </data>
+  <data name="TripStartedFromFormat" xml:space="preserve">
+    <value>Following your trip from {0} to {1}. Tray Times will tell you when to leave.</value>
+    <comment>Shown after Go when the start was guessed. {0} and {1} are places.</comment>
+  </data>
+  <data name="TripScheduledFormat" xml:space="preserve">
+    <value>Your trip to {0} is scheduled to leave {1}. Tray Times will tell you when it's time.</value>
+    <comment>Shown after Go on a trip over 99 minutes away. {0} is a place; {1} a time of day, or a day and time.</comment>
+  </data>
+  <data name="TripScheduledFromFormat" xml:space="preserve">
+    <value>Your trip from {0} to {1} is scheduled to leave {2}. Tray Times will tell you when it's time.</value>
+    <comment>Shown after Go on a trip over 99 minutes away whose start was guessed. {0} and {1} are places; {2} a time of day, or a day and time.</comment>
+  </data>
+  <data name="TrackInsteadFormat" xml:space="preserve">
+    <value>End your trip to {0} and track this bus instead?</value>
+    <comment>Asked when a bus's bell is pressed during a trip; one thing is tracked at a time. {0} is a place.</comment>
+  </data>
+  <data name="TrackInsteadConfirm" xml:space="preserve">
+    <value>End trip and track</value>
+  </data>
+  <data name="TrackInsteadCancel" xml:space="preserve">
+    <value>Keep trip</value>
+  </data>
+  <data name="TripProgressHeadingFormat" xml:space="preserve">
+    <value>Trip to {0}</value>
+    <comment>The heading while a trip is followed. {0} is a place.</comment>
+  </data>
+  <data name="TripProgressBack.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Back to departures</value>
+  </data>
+  <data name="TripProgressBack.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Back to departures (Escape, Backspace, or Alt+Left). The trip goes on.</value>
+  </data>
+  <data name="EndTripButton.Content" xml:space="preserve">
+    <value>End trip</value>
+  </data>
+  <data name="EndTripButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>End trip</value>
+  </data>
+  <data name="EndTripButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Stop following this trip</value>
+  </data>
+  <data name="MissedItButton.Content" xml:space="preserve">
+    <value>I missed it</value>
+    <comment>The rider missed the bus or train they were heading to, or was assumed to be on.</comment>
+  </data>
+  <data name="MissedItButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>I missed it</value>
+  </data>
+  <data name="MissedItButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve">
+    <value>Take the next bus or train instead</value>
+  </data>
+  <data name="ResumeTripButton.Content" xml:space="preserve">
+    <value>Resume</value>
+  </data>
+  <data name="ResumeTripButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Resume the trip</value>
+  </data>
+  <data name="DiscardTripButton.Content" xml:space="preserve">
+    <value>End trip</value>
+  </data>
+  <data name="DiscardTripButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>End the trip</value>
+  </data>
+  <data name="TripSteps.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Trip steps in travel order</value>
+  </data>
+  <data name="TripStatusLeaveFormat" xml:space="preserve">
+    <value>Leave {0}</value>
+    <comment>The trip's status. {0} is "in 6 min" or "now".</comment>
+  </data>
+  <data name="TripStatusLeaveAtFormat" xml:space="preserve">
+    <value>Leave {0}</value>
+    <comment>The trip's status, for a trip over 99 minutes away. {0} is a time of day, or a day and time such as "Tue 8:00 AM".</comment>
+  </data>
+  <data name="TripStatusScheduledText" xml:space="preserve">
+    <value>Scheduled. Tray Times checks the times shortly before you leave.</value>
+  </data>
+  <data name="TripStatusRideLeavesFormat" xml:space="preserve">
+    <value>The {0} leaves {1}</value>
+    <comment>The trip's status. {0} is a route; {1} "in 3 min" or "now".</comment>
+  </data>
+  <data name="TripStatusGetOffFormat" xml:space="preserve">
+    <value>Get off at {0} {1}</value>
+    <comment>The trip's status. {0} is a stop; {1} "in 9 min" or "now".</comment>
+  </data>
+  <data name="TripStatusArriveFormat" xml:space="preserve">
+    <value>Arrive at {0} at {1}</value>
+    <comment>The trip's status. {0} is a place; {1} a time of day.</comment>
+  </data>
+  <data name="TripStatusArrivedFormat" xml:space="preserve">
+    <value>You've arrived at {0}</value>
+    <comment>The trip's status. {0} is a place.</comment>
+  </data>
+  <data name="TripStatusDoneText" xml:space="preserve">
+    <value>The trip ends on its own in a few minutes.</value>
+  </data>
+  <data name="TripStatusReplanTitle" xml:space="preserve">
+    <value>Looking for another way…</value>
+  </data>
+  <data name="TripStatusReplanSpoken" xml:space="preserve">
+    <value>Looking for another way</value>
+    <comment>Read by screen readers in place of TripStatusReplanTitle, before its detail.</comment>
+  </data>
+  <data name="TripResumeSpokenFormat" xml:space="preserve">
+    <value>{0} {1}</value>
+    <comment>Read by screen readers for the Resume card: the question (TripResumeTitleFormat), then why it's asked (TripResumeText).</comment>
+  </data>
+  <data name="TripStatusReplanText" xml:space="preserve">
+    <value>No bus or train left can make this trip. Tray Times plans the rest again as soon as it can.</value>
+  </data>
+  <data name="TripStatusWalkToRideFormat" xml:space="preserve">
+    <value>Walk {0} to {1} for the {2}</value>
+    <comment>The trip's status. {0} is how long, such as "4 min" (TripDurationFormat); {1} a stop; {2} a route.</comment>
+  </data>
+  <data name="TripStatusBoardAtFormat" xml:space="preserve">
+    <value>Board at {0}, leaving {1}</value>
+    <comment>The trip's status. {0} is a stop; {1} a time of day.</comment>
+  </data>
+  <data name="TripStatusWalkToPlaceFormat" xml:space="preserve">
+    <value>Walk {0} to {1}</value>
+    <comment>The trip's status. {0} is how long, such as "3 min" (TripDurationFormat); {1} a place.</comment>
+  </data>
+  <data name="TripStatusSpokenFormat" xml:space="preserve">
+    <value>{0}. {1}</value>
+    <comment>Read by screen readers: the trip's status, then its detail.</comment>
+  </data>
+  <data name="TripDurationFormat" xml:space="preserve">
+    <value>{0} min</value>
+    <comment>{0} is a number of minutes. Used inside other trip texts, such as "Walk 4 min to...".</comment>
+  </data>
+  <data name="TripDurationSpokenFormat" xml:space="preserve">
+    <value>{0} minutes</value>
+    <comment>Read by screen readers in place of TripDurationFormat. {0} is a number of minutes, 2 or more.</comment>
+  </data>
+  <data name="TripDurationOneMinuteSpoken" xml:space="preserve">
+    <value>1 minute</value>
+    <comment>Read by screen readers in place of TripDurationFormat.</comment>
+  </data>
+  <data name="TripInMinutesSpokenFormat" xml:space="preserve">
+    <value>in {0} minutes</value>
+    <comment>Read by screen readers in place of TripInMinutesFormat. {0} is a number of minutes, 2 or more.</comment>
+  </data>
+  <data name="TripInOneMinuteSpoken" xml:space="preserve">
+    <value>in 1 minute</value>
+    <comment>Read by screen readers in place of TripInMinutesFormat.</comment>
+  </data>
+  <data name="TripLegDoneNameFormat" xml:space="preserve">
+    <value>Done: {0}</value>
+    <comment>Read by screen readers for a step of the trip the rider has finished. {0} describes the step.</comment>
+  </data>
+  <data name="TripLegCurrentNameFormat" xml:space="preserve">
+    <value>Now: {0}</value>
+    <comment>Read by screen readers for the step of the trip the rider is on. {0} describes the step.</comment>
+  </data>
+  <data name="TripLegNameFormat" xml:space="preserve">
+    <value>{0}. {1}</value>
+    <comment>Read by screen readers for a walk: how long, then where to.</comment>
+  </data>
+  <data name="TripLegWaitNameFormat" xml:space="preserve">
+    <value>{0}. {1}. {2}</value>
+    <comment>Read by screen readers for a walk: how long, where to, then the wait for the next ride.</comment>
+  </data>
+  <data name="TripRideNameFormat" xml:space="preserve">
+    <value>Route {0} to {1}. {2}. {3}. {4}</value>
+    <comment>Read by screen readers for a ride. {0} is a route; {1} where it's headed; {2} where it boards and when; {3} whether the time is live, and the stops; {4} where to get off and when.</comment>
+  </data>
+  <data name="TripCardFormat" xml:space="preserve">
+    <value>Trip to {0} · {1}</value>
+    <comment>The board's card during a trip. {0} is a place; {1} what's next, such as "get off in 9 min".</comment>
+  </data>
+  <data name="TripCardLeaveFormat" xml:space="preserve">
+    <value>leave {0}</value>
+    <comment>Inside TripCardFormat. {0} is "in 6 min" or "now".</comment>
+  </data>
+  <data name="TripCardLeaveAtFormat" xml:space="preserve">
+    <value>leave {0}</value>
+    <comment>Inside TripCardFormat, for a trip over 99 minutes away. {0} is a time of day, or a day and time.</comment>
+  </data>
+  <data name="TripCardRideLeavesFormat" xml:space="preserve">
+    <value>the {0} leaves {1}</value>
+    <comment>Inside TripCardFormat. {0} is a route; {1} "in 3 min" or "now".</comment>
+  </data>
+  <data name="TripCardGetOffFormat" xml:space="preserve">
+    <value>get off {0}</value>
+    <comment>Inside TripCardFormat. {0} is "in 9 min" or "now".</comment>
+  </data>
+  <data name="TripCardArrived" xml:space="preserve">
+    <value>arrived</value>
+    <comment>Inside TripCardFormat.</comment>
+  </data>
+  <data name="TripCardReplan" xml:space="preserve">
+    <value>looking for another way</value>
+    <comment>Inside TripCardFormat.</comment>
+  </data>
+  <data name="TripCardResume" xml:space="preserve">
+    <value>resume or end it?</value>
+    <comment>Inside TripCardFormat, for a trip saved before the app restarted.</comment>
+  </data>
+  <data name="TripCardNameFormat" xml:space="preserve">
+    <value>Trip to {0}. {1}</value>
+    <comment>Read by screen readers for the board's card during a trip. {0} is a place; {1} the trip's status.</comment>
+  </data>
+  <data name="TripCardTooltip" xml:space="preserve">
+    <value>Show your trip's progress</value>
   </data>
 </root>

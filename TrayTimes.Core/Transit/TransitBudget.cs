@@ -11,7 +11,7 @@ public enum TransitPriority
     /// <summary>Something the rider just did: opened the flyout, refreshed, picked a stop.</summary>
     Manual,
 
-    /// <summary>The tracked ride, whose alerts must not stop.</summary>
+    /// <summary>The tracked ride or the active trip, whose alerts must not stop.</summary>
     Urgent,
 }
 

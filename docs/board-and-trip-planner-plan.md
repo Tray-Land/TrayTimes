@@ -511,7 +511,7 @@ Each session appends an execution-log entry with the date, step, and status; the
 
 ## Follow-ups (not in this plan)
 
-- **Tracking across a transfer:** alert when to leave the first bus, and track the second.
+- **Tracking across a transfer:** alert when to leave the first bus, and track the second. Planned as part of [active trip mode](active-trip-plan.md).
 - **Rider settings** for `walk_speed`, `accessibility_need`, and "minimize walking" (`walk_reluctance`).
 - **Showing service alerts** on board rows and trip legs. They already arrive with departures.
 - **Learning destinations** from use instead of the home/work rule.

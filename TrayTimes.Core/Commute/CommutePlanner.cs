@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using TrayTimes.Models;
 using TrayTimes.Transit;
 
@@ -10,6 +11,7 @@ namespace TrayTimes.Commute;
 /// <param name="IsGuess">True when the device location was unknown and the trip was guessed from the time of day.</param>
 public sealed record CommuteLeg(FavoritePlace? From, GeoPoint Origin, FavoritePlace To, bool IsGuess)
 {
+    [JsonIgnore]
     public bool IsAlreadyThere => GeoMath.DistanceMeters(Origin, To.Location) <= CommutePlanner.AtPlaceMeters;
 }
 

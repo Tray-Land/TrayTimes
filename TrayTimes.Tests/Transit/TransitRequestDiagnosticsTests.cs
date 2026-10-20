@@ -257,6 +257,7 @@ public sealed class TransitRequestDiagnosticsTests
 
     [TestMethod]
     [DataRow(TransitConsumer.Tracking, TransitTrigger.Timer, TransitPriority.Urgent)]
+    [DataRow(TransitConsumer.ActiveTrip, TransitTrigger.Timer, TransitPriority.Urgent)]
     [DataRow(TransitConsumer.Favorites, TransitTrigger.ManualRefresh, TransitPriority.Manual)]
     [DataRow(TransitConsumer.Nearby, TransitTrigger.FlyoutOpened, TransitPriority.Manual)]
     [DataRow(TransitConsumer.Commute, TransitTrigger.VehicleSelected, TransitPriority.Manual)]

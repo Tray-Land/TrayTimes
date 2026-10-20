@@ -1,3 +1,4 @@
+using TrayTimes.Commute;
 using TrayTimes.Transit;
 
 namespace TrayTimes.Tracking;
@@ -47,9 +48,6 @@ public sealed record TrackedBus(
 
     /// <summary>How far a prediction must move after the head-out alert to alert again.</summary>
     public static readonly TimeSpan ShiftThreshold = TimeSpan.FromMinutes(3);
-
-    /// <summary>How far apart predictions can be and still be the same trip, when there's no trip ID.</summary>
-    public static readonly TimeSpan MatchTolerance = TimeSpan.FromMinutes(10);
 
     /// <summary>How long before a scheduled time the rider's bus is first looked for in real-time data.</summary>
     public static readonly TimeSpan RealTimeLookahead = TimeSpan.FromMinutes(15);
@@ -127,22 +125,9 @@ public sealed record TrackedBus(
             : TimeSpan.FromSeconds(60);
     }
 
-    /// <summary>
-    /// This trip among a stop's departures: by trip ID when known (real-time or, on feeds without
-    /// real-time data, scheduled), else the nearest real-time departure on the same route and direction.
-    /// </summary>
-    public Arrival? FindIn(IEnumerable<Arrival> arrivals)
-    {
-        IEnumerable<Arrival> candidates = arrivals.Where(a =>
-            a.StopId == StopId
-            && string.Equals(a.RouteId, RouteId, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(a.DirectionId, DirectionId, StringComparison.OrdinalIgnoreCase));
-
-        candidates = TripId is not null
-            ? candidates.Where(a => a.TripId == TripId)
-            : candidates.Where(a => a.IsRealTime && Gap(a) <= MatchTolerance);
-        return candidates.MinBy(Gap);
-    }
+    /// <summary>This trip among a stop's departures (see <see cref="TripMatch.Find"/>).</summary>
+    public Arrival? FindIn(IEnumerable<Arrival> arrivals) =>
+        TripMatch.Find(arrivals, new StopLine(StopId, RouteId, DirectionId), TripId, PredictedTime);
 
     /// <summary>
     /// The row to light up in a list that may include timetable rows: this bus's real-time match, else,
@@ -222,6 +207,4 @@ public sealed record TrackedBus(
 
         return new TrackingStep(bus, alert, bus.IsOver(now));
     }
-
-    private TimeSpan Gap(Arrival arrival) => (arrival.PredictedTime - PredictedTime).Duration();
 }

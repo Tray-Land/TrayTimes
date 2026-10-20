@@ -79,16 +79,44 @@ namespace TrayTimes.Services
 
     internal static class ConnectivityService
     {
-        public static bool IsInternetAvailable => true;
+        public static event EventHandler? NetworkStatusChanged;
+
+        public static bool IsInternetAvailable { get; set; } = true;
+
+        /// <summary>Goes on or offline, and says so as Windows would (on the test's thread).</summary>
+        public static void SetOnline(bool online)
+        {
+            IsInternetAvailable = online;
+            NetworkStatusChanged?.Invoke(null, EventArgs.Empty);
+        }
+
+        public static void Reset()
+        {
+            NetworkStatusChanged = null;
+            IsInternetAvailable = true;
+        }
     }
 
     internal static class NotificationService
     {
         public static List<string> Titles { get; } = [];
 
+        /// <summary>Each notification shown: its title and its buttons.</summary>
+        public static List<(string Title, NotificationAction[] Buttons)> Shown { get; } = [];
+
         public static void Clear() { }
 
-        public static void Show(string title, string text, bool canStopTracking) => Titles.Add(title);
+        public static void Show(string title, string text, IReadOnlyList<NotificationAction> buttons)
+        {
+            Titles.Add(title);
+            Shown.Add((title, [.. buttons]));
+        }
+
+        public static void Reset()
+        {
+            Titles.Clear();
+            Shown.Clear();
+        }
     }
 }
 

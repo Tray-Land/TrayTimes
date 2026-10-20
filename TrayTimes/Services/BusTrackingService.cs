@@ -187,7 +187,7 @@ internal sealed class BusTrackingService
             TrackingAlert.Earlier => ("Your ride is coming sooner", $"{route} now leaves {bus.StopName} at {clock} ({inMinutes})."),
             _ => ("Your ride was canceled", $"{route} at {bus.StopName} was canceled. Tracking has stopped."),
         };
-        NotificationService.Show(title, text, canStopTracking: alert != TrackingAlert.Canceled);
+        NotificationService.Show(title, text, alert == TrackingAlert.Canceled ? [] : [NotificationAction.StopTracking]);
     }
 
     private static void SetKeepAwake(bool keepAwake) =>

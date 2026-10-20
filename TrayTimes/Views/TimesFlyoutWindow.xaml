@@ -19,11 +19,10 @@
             <KeyboardAccelerator Key="Back" Invoked="Back_Invoked" />
             <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="Back_Invoked" />
             <KeyboardAccelerator Key="F5" Invoked="Refresh_Invoked" />
+            <KeyboardAccelerator Key="Number0" Modifiers="Control" Invoked="Fit_Invoked" />
         </Grid.KeyboardAccelerators>
 
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition x:Name="MapRow" Height="230" />
             <RowDefinition Height="Auto" />
@@ -261,7 +260,11 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+            <Grid VerticalAlignment="Center" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
                 <Grid Width="8" Height="8">
                     <Ellipse x:Name="LiveDot" Fill="{ThemeResource SystemFillColorSuccessBrush}" />
                     <!--  Negative margin lets the ring circle the dot without shifting the text  -->
@@ -276,43 +279,86 @@
                         IsActive="False"
                         IsIndeterminate="True" />
                 </Grid>
-                <StackPanel>
+                <StackPanel Grid.Column="1">
                     <TextBlock
                         x:Name="TitleText"
                         Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="Departures" />
+                        Text="Departures"
+                        TextTrimming="CharacterEllipsis" />
                     <TextBlock
                         x:Name="UpdatedText"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}" />
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextTrimming="CharacterEllipsis" />
                 </StackPanel>
-            </StackPanel>
+            </Grid>
 
             <Button
+                x:Name="LocationPermissionButton"
+                x:Uid="LocationPermissionButton"
                 Grid.Column="1"
-                AutomationProperties.Name="Refresh arrival times"
-                Click="RefreshButton_Click"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="LocationPermissionButton"
                 Style="{StaticResource ToolbarButtonStyle}"
-                ToolTipService.ToolTip="Refresh (F5)">
+                Visibility="Collapsed">
                 <FontIcon
-                    x:Name="RefreshIcon"
+                    AutomationProperties.AccessibilityView="Raw"
                     FontSize="16"
-                    Glyph="&#xE72C;" />
+                    Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                    Glyph="&#xE7BA;" />
+                <Button.Flyout>
+                    <Flyout x:Name="LocationPermissionFlyout" Placement="BottomEdgeAlignedRight">
+                        <StackPanel MaxWidth="260" Spacing="12">
+                            <TextBlock
+                                x:Uid="LocationPermissionHeading"
+                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                x:Name="LocationPermissionMessage"
+                                x:Uid="LocationPermissionMessage"
+                                TextWrapping="Wrap" />
+                            <Button
+                                x:Name="GrantLocationPermissionButton"
+                                x:Uid="GrantLocationPermissionButton"
+                                HorizontalAlignment="Left"
+                                AutomationProperties.AutomationId="GrantLocationPermissionButton"
+                                Click="GrantLocationPermissionButton_Click" />
+                        </StackPanel>
+                    </Flyout>
+                </Button.Flyout>
             </Button>
-            <Button
-                x:Name="FitButton"
-                x:Uid="BoardFitButton"
+
+            <!--  Keep the board's center beside Settings rather than in a second header row  -->
+            <DropDownButton
+                x:Name="PlaceChip"
+                x:Uid="PlaceChip"
                 Grid.Column="2"
-                AutomationProperties.AutomationId="FitButton"
-                Click="FitButton_Click"
-                Style="{StaticResource ToolbarButtonStyle}">
-                <FontIcon
-                    x:Name="FitIcon"
-                    FontSize="16"
-                    Glyph="&#xE80F;" />
-            </Button>
+                MaxWidth="170"
+                Padding="8,4"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="PlaceChip">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon
+                        x:Name="PlaceChipGlyph"
+                        AutomationProperties.AccessibilityView="Raw"
+                        FontSize="14"
+                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                        Glyph="&#xE81D;" />
+                    <TextBlock
+                        x:Name="PlaceChipText"
+                        MaxWidth="108"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <DropDownButton.Flyout>
+                    <MenuFlyout
+                        x:Name="PlaceMenu"
+                        Opening="PlaceMenu_Opening"
+                        Placement="BottomEdgeAlignedRight" />
+                </DropDownButton.Flyout>
+            </DropDownButton>
             <Button
                 Grid.Column="3"
+                AutomationProperties.AutomationId="FlyoutSettingsButton"
                 AutomationProperties.Name="Stops and settings"
                 Click="SettingsButton_Click"
                 Style="{StaticResource ToolbarButtonStyle}"
@@ -324,59 +370,28 @@
             </Button>
         </Grid>
 
-        <!--  Where the board is centered; its menu jumps the board to a saved place or stop  -->
-        <DropDownButton
-            x:Name="PlaceChip"
-            x:Uid="PlaceChip"
-            Grid.Row="1"
-            Margin="10,0,10,6"
-            Padding="10,4"
-            AutomationProperties.AutomationId="PlaceChip">
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <FontIcon
-                    x:Name="PlaceChipGlyph"
-                    AutomationProperties.AccessibilityView="Raw"
-                    FontSize="14"
-                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                    Glyph="&#xE81D;" />
-                <TextBlock
-                    x:Name="PlaceChipText"
-                    MaxWidth="300"
-                    TextTrimming="CharacterEllipsis" />
-            </StackPanel>
-            <DropDownButton.Flyout>
-                <MenuFlyout
-                    x:Name="PlaceMenu"
-                    Opening="PlaceMenu_Opening"
-                    Placement="BottomEdgeAlignedLeft" />
-            </DropDownButton.Flyout>
-        </DropDownButton>
-
-        <InfoBar
-            x:Name="LocationPermissionBar"
-            x:Uid="LocationPermissionBar"
-            Grid.Row="2"
-            Margin="8,4,8,8"
-            AutomationProperties.AutomationId="LocationPermissionBar"
-            IsClosable="False"
-            IsOpen="False"
-            Severity="Warning"
-            Visibility="Collapsed">
-            <InfoBar.ActionButton>
-                <Button
-                    x:Name="GrantLocationPermissionButton"
-                    x:Uid="GrantLocationPermissionButton"
-                    AutomationProperties.AutomationId="GrantLocationPermissionButton"
-                    Click="GrantLocationPermissionButton_Click" />
-            </InfoBar.ActionButton>
-        </InfoBar>
-
         <!--  Map  -->
-        <Grid Grid.Row="3">
+        <Grid Grid.Row="1">
             <map:MapControl
                 x:Name="Map"
+                AutomationProperties.AutomationId="FlyoutMap"
                 AutomationProperties.Name="Map of your stops and the selected route's vehicles"
-                MapStyle="Road" />
+                MapStyle="Road"
+                SizeChanged="Map_SizeChanged">
+                <map:MapControl.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem
+                            x:Name="FitMenuItem"
+                            x:Uid="BoardFitMenuItem"
+                            AutomationProperties.AutomationId="FitMapMenuItem"
+                            Click="FitMenuItem_Click" />
+                        <MenuFlyoutItem
+                            x:Uid="RefreshMapMenuItem"
+                            AutomationProperties.AutomationId="RefreshMapMenuItem"
+                            Click="RefreshMenuItem_Click" />
+                    </MenuFlyout>
+                </map:MapControl.ContextFlyout>
+            </map:MapControl>
             <!--  Hides the map's light-gray clear color until the basemap's first tiles arrive  -->
             <Border
                 x:Name="MapCover"
@@ -404,7 +419,7 @@
         </Grid>
 
         <!--  Drag (or focus and press Up/Down) to trade map space for list space  -->
-        <views:ResizeCursorGrid Grid.Row="4">
+        <views:ResizeCursorGrid Grid.Row="2">
             <Thumb
                 x:Name="Splitter"
                 AutomationProperties.AutomationId="MapSplitter"
@@ -435,7 +450,7 @@
         </views:ResizeCursorGrid>
 
         <!--  Arrivals  -->
-        <Grid x:Name="ArrivalsPane" Grid.Row="5">
+        <Grid x:Name="ArrivalsPane" Grid.Row="3">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -499,13 +514,20 @@
 
         <ContentControl
             x:Name="SearchHost"
-            Grid.Row="5"
+            Grid.Row="3"
             HorizontalContentAlignment="Stretch"
             VerticalContentAlignment="Stretch"
             Visibility="Collapsed" />
         <ContentControl
             x:Name="TripHost"
-            Grid.Row="5"
+            Grid.Row="3"
+            HorizontalContentAlignment="Stretch"
+            VerticalContentAlignment="Stretch"
+            Visibility="Collapsed" />
+        <!--  The active trip's progress (or its Resume card), shown on every open during a trip  -->
+        <ContentControl
+            x:Name="ProgressHost"
+            Grid.Row="3"
             HorizontalContentAlignment="Stretch"
             VerticalContentAlignment="Stretch"
             Visibility="Collapsed" />
@@ -514,7 +536,7 @@
         <HyperlinkButton
             x:Name="PoweredByTransit"
             x:Uid="PoweredByTransit"
-            Grid.Row="6"
+            Grid.Row="4"
             Margin="0,0,8,4"
             Padding="6,2"
             HorizontalAlignment="Right"

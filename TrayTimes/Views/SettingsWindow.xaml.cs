@@ -256,7 +256,7 @@ public sealed partial class SettingsWindow : WindowEx
         }
 
         SettingsService.KeepAwakeWhileTracking = KeepAwakeToggle.IsOn;
-        App.Current.Tracker.ApplyKeepAwakeSetting();
+        App.Current.ApplyKeepAwakeSetting();
     }
 
     private void BudgetBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)

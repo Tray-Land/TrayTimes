@@ -2,6 +2,7 @@ using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using TrayTimes.Commute;
+using TrayTimes.Services;
 using TrayTimes.Transit;
 using TrayTimes.Views;
 using Windows.UI;
@@ -46,6 +47,9 @@ public sealed class SuggestionCardItem
 
     public string AutomationName { get; private init; } = string.Empty;
 
+    /// <summary>What selecting the trip does.</summary>
+    public string TripToolTip { get; private init; } = string.Empty;
+
     /// <summary>The trip in one line for the tray tooltip, e.g. "Work: leave in 6 min, 14 at 8:12"; null for a notice.</summary>
     public string? TooltipText { get; private init; }
 
@@ -72,7 +76,7 @@ public sealed class SuggestionCardItem
     public Visibility DestinationVisibility => CanChooseDestination ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Everything the card shows; equal signatures mean the card needn't be updated.</summary>
-    public string Signature => string.Join('|', Key, Glyph, Title, Detail, Note, IsBusy, AutomationName, ActionText, CanChooseDestination,
+    public string Signature => string.Join('|', Key, Glyph, Title, Detail, Note, IsBusy, AutomationName, TripToolTip, ActionText, CanChooseDestination,
         string.Join(';', Routes.Select(r => r.Signature)));
 
     /// <summary>The trip to <paramref name="leg"/>'s destination, counting down to when to leave.</summary>
@@ -121,7 +125,32 @@ public sealed class SuggestionCardItem
             Trip = trip,
             Leg = leg,
             AutomationName = note.Length == 0 ? name : AppStrings.Format("SuggestionNameWithNoteFormat", name, note),
+            TripToolTip = AppStrings.Get("SuggestionTripTooltip"),
             TooltipText = tooltip,
+        };
+    }
+
+    /// <summary>
+    /// The trip the rider started, in the suggestion's place: "Trip to Work · get off in 9 min". The tray tooltip
+    /// already leads with the trip, so this adds no line to it.
+    /// </summary>
+    /// <param name="step">Where the rider is; null for a trip waiting to be resumed.</param>
+    public static SuggestionCardItem ForActiveTrip(ActiveTrip trip, TripStep? step, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(trip);
+        LiveTrip live = trip.Progress.Trip;
+        return new SuggestionCardItem($"active|{trip.Leg.To.Id}", MapHelpers.PlaceGlyph(trip.Leg.To.Kind), TripMessages.CardTitle(trip, step, now),
+            AppStrings.Format("SuggestionArriveFormat", TripMessages.When(live.Arrives, now)))
+        {
+            Routes = [.. live.Legs.OfType<LiveRide>().Select((r, i) => new RouteChipItem(
+                r.Line.Route.DisplayId,
+                MapHelpers.ParseRouteColor(r.Departure?.RouteColor ?? r.Line.Route.Color),
+                isTransfer: i > 0))],
+            Trip = live,
+            Leg = trip.Leg,
+            AutomationName = TripMessages.CardName(trip, step, now),
+            TripToolTip = AppStrings.Get("TripCardTooltip"),
+            CanChooseDestination = false, // One trip at a time: end this one to plan another.
         };
     }
 

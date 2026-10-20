@@ -4,7 +4,7 @@ namespace TrayTimes.Transit;
 
 public enum TransitEndpoint { Departures, NearbyRoutes, Plan, SearchStops, Networks, Routes, RouteDetails, Vehicles }
 
-public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings, Trip }
+public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings, Trip, ActiveTrip }
 
 public enum TransitTrigger
 {
@@ -70,10 +70,10 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
     /// <summary>The consumer and trigger labelling requests made from the current async flow.</summary>
     public static (TransitConsumer Consumer, TransitTrigger Trigger) CurrentScope => Context.Value;
 
-    /// <summary>Tracking is urgent; anything the rider just did is manual; timers and the rest are automatic.</summary>
+    /// <summary>Tracking and an active trip are urgent; anything the rider just did is manual; timers and the rest are automatic.</summary>
     public static TransitPriority CurrentPriority => Context.Value switch
     {
-        (TransitConsumer.Tracking, _) => TransitPriority.Urgent,
+        (TransitConsumer.Tracking or TransitConsumer.ActiveTrip, _) => TransitPriority.Urgent,
         (_, TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
             or TransitTrigger.CenterChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
             or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection or TransitTrigger.VehicleSelected

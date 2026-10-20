@@ -1,10 +1,44 @@
+using System.Globalization;
+using System.Xml.Linq;
 using TrayTimes.Transit;
 
 namespace Microsoft.Windows.ApplicationModel.Resources
 {
+    /// <summary>
+    /// Returns each string's key, so a test can tell which string was chosen. Inside <see cref="UseEnglish"/>, it
+    /// returns the app's own English strings (Strings/en-us/Resources.resw) instead, so a test can read what the
+    /// rider sees and Narrator reads.
+    /// </summary>
     internal sealed class ResourceLoader
     {
-        public string GetString(string name) => name;
+        private static readonly AsyncLocal<bool> English = new();
+        private static readonly Lazy<Dictionary<string, string>> Strings = new(Load);
+
+        public string GetString(string name) =>
+            English.Value && Strings.Value.TryGetValue(name.Replace('/', '.'), out string? value) ? value : name;
+
+        /// <summary>Uses the app's English strings and the en-US culture on this test's flow until disposed.</summary>
+        public static IDisposable UseEnglish()
+        {
+            CultureInfo culture = CultureInfo.CurrentCulture;
+            English.Value = true;
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("en-US");
+            return new Scope(() =>
+            {
+                English.Value = false;
+                CultureInfo.CurrentCulture = culture;
+            });
+        }
+
+        private static Dictionary<string, string> Load() =>
+            XDocument.Load(Path.Combine(AppContext.BaseDirectory, "Strings", "Resources.resw")).Root!
+                .Elements("data")
+                .ToDictionary(d => (string)d.Attribute("name")!, d => (string)d.Element("value")!, StringComparer.Ordinal);
+
+        private sealed class Scope(Action dispose) : IDisposable
+        {
+            public void Dispose() => dispose();
+        }
     }
 }
 

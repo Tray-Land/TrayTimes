@@ -6,103 +6,11 @@
     xmlns:controls="using:TrayTimes.Controls">
 
     <UserControl.Resources>
-        <DataTemplate
-            x:Key="WalkLegTemplate"
-            x:DataType="controls:TripWalkItem"
-            x:DefaultBindMode="OneTime">
-            <Grid Padding="8,8" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="40" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <FontIcon
-                    VerticalAlignment="Top"
-                    AutomationProperties.AccessibilityView="Raw"
-                    FontSize="20"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Glyph="&#xE805;" />
-                <StackPanel Grid.Column="1" Spacing="3">
-                    <TextBlock
-                        Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="{x:Bind Title}"
-                        TextWrapping="Wrap" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind Detail}"
-                        TextWrapping="Wrap" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind Wait}"
-                        Visibility="{x:Bind WaitVisibility}" />
-                </StackPanel>
-            </Grid>
-        </DataTemplate>
-
-        <DataTemplate
-            x:Key="RideLegTemplate"
-            x:DataType="controls:TripRideItem"
-            x:DefaultBindMode="OneTime">
-            <Grid Padding="8,8" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="40" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Border
-                    Height="28"
-                    Padding="4,0"
-                    VerticalAlignment="Top"
-                    Background="{x:Bind RouteBackground}"
-                    CornerRadius="4">
-                    <TextBlock
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Foreground="{x:Bind RouteForeground}"
-                        Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="{x:Bind RouteLabel}" />
-                </Border>
-                <StackPanel Grid.Column="1" Spacing="3">
-                    <TextBlock
-                        Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="{x:Bind Destination}"
-                        TextWrapping="Wrap" />
-                    <TextBlock Text="{x:Bind Board}" TextWrapping="Wrap" />
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind Detail}"
-                        TextWrapping="Wrap" />
-                    <ScrollViewer
-                        Margin="0,3,0,0"
-                        AutomationProperties.Name="{x:Bind TimesName}"
-                        HorizontalScrollBarVisibility="Auto"
-                        HorizontalScrollMode="Enabled"
-                        VerticalScrollBarVisibility="Disabled"
-                        VerticalScrollMode="Disabled"
-                        Visibility="{x:Bind TimesVisibility}">
-                        <ItemsControl
-                            Margin="0,0,0,6"
-                            ItemTemplate="{x:Bind TimeTemplate}"
-                            ItemsSource="{x:Bind Times}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="6" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                    </ScrollViewer>
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind Alight}"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-            </Grid>
-        </DataTemplate>
-
-        <controls:TripLegTemplateSelector
-            x:Key="LegTemplates"
-            RideTemplate="{StaticResource RideLegTemplate}"
-            WalkTemplate="{StaticResource WalkLegTemplate}" />
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <controls:TripLegTemplates />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </UserControl.Resources>
 
     <Grid>
@@ -110,15 +18,11 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid Padding="6,2,10,0" ColumnSpacing="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
+        <!--  Back · where to and when it arrives · when to travel · Go  -->
+        <controls:TripHeaderPanel Margin="6,2,10,4">
             <Button
                 x:Name="BackButton"
                 x:Uid="TripBackButton"
@@ -130,92 +34,102 @@
                     FontSize="16"
                     Glyph="&#xE72B;" />
             </Button>
-            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+            <StackPanel VerticalAlignment="Center">
                 <TextBlock
                     x:Name="HeadingText"
                     AutomationProperties.AutomationId="TripHeading"
+                    MaxLines="2"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
+                    TextTrimming="CharacterEllipsis"
                     TextWrapping="Wrap" />
                 <TextBlock
                     x:Name="ArrivalText"
                     AutomationProperties.AutomationId="TripArrival"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Style="{StaticResource CaptionTextBlockStyle}" />
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    TextWrapping="Wrap" />
             </StackPanel>
-        </Grid>
-
-        <Grid
-            x:Name="TimeAnchor"
-            Grid.Row="1"
-            Margin="8,4">
-            <FlyoutBase.AttachedFlyout>
-                <Flyout x:Name="TimeEditorFlyout">
-                    <StackPanel Width="280" Spacing="12">
-                        <TextBlock
-                            x:Name="TimeEditorHeading"
-                            Style="{StaticResource BodyStrongTextBlockStyle}" />
-                        <CalendarDatePicker
-                            x:Name="TravelDatePicker"
-                            x:Uid="TripTravelDate"
-                            AutomationProperties.AutomationId="TripTravelDate"
-                            HorizontalAlignment="Stretch" />
-                        <TimePicker
-                            x:Name="TravelClockPicker"
-                            x:Uid="TripTravelClock"
-                            AutomationProperties.AutomationId="TripTravelClock"
-                            HorizontalAlignment="Stretch"
-                            MinuteIncrement="5" />
-                        <TextBlock
-                            x:Name="TimeValidationText"
-                            AutomationProperties.AutomationId="TripTimeValidation"
-                            AutomationProperties.LiveSetting="Polite"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            TextWrapping="Wrap"
-                            Visibility="Collapsed" />
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <Button
-                                x:Uid="TripTimeApply"
-                                AutomationProperties.AutomationId="TripTimeApply"
-                                Click="TimeApply_Click"
-                                Style="{StaticResource AccentButtonStyle}" />
-                            <Button
-                                x:Uid="TripTimeCancel"
-                                AutomationProperties.AutomationId="TripTimeCancel"
-                                Click="TimeCancel_Click" />
-                        </StackPanel>
-                    </StackPanel>
-                </Flyout>
-            </FlyoutBase.AttachedFlyout>
-            <DropDownButton
-                x:Name="TimeButton"
-                AutomationProperties.AutomationId="TripTimeButton"
-                HorizontalAlignment="Left">
-                <TextBlock
-                    x:Name="TimeButtonText"
-                    MaxWidth="280"
-                    TextTrimming="CharacterEllipsis" />
-                <DropDownButton.Flyout>
-                    <MenuFlyout>
-                        <MenuFlyoutItem
-                            x:Uid="TripLeaveNow"
-                            AutomationProperties.AutomationId="TripLeaveNow"
-                            Click="LeaveNow_Click" />
-                        <MenuFlyoutItem
-                            x:Uid="TripLeaveAt"
-                            AutomationProperties.AutomationId="TripLeaveAt"
-                            Click="LeaveAt_Click" />
-                        <MenuFlyoutItem
-                            x:Uid="TripArriveBy"
-                            AutomationProperties.AutomationId="TripArriveBy"
-                            Click="ArriveBy_Click" />
-                    </MenuFlyout>
-                </DropDownButton.Flyout>
-            </DropDownButton>
-        </Grid>
+            <StackPanel
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="6">
+                <DropDownButton
+                    x:Name="TimeButton"
+                    Padding="10,5,8,6"
+                    AutomationProperties.AutomationId="TripTimeButton">
+                    <FlyoutBase.AttachedFlyout>
+                        <Flyout x:Name="TimeEditorFlyout" Placement="BottomEdgeAlignedRight">
+                            <StackPanel Width="280" Spacing="12">
+                                <TextBlock
+                                    x:Name="TimeEditorHeading"
+                                    Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                <CalendarDatePicker
+                                    x:Name="TravelDatePicker"
+                                    x:Uid="TripTravelDate"
+                                    AutomationProperties.AutomationId="TripTravelDate"
+                                    HorizontalAlignment="Stretch" />
+                                <TimePicker
+                                    x:Name="TravelClockPicker"
+                                    x:Uid="TripTravelClock"
+                                    AutomationProperties.AutomationId="TripTravelClock"
+                                    HorizontalAlignment="Stretch"
+                                    MinuteIncrement="5" />
+                                <TextBlock
+                                    x:Name="TimeValidationText"
+                                    AutomationProperties.AutomationId="TripTimeValidation"
+                                    AutomationProperties.LiveSetting="Polite"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    TextWrapping="Wrap"
+                                    Visibility="Collapsed" />
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button
+                                        x:Uid="TripTimeApply"
+                                        AutomationProperties.AutomationId="TripTimeApply"
+                                        Click="TimeApply_Click"
+                                        Style="{StaticResource AccentButtonStyle}" />
+                                    <Button
+                                        x:Uid="TripTimeCancel"
+                                        AutomationProperties.AutomationId="TripTimeCancel"
+                                        Click="TimeCancel_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Flyout>
+                    </FlyoutBase.AttachedFlyout>
+                    <TextBlock
+                        x:Name="TimeButtonText"
+                        MaxWidth="190"
+                        TextTrimming="CharacterEllipsis" />
+                    <DropDownButton.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuFlyoutItem
+                                x:Uid="TripLeaveNow"
+                                AutomationProperties.AutomationId="TripLeaveNow"
+                                Click="LeaveNow_Click" />
+                            <MenuFlyoutItem
+                                x:Uid="TripLeaveAt"
+                                AutomationProperties.AutomationId="TripLeaveAt"
+                                Click="LeaveAt_Click" />
+                            <MenuFlyoutItem
+                                x:Uid="TripArriveBy"
+                                AutomationProperties.AutomationId="TripArriveBy"
+                                Click="ArriveBy_Click" />
+                        </MenuFlyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+                <Button
+                    x:Name="GoButton"
+                    x:Uid="GoButton"
+                    MinWidth="52"
+                    AutomationProperties.AutomationId="GoButton"
+                    Click="GoButton_Click"
+                    IsEnabled="False"
+                    Style="{StaticResource AccentButtonStyle}" />
+            </StackPanel>
+        </controls:TripHeaderPanel>
 
         <ScrollViewer
             x:Uid="TripOptionsScroller"
-            Grid.Row="2"
+            Grid.Row="1"
             Margin="6,0"
             HorizontalScrollBarVisibility="Auto"
             HorizontalScrollMode="Enabled"
@@ -230,7 +144,7 @@
 
         <InfoBar
             x:Name="NoticeBar"
-            Grid.Row="3"
+            Grid.Row="2"
             Margin="8,4"
             AutomationProperties.AutomationId="TripNotice"
             AutomationProperties.LiveSetting="Polite"
@@ -241,7 +155,7 @@
         <ListView
             x:Name="LegsList"
             x:Uid="TripLegs"
-            Grid.Row="4"
+            Grid.Row="3"
             Padding="6,0,6,6"
             AutomationProperties.AutomationId="TripLegs"
             IsItemClickEnabled="False"

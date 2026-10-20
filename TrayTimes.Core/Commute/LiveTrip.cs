@@ -138,24 +138,33 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
             d.TripId is not null && a.TripId is not null ? d.TripId == a.TripId : d.Departs == (a.ScheduledTime ?? a.PredictedTime))).Select(Scheduled);
         return [.. known.Concat(planned).Prepend(first)
             .Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ride.Starts)
-            .DistinctBy(a => a.TripId ?? $"t{a.PredictedTime.ToUnixTimeSeconds()}")
+            .DistinctBy(a => TripKey(a.TripId, a.PredictedTime))
             .OrderBy(a => a.PredictedTime)
             .Take(maxDepartures)];
     }
 
-    /// <summary>The departure of any of the ride's lines, at or after <paramref name="ready"/>, that gets off soonest.</summary>
-    private static LiveRide? Board(RideLeg ride, ILookup<StopLine, Arrival> batch, DateTimeOffset ready) => ride.Lines
-        .Select(line => Next(ride, line, batch[new StopLine(line.BoardAt.Id, line.Route.Id, line.Direction.Id)], ready))
+    /// <summary>Names one departure: its trip ID, else its time, for a feed without trip IDs.</summary>
+    internal static string TripKey(string? tripId, DateTimeOffset departs) =>
+        tripId ?? $"@{departs.ToUnixTimeSeconds()}";
+
+    /// <summary>
+    /// The departure of any of the ride's lines, at or after <paramref name="ready"/>, that gets off soonest,
+    /// leaving out <paramref name="skipped"/> trips (by <see cref="TripKey"/>).
+    /// </summary>
+    internal static LiveRide? Board(RideLeg ride, ILookup<StopLine, Arrival> batch, DateTimeOffset ready, IReadOnlySet<string>? skipped = null) => ride.Lines
+        .Select(line => Next(ride, line, batch[new StopLine(line.BoardAt.Id, line.Route.Id, line.Direction.Id)], ready, skipped))
         .OfType<LiveRide>()
         .OrderBy(r => r.Ends)
         .ThenBy(r => r.Starts)
         .FirstOrDefault();
 
     /// <summary>The line's next departure at or after <paramref name="ready"/>: the batch's, else the plan's.</summary>
-    private static LiveRide? Next(RideLeg ride, RideLine line, IEnumerable<Arrival> batch, DateTimeOffset ready)
+    private static LiveRide? Next(RideLeg ride, RideLine line, IEnumerable<Arrival> batch, DateTimeOffset ready, IReadOnlySet<string>? skipped)
     {
         Arrival[] known = [.. batch];
-        if (known.Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ready).MinBy(a => a.PredictedTime) is { } departure)
+        bool Skipped(string? tripId, DateTimeOffset departs) => skipped?.Contains(TripKey(tripId, departs)) ?? false;
+        if (known.Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ready && !Skipped(a.TripId, a.PredictedTime))
+            .MinBy(a => a.PredictedTime) is { } departure)
         {
             return new LiveRide(ride, line, departure.PredictedTime, departure.PredictedTime + RideTime(ride, line, departure), departure);
         }
@@ -164,14 +173,14 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
         // or already gone) isn't taken from the plan.
         HashSet<string> knownTrips = [.. known.Select(a => a.TripId).OfType<string>()];
         return line.Departures
-            .Where(d => d.Departs >= ready && (d.TripId is null || !knownTrips.Contains(d.TripId)))
+            .Where(d => d.Departs >= ready && (d.TripId is null || !knownTrips.Contains(d.TripId)) && !Skipped(d.TripId, d.Departs))
             .MinBy(d => d.Departs) is { } planned
             ? new LiveRide(ride, line, planned.Departs, planned.Alights, null)
             : null;
     }
 
     /// <summary>How long the plan rides <paramref name="departure"/>'s trip, else the line's planned trip nearest in time, else the leg.</summary>
-    private static TimeSpan RideTime(RideLeg ride, RideLine line, Arrival departure)
+    internal static TimeSpan RideTime(RideLeg ride, RideLine line, Arrival departure)
     {
         PlannedDeparture? planned = line.Departures.FirstOrDefault(d => d.TripId is not null && d.TripId == departure.TripId)
             ?? line.Departures.MinBy(d => (d.Departs - departure.PredictedTime).Duration());

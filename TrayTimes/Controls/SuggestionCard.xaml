@@ -54,11 +54,11 @@
         <!--  The trip: where to, when to leave, its rides, and when it gets there  -->
         <Button
             x:Name="TripButton"
-            x:Uid="SuggestionTripButton"
             AutomationProperties.AutomationId="SuggestionCard"
             AutomationProperties.Name="{x:Bind Item.AutomationName}"
             Click="TripButton_Click"
             Style="{StaticResource RowButtonStyle}"
+            ToolTipService.ToolTip="{x:Bind Item.TripToolTip}"
             Visibility="{x:Bind Item.TripVisibility}">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
