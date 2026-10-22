@@ -228,6 +228,15 @@ internal static class TripMessages
 
         LiveRide ride = rides[changed];
         string title = AppStrings.Format(alert == TripAlert.RideChanged ? "TripRideChangedTitleFormat" : "TripConnectionChangedTitleFormat", Route(ride), Clock(ride.Starts));
+
+        // Still on the ride before it, "it leaves in 6 min" isn't something to act on; where to get off, and the wait after, is.
+        if (changed > 0 && progress.Step(now, leadMinutes: 0) is { Kind: TripStepKind.Ride, AwaitsReplan: false } step && step.Ride == changed - 1)
+        {
+            LiveRide off = rides[changed - 1];
+            string getOff = AppStrings.Format("TripStatusGetOffFormat", StopName(off.Line.AlightAt), In(Minutes(off.Ends, now)));
+            return (title, AppStrings.Format("TripTransferChangedFormat", getOff, AfterRide(live, changed - 1, place, spoken: false), place, Clock(live.Arrives)));
+        }
+
         return (title, AppStrings.Format("TripRideLeavesFormat", StopName(ride.Line.BoardAt), In(Minutes(ride.Starts, now)), place, Clock(live.Arrives)));
     }
 
@@ -257,12 +266,24 @@ internal static class TripMessages
             : AppStrings.Format("TripCatchRideFormat", Route(next), StopName(next.Line.BoardAt), Clock(next.Starts));
     }
 
-    /// <summary>What comes after getting off <paramref name="ride"/>: "Then walk 1 min to the 30 at 8:30".</summary>
+    /// <summary>
+    /// What comes after getting off <paramref name="ride"/>: "Then walk 1 min to the 30 at 8:30", or, when the next
+    /// ride leaves a minute or more after the rider can be at its stop, the wait too: "Then wait 4 min for the 30 at 8:30".
+    /// </summary>
     private static string AfterRide(LiveTrip live, int ride, string place, bool spoken)
     {
         (TimeSpan walk, LiveRide? next) = WalkTo(live, ride + 1);
         if (next is not null)
         {
+            int wait = (int)(next.Starts - (live.Legs.OfType<LiveRide>().ElementAt(ride).Ends + walk)).TotalMinutes;
+            if (wait >= 1)
+            {
+                string waiting = Duration(TimeSpan.FromMinutes(wait), spoken);
+                return walk > TimeSpan.Zero
+                    ? AppStrings.Format("TripThenWalkWaitForRideFormat", Duration(walk, spoken), waiting, Route(next), Clock(next.Starts))
+                    : AppStrings.Format("TripThenWaitForRideFormat", waiting, Route(next), Clock(next.Starts));
+            }
+
             return walk > TimeSpan.Zero
                 ? AppStrings.Format("TripThenWalkToRideFormat", Duration(walk, spoken), Route(next), Clock(next.Starts))
                 : AppStrings.Format("TripThenCatchRideFormat", Route(next), Clock(next.Starts));

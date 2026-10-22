@@ -1013,6 +1013,18 @@
     <value>Then catch the {0} at {1}</value>
     <comment>After getting off, in a notification and the trip's status. {0} is a route; {1} a time of day.</comment>
   </data>
+  <data name="TripThenWaitForRideFormat" xml:space="preserve">
+    <value>Then wait {0} for the {1} at {2}</value>
+    <comment>After getting off at the stop where the next ride boards, in a notification and the trip's status. {0} is how long, such as "4 min" (TripDurationFormat); {1} a route; {2} a time of day.</comment>
+  </data>
+  <data name="TripThenWalkWaitForRideFormat" xml:space="preserve">
+    <value>Then walk {0} and wait {1} for the {2} at {3}</value>
+    <comment>After getting off, when the next ride boards elsewhere and still leaves later, in a notification and the trip's status. {0} is the walk, such as "2 min"; {1} the wait, such as "3 min" (both TripDurationFormat); {2} a route; {3} a time of day.</comment>
+  </data>
+  <data name="TripTransferChangedFormat" xml:space="preserve">
+    <value>{0}. {1}. You'll arrive at {2} at {3}.</value>
+    <comment>A notification's text when the next ride, a transfer, moves while the rider is still on the ride before it. {0} is when to get off (TripStatusGetOffFormat); {1} what comes next (such as TripThenWaitForRideFormat); {2} a place; {3} a time of day.</comment>
+  </data>
   <data name="TripThenWalkToPlaceFormat" xml:space="preserve">
     <value>Then walk {0} to {1}, arriving {2}</value>
     <comment>After getting off, in a notification and the trip's status. {0} is how long, such as "3 min" (TripDurationFormat); {1} a place; {2} a time of day.</comment>

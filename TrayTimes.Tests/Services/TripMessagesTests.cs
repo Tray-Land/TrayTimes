@@ -80,7 +80,7 @@ public sealed class TripMessagesTests
     }
 
     [TestMethod]
-    public void Status_OnTheFirstRide_SaysWhereToGetOffAndTheWalkToTheNext()
+    public void Status_OnTheFirstRide_SaysWhereToGetOffAndTheWalkAndWaitForTheNext()
     {
         // Arrange
         using IDisposable english = ResourceLoader.UseEnglish();
@@ -90,8 +90,8 @@ public sealed class TripMessagesTests
 
         // Assert
         Assert.AreEqual("Get off at State St in 9 min", status.Title);
-        Assert.AreEqual($"Then walk 2 min to the 30 at {Clock(At(25))}", status.Detail);
-        Assert.AreEqual($"Get off at State St in 9 minutes. Then walk 2 minutes to the 30 at {Clock(At(25))}", status.Spoken);
+        Assert.AreEqual($"Then walk 2 min and wait 3 min for the 30 at {Clock(At(25))}", status.Detail);
+        Assert.AreEqual($"Get off at State St in 9 minutes. Then walk 2 minutes and wait 3 minutes for the 30 at {Clock(At(25))}", status.Spoken);
     }
 
     [TestMethod]
@@ -211,7 +211,7 @@ public sealed class TripMessagesTests
         string name = TripMessages.CardName(trip, trip.Progress.Step(At(11), Lead), At(11));
 
         // Assert
-        Assert.AreEqual($"Trip to Work. Get off at State St in 9 minutes. Then walk 2 minutes to the 30 at {Clock(At(25))}", name);
+        Assert.AreEqual($"Trip to Work. Get off at State St in 9 minutes. Then walk 2 minutes and wait 3 minutes for the 30 at {Clock(At(25))}", name);
     }
 
     [TestMethod]
@@ -374,22 +374,119 @@ public sealed class TripMessagesTests
     }
 
     [TestMethod]
-    public void Alert_GetOffSoonBeforeATransfer_SaysTheWalkToTheNextRide()
+    public void Alert_GetOffSoonBeforeATransferWithAWalkAndAWait_SaysBothBeforeTheNextRide()
     {
         // Arrange
         using IDisposable english = ResourceLoader.UseEnglish();
-        TripProgress progress = Trip().Progress;
+
+        // Act: the 14 gets off at 8:20, 2 minutes' walk from the 30, which leaves at 8:25.
+        (string title, string text) = GetOffSoonAlert(Transfer(walk: 2, departs: 25));
+
+        // Assert
+        Assert.AreEqual("Get off at State St in 2 min", title);
+        Assert.AreEqual($"Then walk 2 min and wait 3 min for the 30 at {Clock(At(25))}", text);
+    }
+
+    [TestMethod]
+    public void Alert_GetOffSoonBeforeATransferAtTheSameStop_SaysHowLongToWaitForTheNextBus()
+    {
+        // Arrange
+        using IDisposable english = ResourceLoader.UseEnglish();
+
+        // Act: no walk between them; the 30 leaves 5 minutes after the 14 gets off.
+        (string title, string text) = GetOffSoonAlert(Transfer(walk: 0, departs: 25));
+
+        // Assert
+        Assert.AreEqual("Get off at State St in 2 min", title);
+        Assert.AreEqual($"Then wait 5 min for the 30 at {Clock(At(25))}", text);
+    }
+
+    [TestMethod]
+    public void Alert_GetOffSoonBeforeATransferWithNoWait_SaysTheWalkToTheNextRide()
+    {
+        // Arrange
+        using IDisposable english = ResourceLoader.UseEnglish();
+
+        // Act: the walk gets there just as the 30 leaves.
+        (string title, string text) = GetOffSoonAlert(Transfer(walk: 2, departs: 22));
+
+        // Assert
+        Assert.AreEqual("Get off at State St in 2 min", title);
+        Assert.AreEqual($"Then walk 2 min to the 30 at {Clock(At(22))}", text);
+    }
+
+    [TestMethod]
+    public void Alert_GetOffSoonBeforeATransferLeavingAsYouGetOff_SaysToCatchTheNextRide()
+    {
+        // Arrange
+        using IDisposable english = ResourceLoader.UseEnglish();
+
+        // Act: no walk, and the 30 leaves as the 14 gets off.
+        (string title, string text) = GetOffSoonAlert(Transfer(walk: 0, departs: 20));
+
+        // Assert
+        Assert.AreEqual("Get off at State St in 2 min", title);
+        Assert.AreEqual($"Then catch the 30 at {Clock(At(20))}", text);
+    }
+
+    [TestMethod]
+    public void Alert_RideChangedWhileOnTheRideBeforeIt_SaysWhereToGetOffAndTheWait()
+    {
+        // Arrange: 8:12, on the 14, which the rider was last told about the 30 behind.
+        using IDisposable english = ResourceLoader.UseEnglish();
+        TripProgress progress = Trip().Progress with { AnnouncedRide = 1 };
+
+        // Act
+        (string title, string text) = TripMessages.Alert(new ActiveTrip(progress, Leg(), new TripDestination(Work.Location)), TripAlert.RideChanged, progress, At(12));
+
+        // Assert
+        Assert.AreEqual($"The 30 now leaves at {Clock(At(25))}", title);
+        Assert.AreEqual($"Get off at State St in 8 min. Then walk 2 min and wait 3 min for the 30 at {Clock(At(25))}. You'll arrive at Work at {Clock(At(38))}.", text);
+    }
+
+    [TestMethod]
+    public void Alert_RideChangedWhileHeadingToItsStop_SaysWhenItLeaves()
+    {
+        // Arrange: 8:22, off the 14 and at the 30's stop.
+        using IDisposable english = ResourceLoader.UseEnglish();
+        TripProgress progress = Trip().Progress with { AnnouncedRide = 1 };
+
+        // Act
+        (string title, string text) = TripMessages.Alert(new ActiveTrip(progress, Leg(), new TripDestination(Work.Location)), TripAlert.RideChanged, progress, At(22));
+
+        // Assert
+        Assert.AreEqual($"The 30 now leaves at {Clock(At(25))}", title);
+        Assert.AreEqual($"It leaves Lake St in 3 min. You'll arrive at Work at {Clock(At(38))}.", text);
+    }
+
+    /// <summary>The get-off alert for the 14 at 8:18, as the trip raises it, with the 14 and then the 30 planned as <paramref name="itinerary"/> says.</summary>
+    private static (string Title, string Text) GetOffSoonAlert(TripItinerary itinerary)
+    {
+        TripProgress progress = TripProgress.Start(LiveTrip.Compute(itinerary, [], At(-10))!, default, null, Lead, At(-10));
         for (int minute = -10; minute <= 18; minute++)
         {
             progress = progress.Advance(null, Lead, At(minute)).Progress;
         }
 
-        // Act
-        (string title, string text) = TripMessages.Alert(new ActiveTrip(progress, Leg(), new TripDestination(Work.Location)), TripAlert.GetOffSoon, progress, At(18));
+        return TripMessages.Alert(new ActiveTrip(progress, Leg(), new TripDestination(Work.Location)), TripAlert.GetOffSoon, progress, At(18));
+    }
 
-        // Assert
-        Assert.AreEqual("Get off at State St in 2 min", title);
-        Assert.AreEqual($"Then walk 2 min to the 30 at {Clock(At(25))}", text);
+    /// <summary>Walk 5 min, the 14 (8:05–8:20), <paramref name="walk"/> minutes' walk (none when 0), the 30 from <paramref name="departs"/> for 10 min, and a 3 min walk to Work.</summary>
+    private static TripItinerary Transfer(int walk, int departs)
+    {
+        List<TripLeg> legs =
+        [
+            Walk(0, 5),
+            new RideLeg(At(5), At(20), [Line(Fourteen, "Oak & 5th", "State St", 5, 20, "14-1")]),
+        ];
+        if (walk > 0)
+        {
+            legs.Add(Walk(20, 20 + walk));
+        }
+
+        legs.Add(new RideLeg(At(departs), At(departs + 10), [Line(Thirty, "Lake St", "Pine Ave", departs, departs + 10, "30-1")]));
+        legs.Add(Walk(departs + 10, departs + 13));
+        return new TripItinerary(legs, At(0), At(departs + 13));
     }
 
     private static TripStatus Status(ActiveTrip trip, DateTimeOffset now) => TripMessages.Status(trip, trip.Progress.Step(now, Lead), now);
