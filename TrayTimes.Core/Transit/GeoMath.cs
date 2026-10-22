@@ -14,6 +14,42 @@ public static class GeoMath
         return 2 * EarthRadiusMeters * Math.Asin(Math.Min(1, Math.Sqrt(h)));
     }
 
+    /// <summary>
+    /// The point <paramref name="fraction"/> (0 to 1, clamped) of the way along <paramref name="path"/> by distance,
+    /// for placing a moving vehicle roughly. Null for an empty path.
+    /// </summary>
+    public static GeoPoint? PointAlong(IReadOnlyList<GeoPoint> path, double fraction)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        if (path.Count == 0)
+        {
+            return null;
+        }
+
+        double total = 0;
+        for (int i = 1; i < path.Count; i++)
+        {
+            total += DistanceMeters(path[i - 1], path[i]);
+        }
+
+        double remaining = Math.Clamp(fraction, 0, 1) * total;
+        for (int i = 1; i < path.Count; i++)
+        {
+            double segment = DistanceMeters(path[i - 1], path[i]);
+            if (segment > 0 && remaining <= segment)
+            {
+                double along = remaining / segment;
+                return new GeoPoint(
+                    path[i - 1].Lat + ((path[i].Lat - path[i - 1].Lat) * along),
+                    path[i - 1].Lon + ((path[i].Lon - path[i - 1].Lon) * along));
+            }
+
+            remaining -= segment;
+        }
+
+        return path[^1];
+    }
+
     /// <summary>Initial compass bearing from <paramref name="from"/> to <paramref name="to"/>, in whole degrees clockwise from north (0-359).</summary>
     public static int BearingDegrees(GeoPoint from, GeoPoint to)
     {

@@ -48,6 +48,79 @@ public sealed class GeoMathTests
     }
 
     [TestMethod]
+    public void PointAlong_EmptyPath_ReturnsNull()
+    {
+        // Act
+        GeoPoint? point = GeoMath.PointAlong([], 0.5);
+
+        // Assert
+        Assert.IsNull(point);
+    }
+
+    [TestMethod]
+    [DataRow(-1.0)]
+    [DataRow(0.0)]
+    [DataRow(0.5)]
+    [DataRow(2.0)]
+    public void PointAlong_SinglePoint_ReturnsThatPoint(double fraction)
+    {
+        // Act
+        GeoPoint? point = GeoMath.PointAlong([new GeoPoint(43, -88)], fraction);
+
+        // Assert
+        Assert.AreEqual(new GeoPoint(43, -88), point);
+    }
+
+    [TestMethod]
+    [DataRow(-0.5, 43.0)]
+    [DataRow(0.0, 43.0)]
+    [DataRow(0.5, 43.5)]
+    [DataRow(1.0, 44.0)]
+    [DataRow(1.5, 44.0)]
+    public void PointAlong_StraightLine_InterpolatesAndClampsTheFraction(double fraction, double expectedLat)
+    {
+        // Arrange
+        GeoPoint[] path = [new(43, -88), new(44, -88)];
+
+        // Act
+        GeoPoint? point = GeoMath.PointAlong(path, fraction);
+
+        // Assert
+        Assert.IsNotNull(point);
+        Assert.AreEqual(expectedLat, point.Value.Lat, 1e-9);
+        Assert.AreEqual(-88, point.Value.Lon, 1e-9);
+    }
+
+    [TestMethod]
+    public void PointAlong_UnevenSegments_MeasuresByDistanceNotByPoints()
+    {
+        // Arrange: a long leg north, then a short one east; halfway by distance is well inside the first.
+        GeoPoint[] path = [new(43, -88), new(44, -88), new(44, -87.99)];
+
+        // Act
+        GeoPoint? point = GeoMath.PointAlong(path, 0.5);
+
+        // Assert
+        Assert.IsNotNull(point);
+        Assert.IsGreaterThan(43.4, point.Value.Lat);
+        Assert.IsLessThan(43.6, point.Value.Lat);
+        Assert.AreEqual(-88, point.Value.Lon, 1e-9);
+    }
+
+    [TestMethod]
+    public void PointAlong_PointsThatDoNotMove_ReturnsTheLastPoint()
+    {
+        // Arrange
+        GeoPoint[] path = [new(43, -88), new(43, -88)];
+
+        // Act
+        GeoPoint? point = GeoMath.PointAlong(path, 0.5);
+
+        // Assert
+        Assert.AreEqual(new GeoPoint(43, -88), point);
+    }
+
+    [TestMethod]
     public void DecodePolyline_GoogleReferenceExample_ReturnsItsPoints()
     {
         // Arrange: the example from Google's encoded polyline algorithm documentation.

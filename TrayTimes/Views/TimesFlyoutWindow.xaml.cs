@@ -52,6 +52,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private const int MaxNearbyStops = 8;
     private const int MaxRoutedStops = 12; // walking routes looked up per discovery
     private const double WalkingMetersPerMinute = 80; // about 3 mph
+    private const double ShortWalkZoom = 17; // a walk too short to frame by its bounds: about a block's width fits
+    private const double VehicleZoom = 16; // a bus and the streets around it
     private static readonly TimeSpan PendingPopWindow = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan LocationTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RecentDismissWindow = TimeSpan.FromMilliseconds(300);
@@ -152,6 +154,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private TripProgressView? _progressView;
     private bool IsProgressOpen => ProgressHost.Visibility == Visibility.Visible;
     private bool _progressMapInitialized;
+    private readonly TripStepZoom _stepZoom = new();
     private bool IsTripShown => IsTripOpen || IsProgressOpen; // A trip, not the board, owns the map.
 
     // Motion state: which rows have already animated in, so a refresh only animates what's new or changed.
@@ -2236,6 +2239,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     /// </summary>
     private void OpenProgress()
     {
+        // Even when already open: a reopen's CloseSearch has just put the board back over it.
+        ArrivalsPane.Visibility = Visibility.Collapsed;
+        PlaceChip.Visibility = Visibility.Collapsed;
         if (IsProgressOpen)
         {
             RenderProgress(DateTimeOffset.Now);
@@ -2250,17 +2256,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _progressView.EndRequested += (_, _) => _trips.End();
             _progressView.MissedRequested += (_, _) => _ = _trips.MissedAsync();
             _progressView.ResumeRequested += (_, _) => _ = _trips.ResumeAsync();
+            _progressView.StepInvoked += ProgressView_StepInvoked;
             ProgressHost.Content = _progressView;
         }
 
+        _stepZoom.Reset();
         _tripMap.Invalidate();
         _progressMapInitialized = false;
         _vehiclePositions.Invalidate();
         ClearVehicles();
         HideMapCaption(animate: false);
         ResetRoutes();
-        ArrivalsPane.Visibility = Visibility.Collapsed;
-        PlaceChip.Visibility = Visibility.Collapsed;
         ProgressHost.Visibility = Visibility.Visible;
         SetFitLabel(isTrip: true);
         RenderProgress(DateTimeOffset.Now);
@@ -2317,6 +2323,53 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _tripMap.Emphasize(step?.Leg ?? -1);
         FollowRide(trip, step, now);
+    }
+
+    /// <summary>
+    /// A click on one of the progress view's steps frames that leg on the map: a walk from point to point, or a ride
+    /// from boarding to getting off. On the ride the rider is on, clicks alternate between the bus about where it is
+    /// now and the whole ride.
+    /// </summary>
+    private void ProgressView_StepInvoked(object? sender, int index)
+    {
+        if (_trips.Current is not { } trip || trip.Progress.Trip.Legs.ElementAtOrDefault(index) is not { } leg)
+        {
+            return;
+        }
+
+        bool onRide = leg is LiveRide && _trips.Step is { Kind: TripStepKind.Ride } step && step.Leg == index;
+        TripStepView view = _stepZoom.Tap(index, onRide);
+        switch (leg)
+        {
+            case LiveWalk walk:
+                _ = MapHelpers.FrameAsync(Map, walk.Walk.Path, MapAnimationKind.Default, ShortWalkZoom);
+                break;
+            case LiveRide ride when view == TripStepView.Vehicle:
+                List<GeoPoint> vehicle = [RideVehicleLocation(ride, DateTimeOffset.Now)];
+                _ = MapHelpers.FrameAsync(Map, vehicle, MapAnimationKind.Default, VehicleZoom);
+                break;
+            case LiveRide ride:
+                List<GeoPoint> route = [.. ride.Line.Path, ride.Line.BoardAt.Location];
+                if (ride.Line.AlightAt is { } alight)
+                {
+                    route.Add(alight.Location);
+                }
+
+                _ = MapHelpers.FrameAsync(Map, route, MapAnimationKind.Default);
+                break;
+        }
+    }
+
+    /// <summary>Where the rider's bus is: its reported position, or roughly where its times put it along the ride.</summary>
+    private GeoPoint RideVehicleLocation(LiveRide ride, DateTimeOffset now)
+    {
+        if (_selectedTripId is { } tripId && _vehicles.Values.FirstOrDefault(v => v.TripId == tripId) is { } vehicle)
+        {
+            return vehicle.Location;
+        }
+
+        double length = (ride.Ends - ride.Starts).TotalSeconds;
+        return GeoMath.PointAlong(ride.Line.Path, length > 0 ? (now - ride.Starts).TotalSeconds / length : 0) ?? ride.Line.BoardAt.Location;
     }
 
     /// <summary>The trip started, moved on, ended, or was resumed: the progress view and the board's card follow it.</summary>
@@ -2402,6 +2455,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void FitMap()
     {
+        _stepZoom.Reset();
         DeselectVehicle();
         _ = FrameListedStopsAsync(MapAnimationKind.Default);
     }

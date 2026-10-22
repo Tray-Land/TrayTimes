@@ -35,6 +35,9 @@ public sealed partial class TripProgressView : UserControl
 
     public event EventHandler? ResumeRequested;
 
+    /// <summary>Raised with the index, in the trip's legs, of the step the rider clicked.</summary>
+    public event EventHandler<int>? StepInvoked;
+
     public void FocusBack() => BackButton.Focus(FocusState.Programmatic);
 
     /// <summary>Shows <paramref name="trip"/> at <paramref name="now"/>.</summary>
@@ -77,13 +80,14 @@ public sealed partial class TripProgressView : UserControl
         List<TripLegItem> items = [];
         for (int i = 0; i < live.Legs.Count; i++)
         {
+            bool hasNext = i + 1 < live.Legs.Count;
             if (live.Legs[i] is LiveWalk walk)
             {
-                items.Add(new TripWalkItem(walk, i + 1 < live.Legs.Count ? live.Legs[i + 1] : null, destination, step.StateOf(i)));
+                items.Add(new TripWalkItem(walk, hasNext ? live.Legs[i + 1] : null, destination, step.StateOf(i)) { JoinsPrevious = i > 0, JoinsNext = hasNext });
             }
             else if (live.Legs[i] is LiveRide ride)
             {
-                items.Add(new TripRideItem(ride, [], timeTemplate: null, step.StateOf(i)));
+                items.Add(new TripRideItem(ride, [], timeTemplate: null, step.StateOf(i)) { JoinsPrevious = i > 0, JoinsNext = hasNext });
             }
         }
 
@@ -121,5 +125,14 @@ public sealed partial class TripProgressView : UserControl
     {
         _announceNext = true;
         ResumeRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Every leg is one step, in order, so a step's place in the list is its leg's index.</summary>
+    private void StepsList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is TripLegItem item && _legs.IndexOf(item) is >= 0 and int leg)
+        {
+            StepInvoked?.Invoke(this, leg);
+        }
     }
 }

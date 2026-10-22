@@ -24,6 +24,22 @@ public abstract class TripLegItem(TripLegState? state)
 
     public Visibility UpcomingVisibility => State == TripLegState.Upcoming ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>Whether another leg comes before this one, for the line joining them.</summary>
+    public bool JoinsPrevious { get; init; }
+
+    /// <summary>Whether another leg comes after this one, for the line joining them.</summary>
+    public bool JoinsNext { get; init; }
+
+    public Visibility PreviousLinkVisibility => State is not null && JoinsPrevious ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility NextLinkVisibility => State is not null && JoinsNext ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>The line from the leg before is solid once the rider has reached this leg, and dashed while it's still ahead.</summary>
+    public DoubleCollection PreviousLinkDashes => LinkDashes(traveled: State is TripLegState.Current or TripLegState.Done);
+
+    /// <summary>The line to the leg after is solid once the rider has passed this leg, and dashed while it's still ahead.</summary>
+    public DoubleCollection NextLinkDashes => LinkDashes(traveled: State == TripLegState.Done);
+
     /// <summary>Done legs are dimmed (their check mark says so too, not the dimming alone).</summary>
     public double RowOpacity => State == TripLegState.Done ? DoneOpacity : 1;
 
@@ -39,6 +55,9 @@ public abstract class TripLegItem(TripLegState? state)
 
     /// <summary>The leg in words, without its state.</summary>
     protected abstract string Description { get; }
+
+    /// <summary>What a signature starts with: everything about the leg's marker and its lines.</summary>
+    protected string MarkerSignature => $"{State}|{JoinsPrevious}|{JoinsNext}";
 
     /// <summary>Replaces only the legs that changed, so unchanged rows (and their time chips) keep their place.</summary>
     public static void Sync(ObservableCollection<TripLegItem> shown, IReadOnlyList<TripLegItem> items)
@@ -69,6 +88,8 @@ public abstract class TripLegItem(TripLegState? state)
     protected static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
 
     protected static int Minutes(TimeSpan duration) => Math.Max(0, (int)Math.Ceiling(duration.TotalMinutes));
+
+    private static DoubleCollection LinkDashes(bool traveled) => traveled ? new DoubleCollection() : new DoubleCollection { 2, 2 };
 }
 
 public sealed class TripWalkItem : TripLegItem
@@ -94,7 +115,7 @@ public sealed class TripWalkItem : TripLegItem
 
     public Visibility WaitVisibility => Wait.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
 
-    public override string Signature => $"{State}|{Title}|{Detail}|{Wait}";
+    public override string Signature => $"{MarkerSignature}|{Title}|{Detail}|{Wait}";
 
     protected override string Description => Wait.Length == 0
         ? AppStrings.Format("TripLegNameFormat", Title, Detail)
@@ -150,7 +171,7 @@ public sealed class TripRideItem : TripLegItem
 
     public Visibility TimesVisibility => Times.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
-    public override string Signature => $"{State}|{RouteLabel}|{RouteBackground.Color}|{Destination}|{Board}|{Detail}|{Alight}|{string.Join(';', Times.Select(t => t.Signature))}";
+    public override string Signature => $"{MarkerSignature}|{RouteLabel}|{RouteBackground.Color}|{Destination}|{Board}|{Detail}|{Alight}|{string.Join(';', Times.Select(t => t.Signature))}";
 
     protected override string Description => AppStrings.Format("TripRideNameFormat", RouteLabel, Destination, Board, Detail, Alight);
 }

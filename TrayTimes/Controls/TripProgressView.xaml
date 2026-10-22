@@ -116,13 +116,13 @@
             Grid.Row="2"
             Padding="6,0,6,6"
             AutomationProperties.AutomationId="TripProgress"
-            IsItemClickEnabled="False"
+            IsItemClickEnabled="True"
+            ItemClick="StepsList_ItemClick"
             ItemTemplateSelector="{StaticResource LegTemplates}"
             SelectionMode="None">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    <Setter Property="IsTabStop" Value="False" />
                     <Setter Property="Padding" Value="0" />
                 </Style>
             </ListView.ItemContainerStyle>
