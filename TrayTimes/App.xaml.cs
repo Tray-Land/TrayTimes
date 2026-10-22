@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.System.Power;
+using TrayTimes.Commute;
 using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
@@ -31,6 +32,9 @@ public partial class App : Application
     private static readonly TimeSpan FlyoutLifetimeAfterDismiss = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan IdleCollectDelay = TimeSpan.FromSeconds(5);
 
+    // How long the tray shows a trip step's icon, then its countdown, each time they swap.
+    private static readonly TimeSpan StepIconInterval = TimeSpan.FromSeconds(5);
+
     // How long a new departures batch waits for the board's, the trip's, and the favorites' stops, so opening the flyout costs one call.
     private static readonly TimeSpan DeparturesCoalesceWindow = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExitSaveTimeout = TimeSpan.FromSeconds(2);
@@ -51,6 +55,9 @@ public partial class App : Application
     private TransitBudget? _budget;
     private TransitCacheService? _cache;
     private DispatcherQueueTimer? _flyoutCloseTimer;
+    private DispatcherQueueTimer? _stepIconTimer;
+    private (TripStepKind Kind, int Leg)? _shownStep;
+    private bool _showStepGlyph;
 
     public App()
     {
@@ -140,6 +147,15 @@ public partial class App : Application
         _flyoutCloseTimer.Interval = FlyoutLifetimeAfterDismiss;
         _flyoutCloseTimer.IsRepeating = false;
         _flyoutCloseTimer.Tick += (_, _) => CloseFlyout();
+
+        _stepIconTimer = _dispatcher.CreateTimer();
+        _stepIconTimer.Interval = StepIconInterval;
+        _stepIconTimer.IsRepeating = true;
+        _stepIconTimer.Tick += (_, _) =>
+        {
+            _showStepGlyph = !_showStepGlyph;
+            UpdateTrayIcon();
+        };
 
         NotificationService.Opened += (_, _) => _dispatcher.TryEnqueue(ShowFlyout);
         NotificationService.ActionRequested += (_, action) => _dispatcher.TryEnqueue(() => OnNotificationAction(action));
@@ -391,8 +407,8 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// During a trip, the minutes to the rider's next action (red when it's time to act), or the app icon
-    /// while that's over 99 minutes away; while tracking, the bus's minutes away; otherwise the app icon.
+    /// During a trip, the step's icon and the minutes to the rider's next action (red when it's time to act) taking
+    /// turns, or the app icon while that's over 99 minutes away; while tracking, the bus's minutes away; otherwise the app icon.
     /// </summary>
     private void UpdateTrayIcon()
     {
@@ -406,18 +422,53 @@ public partial class App : Application
         {
             if (_trips.Step is { } step && ActiveTripService.BadgeMinutes(step, now) is { } minutes)
             {
-                _etaIcon.Show(_trayIcon, minutes, step.IsUrgent, passed: false);
+                ShowTripIcon(_trayIcon, _trips.Current!, step, minutes);
                 return;
             }
         }
         else if (_tracker?.Current is { } bus)
         {
+            StopStepIcon();
             _etaIcon.Show(_trayIcon, bus.MinutesAway(now), _tracker.IsTimeToGo, bus.HasPassed);
             return;
         }
 
+        StopStepIcon();
         _trayIcon.SetIcon(TrayIconPath);
         _etaIcon.Release();
+    }
+
+    /// <summary>A new step starts with its icon (walking, or the bus), then the countdown; after that they swap every <see cref="StepIconInterval"/>.</summary>
+    private void ShowTripIcon(TrayIcon trayIcon, ActiveTrip trip, TripStep step, int minutes)
+    {
+        if (_shownStep != (step.Kind, step.Leg))
+        {
+            _shownStep = (step.Kind, step.Leg);
+            _showStepGlyph = true;
+            _stepIconTimer?.Stop(); // Starts again below, so the icon gets its whole turn.
+        }
+
+        if (_stepIconTimer is { IsRunning: false })
+        {
+            _stepIconTimer.Start();
+        }
+
+        string? glyph = trip.Progress.Trip.Legs.ElementAtOrDefault(step.Leg) switch
+        {
+            LiveWalk => MapHelpers.WalkGlyph,
+            LiveRide => MapHelpers.BusGlyph,
+            _ => null,
+        };
+        if (!_showStepGlyph || glyph is null || !_etaIcon.ShowGlyph(trayIcon, glyph, step.IsUrgent))
+        {
+            _etaIcon.Show(trayIcon, minutes, step.IsUrgent, passed: false);
+        }
+    }
+
+    private void StopStepIcon()
+    {
+        _stepIconTimer?.Stop();
+        _shownStep = null;
     }
 
     /// <summary>
@@ -483,6 +534,7 @@ public partial class App : Application
     private void ExitApp()
     {
         _flyoutCloseTimer?.Stop();
+        _stepIconTimer?.Stop();
         _tracker?.Stop();
         _trips?.FlushAsync().Wait(ExitSaveTimeout); // The trip stays saved, so the next launch can offer to resume it.
         _monitor?.Clear();

@@ -24,13 +24,43 @@ internal sealed class EtaTrayIcon
     /// <param name="passed">True once the bus has gone by; the badge shows a slash instead of minutes.</param>
     public void Show(TrayIcon trayIcon, int minutes, bool urgent, bool passed)
     {
-        int size = PInvoke.GetSystemMetricsForDpi(SYSTEM_METRICS_INDEX.SM_CXSMICON, PInvoke.GetDpiForSystem());
+        int size = IconSize();
         uint background = urgent ? Red : Blue;
         string text = passed ? "/" : Math.Clamp(minutes, 0, 99).ToString(CultureInfo.InvariantCulture);
         byte[] ico = EtaFont.Render(text, size) is { } coverage
             ? EtaIcon.Create(coverage, size, background, White)
             : EtaIcon.Create(minutes, size, background, White);
+        Apply(trayIcon, ico, size);
+    }
 
+    /// <summary>Shows <paramref name="glyph"/> (from <see cref="EtaFont.IconFace"/>) on the same badge; false when it doesn't draw.</summary>
+    /// <param name="urgent">True once it's time to head out.</param>
+    public bool ShowGlyph(TrayIcon trayIcon, string glyph, bool urgent)
+    {
+        int size = IconSize();
+        if (EtaFont.Render(glyph, size, EtaFont.IconFace) is not { } coverage)
+        {
+            return false;
+        }
+
+        Apply(trayIcon, EtaIcon.Create(coverage, size, urgent ? Red : Blue, White), size);
+        return true;
+    }
+
+    /// <summary>Frees the badge; call after the tray icon has been switched back to the app icon.</summary>
+    public void Release()
+    {
+        if (!_icon.IsNull)
+        {
+            PInvoke.DestroyIcon(_icon);
+            _icon = default;
+        }
+    }
+
+    private static int IconSize() => PInvoke.GetSystemMetricsForDpi(SYSTEM_METRICS_INDEX.SM_CXSMICON, PInvoke.GetDpiForSystem());
+
+    private void Apply(TrayIcon trayIcon, byte[] ico, int size)
+    {
         HICON icon;
         nint handle;
         unsafe
@@ -58,15 +88,5 @@ internal sealed class EtaTrayIcon
         trayIcon.SetIcon(Win32Interop.GetIconIdFromIcon(handle));
         Release();
         _icon = icon;
-    }
-
-    /// <summary>Frees the badge; call after the tray icon has been switched back to the app icon.</summary>
-    public void Release()
-    {
-        if (!_icon.IsNull)
-        {
-            PInvoke.DestroyIcon(_icon);
-            _icon = default;
-        }
     }
 }

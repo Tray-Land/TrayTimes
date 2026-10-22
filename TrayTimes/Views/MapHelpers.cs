@@ -18,7 +18,9 @@ namespace TrayTimes.Views;
 /// <summary>Map, route-color, and place-glyph helpers shared by the flyout and the settings window.</summary>
 internal static class MapHelpers
 {
-    public const string BusEmoji = "🚍"; // Oncoming bus, in color so it stands out on the basemap
+    public const string WalkGlyph = ""; // Walk
+    public const string BusGlyph = ""; // Bus
+    public const string BusEmoji ="🚍"; // Oncoming bus, in color so it stands out on the basemap
     public const string SavedStopGlyph = ""; // FavoriteStarFill
     public const string StopGlyph = ""; // CircleFill
 

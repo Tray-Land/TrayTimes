@@ -47,7 +47,7 @@ A trip is a list of steps, each with the time it needs the rider to act. They co
 |---|---|---|---|
 | Get ready | "Leave in 6 min" · Walk 4 min to Oak & 5th for the 14 | Leave by (first departure − the walk) | **Head out** at the rider's lead time before leaving (the existing *Head out* setting). **Leave now** at leave-by |
 | To the stop | "The 14 leaves in 3 min" | The ride's departure | **Ride changed** when it moves ≥ 3 min after Head out. **Connection changed** when it's canceled |
-| Ride | "Get off at State St in 9 min" | Getting off | **Get off soon** 2 min before, with what comes next ("then walk 1 min to the 30 at 8:30") |
+| Ride | "Get off at State St in 9 min" | Getting off | **Get off soon** 2 min before, with what comes next: the walk and the wait for a transfer ("Then wait 4 min for the 30 at 8:30", "Then walk 2 min and wait 3 min for the 30 at 8:30"), else "Then walk 1 min to the 30 at 8:30" |
 | Transfer | "The 30 leaves in 4 min" | The next ride's departure | **Connection changed** when a late first bus misses it ("Take the 8:45 instead · arrive 9:03") |
 | Last walk | "Arrive at Work at 8:42" | Arrival | none |
 
@@ -68,6 +68,7 @@ A trip is a list of steps, each with the time it needs the rider to act. They co
 - Trips and tracking share one notification tag, so a newer alert replaces the older one in Action Center, as tracking does now.
 - Buttons: **I missed it** on boarding and transfer alerts, and **End trip** on all of them. Selecting the notification opens the flyout to the trip.
 - After sleep or a long offline stretch, alerts that came due meanwhile collapse into the latest one. An alert more than 5 minutes stale never pops the flyout.
+- **Words follow where the rider is.** A transfer ride's departure isn't news while the rider is still on the ride before it: they need where to get off and how long they'll wait after. So when the next ride moves during a ride, the text is "Get off at State St in 8 min. Then wait 3 min for the 30 at 8:25. You'll arrive at Work at 8:38."; heading to its stop, it's "It leaves Lake St in 3 min." A wait of under a minute isn't mentioned.
 
 ### The flyout pops up
 
@@ -221,6 +222,8 @@ As built in step 02: `ActiveTripService` takes the `BusTrackingService` and stop
 
 - `ShowPopup(bool activate = true)`: with an active trip, it opens the progress view instead of resetting to the board. With `activate: false`, it shows via `AppWindow.Show(false)` and starts a 30 s hide timer; activation switches it to the normal light-dismiss.
 - `Controls/TripProgressView.xaml`: the header with **End trip**, the status card with **I missed it**, and the steps list. The leg templates move from `TripView.xaml` to a shared resource dictionary so both views use them. `TripWalkItem` and `TripRideItem` gain a state: done, current, or next.
+- **Steps zoom the map.** Each step is clickable and frames its leg: a walk from point to point, or a ride from boarding to getting off, with a little margin (`TripStepZoom` picks the view). Clicking the ride the rider is on alternates between the bus about where it is now (its reported position, else where the ride's times put it along the route) and the whole ride. A step's connector line is solid once the rider has passed it and dashed while it is still ahead.
+- **The tray badge shows the step.** The icon (a walking figure or a bus, for the current leg) and the countdown take turns every 5 seconds, starting with the icon whenever the step changes.
 - `TripView`'s header becomes Back, the heading, the time dropdown, and **Go**, and its separate time row (`TimeAnchor`) goes away. The time editor flyout anchors to the dropdown instead. `SuggestionCard` gets an active-trip state.
 - The flyout still closes a minute after it's hidden. The trip and its camera live in the service, so the next open rebuilds the view from them. Camera state is memory-only for that trip, not restored after the application exits.
 - New strings go in `Strings/en-us/Resources.resw`. Every new control has a name and an `AutomationId` (`GoButton`, `TripProgress`, `TripStatus`, `MissedItButton`, `EndTripButton`).
