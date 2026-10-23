@@ -283,6 +283,28 @@
                             HorizontalAlignment="Stretch"
                             IsEnabled="False"
                             SelectionChanged="StopBox_SelectionChanged" />
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="AreaSearchBox"
+                                x:Uid="SettingsAreaBox"
+                                AutomationProperties.AutomationId="AreaSearchBox"
+                                KeyDown="AreaSearchBox_KeyDown" />
+                            <Button
+                                x:Name="AreaSearchButton"
+                                x:Uid="SettingsAreaButton"
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="AreaSearchButton"
+                                VerticalAlignment="Bottom"
+                                Click="AreaSearchButton_Click" />
+                        </Grid>
+                        <TextBlock
+                            x:Name="AreaStatusText"
+                            Style="{StaticResource SettingsDescriptionStyle}"
+                            Visibility="Collapsed" />
                         <Grid
                             Height="280"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -435,6 +457,10 @@
                     <StackPanel Spacing="12">
                         <TextBlock
                             x:Name="BudgetText"
+                            AutomationProperties.LiveSetting="Polite"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            x:Name="EstimateText"
                             AutomationProperties.LiveSetting="Polite"
                             TextWrapping="Wrap" />
                         <TextBlock x:Uid="SettingsBudgetHelp" Style="{StaticResource SettingsDescriptionStyle}" />

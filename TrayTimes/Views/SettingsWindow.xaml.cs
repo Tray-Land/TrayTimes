@@ -303,17 +303,39 @@ public sealed partial class SettingsWindow : WindowEx
             _budget.DailyAllowance,
             _resources.GetString($"SettingsBudgetLevel{level}"));
 
+        EstimateText.Text = string.Format(
+            CultureInfo.CurrentCulture,
+            _resources.GetString("SettingsEstimateFormat"),
+            ApiCallLog.EstimateMonth(summary.Total, DateOnly.FromDateTime(DateTime.Now)),
+            _budget.Policy.CallsPerMonth);
+
         static ApiUsageRow ToRow(string name, ApiCallCounts counts) =>
             new(name, counts.Today.ToString("N0"), counts.Last7Days.ToString("N0"), counts.ThisMonth.ToString("N0"));
     }
 
     /// <summary>
-    /// Opens on the saved stops, else the rider's places, else where the flyout's map was left,
-    /// else this device's location (without asking for permission), else the whole world.
+    /// Opens on this device's location (without asking for permission), else the area the rider chose by
+    /// postal code, else the saved stops, else the rider's places, else where the flyout's map was left,
+    /// else the whole world, with a prompt for a postal code.
     /// </summary>
     private async Task FrameInitialViewAsync()
     {
-        List<GeoPoint> points = [.. SettingsService.Stops.Select(s => new GeoPoint(s.Lat, s.Lon))];
+        List<GeoPoint> points = [];
+        if (await LocationService.TryGetDeviceLocationAsync(InitialLocationTimeout) is { } here)
+        {
+            points = [here];
+        }
+
+        if (points.Count == 0 && SettingsService.DefaultArea is { } area)
+        {
+            points = [new GeoPoint(area.Lat, area.Lon)];
+        }
+
+        if (points.Count == 0)
+        {
+            points = [.. SettingsService.Stops.Select(s => new GeoPoint(s.Lat, s.Lon))];
+        }
+
         if (points.Count == 0)
         {
             points = [.. SettingsService.Places.Select(p => p.Location)];
@@ -324,11 +346,6 @@ public sealed partial class SettingsWindow : WindowEx
             points = [new GeoPoint(view.Lat, view.Lon)];
         }
 
-        if (points.Count == 0 && await LocationService.TryGetDeviceLocationAsync(InitialLocationTimeout) is { } here)
-        {
-            points = [here];
-        }
-
         if (_windowCancellation.IsCancellationRequested)
         {
             return;
@@ -336,11 +353,65 @@ public sealed partial class SettingsWindow : WindowEx
 
         if (points.Count == 0)
         {
+            ShowAreaStatus("SettingsAreaPrompt");
             _ = PickerMap.TrySetViewAsync(MapHelpers.ToGeopoint(WorldCenter), WorldZoom, 0, 0, MapAnimationKind.None);
             return;
         }
 
         _ = MapHelpers.FrameAsync(PickerMap, points, MapAnimationKind.None, singlePointZoom: 14);
+    }
+
+    private void ShowAreaStatus(string resource)
+    {
+        AreaStatusText.Text = _resources.GetString(resource);
+        AreaStatusText.Visibility = Visibility.Visible;
+    }
+
+    private void AreaSearchBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            _ = FindAreaAsync();
+        }
+    }
+
+    private void AreaSearchButton_Click(object sender, RoutedEventArgs e) => _ = FindAreaAsync();
+
+    /// <summary>Moves the map to a postal code and remembers it as the area the map starts in when the rider's location isn't available.</summary>
+    private async Task FindAreaAsync()
+    {
+        string code = AreaSearchBox.Text.Trim();
+        if (code.Length == 0)
+        {
+            return;
+        }
+
+        AreaSearchButton.IsEnabled = false;
+        try
+        {
+            if (await GeocodingService.FindPostalCodeAsync(code, _windowCancellation.Token) is not { } point)
+            {
+                ShowAreaStatus("SettingsAreaNotFound");
+                return;
+            }
+
+            SettingsService.DefaultArea = new MapView(point.Lat, point.Lon, 13);
+            ShowAreaStatus("SettingsAreaSaved");
+            _ = PickerMap.TrySetViewAsync(MapHelpers.ToGeopoint(point), 13, 0, 0, MapAnimationKind.Default);
+        }
+        catch (OperationCanceledException) when (_windowCancellation.IsCancellationRequested)
+        {
+            // The window closed.
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            ShowAreaStatus("SettingsAreaFailed");
+        }
+        finally
+        {
+            AreaSearchButton.IsEnabled = true;
+        }
     }
 
     private void OnStopsChanged(object? sender, EventArgs e)

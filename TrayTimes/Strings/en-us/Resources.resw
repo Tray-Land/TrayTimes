@@ -142,6 +142,33 @@
   <data name="SettingsStopSearchButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Search for stops near the map</value>
   </data>
+  <data name="SettingsAreaBox.Header" xml:space="preserve">
+    <value>Move the map by ZIP or postal code</value>
+  </data>
+  <data name="SettingsAreaBox.PlaceholderText" xml:space="preserve">
+    <value>ZIP or postal code</value>
+  </data>
+  <data name="SettingsAreaBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>ZIP or postal code to move the map to</value>
+  </data>
+  <data name="SettingsAreaButton.Content" xml:space="preserve">
+    <value>Go</value>
+  </data>
+  <data name="SettingsAreaButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Move the map to this ZIP or postal code</value>
+  </data>
+  <data name="SettingsAreaPrompt" xml:space="preserve">
+    <value>Your location isn't available. Enter a ZIP or postal code to start the map in your area.</value>
+  </data>
+  <data name="SettingsAreaSaved" xml:space="preserve">
+    <value>The map will start in this area from now on.</value>
+  </data>
+  <data name="SettingsAreaNotFound" xml:space="preserve">
+    <value>That ZIP or postal code wasn't found.</value>
+  </data>
+  <data name="SettingsAreaFailed" xml:space="preserve">
+    <value>Couldn't look up that ZIP or postal code. Check your connection and try again.</value>
+  </data>
   <data name="SettingsLoadRoutesButton.Content" xml:space="preserve">
     <value>Browse routes in this area</value>
   </data>
@@ -243,6 +270,9 @@
   </data>
   <data name="SettingsBudgetFormat" xml:space="preserve">
     <value>{0:N0} of {1:N0} calls used this month. Today: {2:N0} of about {3:N0}. {4}</value>
+  </data>
+  <data name="SettingsEstimateFormat" xml:space="preserve">
+    <value>Estimated this month: about {0:N0} of {1:N0} calls, if the last 7 days' pace continues.</value>
   </data>
   <data name="SettingsBudgetLevelNormal" xml:space="preserve">
     <value>The open flyout refreshes every minute.</value>

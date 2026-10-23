@@ -53,6 +53,50 @@ internal static class GeocodingService
         return results;
     }
 
+    /// <summary>
+    /// Where a postal code is, or null if it isn't found. Uses Azure Maps when it has a key; otherwise
+    /// looks up a five-digit US ZIP code, which needs no key.
+    /// </summary>
+    public static async Task<GeoPoint?> FindPostalCodeAsync(string postalCode, CancellationToken cancellationToken = default)
+    {
+        string code = postalCode.Trim();
+        if (code.Length == 0)
+        {
+            return null;
+        }
+
+        if (IsAvailable)
+        {
+            IReadOnlyList<GeocodeResult> results = await SearchAsync(code, cancellationToken);
+            return results.Count > 0 ? results[0].Location : null;
+        }
+
+        if (code.Length != 5 || !code.All(char.IsAsciiDigit))
+        {
+            return null;
+        }
+
+        using HttpResponseMessage response = await Http.GetAsync($"https://api.zippopotam.us/us/{code}", cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (doc.RootElement.TryGetProperty("places", out JsonElement places)
+            && places.GetArrayLength() > 0
+            && places[0].TryGetProperty("latitude", out JsonElement lat)
+            && places[0].TryGetProperty("longitude", out JsonElement lon)
+            && double.TryParse(lat.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double latitude)
+            && double.TryParse(lon.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double longitude))
+        {
+            return new GeoPoint(latitude, longitude);
+        }
+
+        return null;
+    }
+
     /// <summary>The street address nearest <paramref name="point"/>, or null if none is found.</summary>
     public static async Task<string?> ReverseAsync(GeoPoint point, CancellationToken cancellationToken = default)
     {

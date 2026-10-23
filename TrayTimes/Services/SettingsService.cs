@@ -79,6 +79,29 @@ internal static class SettingsService
         set => Set(nameof(FlyoutMapView), value is null ? null : JsonSerializer.Serialize(value, SettingsJsonContext.Default.MapView));
     }
 
+    /// <summary>The area the rider chose by postal code, where Settings' stop map opens when their location isn't available.</summary>
+    public static MapView? DefaultArea
+    {
+        get
+        {
+            if (Get<string?>(nameof(DefaultArea), null) is not { } json)
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize(json, SettingsJsonContext.Default.MapView);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        set => Set(nameof(DefaultArea), value is null ? null : JsonSerializer.Serialize(value, SettingsJsonContext.Default.MapView));
+    }
+
     /// <summary>How tall the user dragged the flyout's map, in DIPs; null keeps the default.</summary>
     public static double? FlyoutMapHeight
     {
