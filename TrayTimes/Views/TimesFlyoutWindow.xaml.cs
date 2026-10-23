@@ -308,7 +308,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void StartShowing()
     {
         _monitor.IsForeground = true; // The saved stops' times, for the jump menu and the tooltip.
-        _center = new NearYou(); // Each open starts near you...
+        _center = BoardCenter.FromKey(SettingsService.BoardCenterKey, SettingsService.Places, SettingsService.Stops); // Each open starts where the rider last looked (near you, at first)...
         _destinationId = null; // ...and guesses the next trip afresh.
         _temporaryDestination = null;
         CloseSearch(focusDestination: false);
@@ -586,6 +586,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         CloseTrip(focusCard: false);
         _center = center;
+        SettingsService.BoardCenterKey = center.ToKey();
         _locationPermissionPending = false;
         EnterBoard(reframe: true);
     }

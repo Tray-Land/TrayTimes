@@ -79,6 +79,13 @@ internal static class SettingsService
         set => Set(nameof(FlyoutMapView), value is null ? null : JsonSerializer.Serialize(value, SettingsJsonContext.Default.MapView));
     }
 
+    /// <summary>The flyout's view the rider last picked (see <c>BoardCenter.ToKey</c>); opens there next time.</summary>
+    public static string? BoardCenterKey
+    {
+        get => Get<string?>(nameof(BoardCenterKey), null);
+        set => Set(nameof(BoardCenterKey), value);
+    }
+
     /// <summary>The area the rider chose by postal code, where Settings' stop map opens when their location isn't available.</summary>
     public static MapView? DefaultArea
     {

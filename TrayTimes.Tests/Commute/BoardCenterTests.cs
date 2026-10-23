@@ -66,6 +66,44 @@ public sealed class BoardCenterTests
     }
 
     [TestMethod]
+    public void FromKey_ToKeyOfEachCenter_GivesTheSameCenter()
+    {
+        // Arrange
+        BoardCenter[] centers = [new NearYou(), new NearPlace(Work), new NearStop(Oak), new AllSavedStops()];
+
+        // Act & Assert
+        foreach (BoardCenter center in centers)
+        {
+            Assert.AreEqual(center, BoardCenter.FromKey(center.ToKey(), [Home, Work], [Oak]));
+        }
+    }
+
+    [TestMethod]
+    [DataRow(null)]
+    [DataRow("")]
+    [DataRow("garbage")]
+    [DataRow("place:Missing")]
+    [DataRow("stop:S:404")]
+    public void FromKey_UnknownOrRemovedCenter_IsNearYou(string? key)
+    {
+        // Act
+        BoardCenter center = BoardCenter.FromKey(key, [Home], [Oak]);
+
+        // Assert
+        Assert.AreEqual(new NearYou(), center);
+    }
+
+    [TestMethod]
+    public void FromKey_AllSavedStopsWithNoneSaved_IsNearYou()
+    {
+        // Act
+        BoardCenter center = BoardCenter.FromKey("all", [Home], []);
+
+        // Assert
+        Assert.AreEqual(new NearYou(), center);
+    }
+
+    [TestMethod]
     public void PointFrom_EachCenter_IsWhereTheBoardLooksForLines()
     {
         // Act & Assert
