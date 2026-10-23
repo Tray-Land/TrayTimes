@@ -70,8 +70,12 @@ public sealed class BusTimeItem
         StopName = stopName;
         IsTracked = arrival == tracked;
         int minutes = arrival.MinutesAway(now);
-        MinutesText = minutes == 0 ? AppStrings.Get("TooltipDue") : AppStrings.Format("TooltipMinutesFormat", minutes);
         ClockText = arrival.PredictedTime.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
+
+        // Far off (after a gap in service), "in 345 min" means little: say when instead.
+        bool far = ServiceGap.IsFar(minutes);
+        MinutesText = far ? ClockText : minutes == 0 ? AppStrings.Get("TooltipDue") : AppStrings.Format("TooltipMinutesFormat", minutes);
+        ChipClockText = far ? string.Empty : ClockText;
         string kind = arrival.IsRealTime ? AppStrings.Get("TripLive") : AppStrings.Get("TripScheduled");
         TrackLabel = !CanTrack ? AppStrings.Format("TrackCanceledFormat", RouteLabel, ClockText, kind)
             : IsTracked ? AppStrings.Format("TrackStopFormat", ClockText, RouteLabel)
@@ -92,6 +96,9 @@ public sealed class BusTimeItem
 
     public string ClockText { get; }
 
+    /// <summary>The clock time shown beside the minutes; empty when the minutes already are the clock time.</summary>
+    public string ChipClockText { get; }
+
     public bool IsTracked { get; }
 
     public bool CanTrack => Arrival.Status != ArrivalStatus.Canceled;
@@ -109,6 +116,27 @@ public sealed class BusTimeItem
     public string Key => $"{Arrival.StopId}|{Arrival.RouteId}|{Arrival.DirectionId}|{Arrival.TripId ?? $"t{(Arrival.ScheduledTime ?? Arrival.PredictedTime).ToUnixTimeSeconds() / 60}"}";
 
     public string Signature => $"{Key}|{MinutesText}|{ClockText}|{IsTracked}|{CanTrack}|{ChipOpacity}";
+}
+
+/// <summary>Telling a gap in service (overnight) from a normal wait.</summary>
+internal static class ServiceGap
+{
+    /// <summary>Past this many minutes, a departure is shown by its time of day rather than a countdown.</summary>
+    public const int FarMinutes = 45;
+
+    public static bool IsFar(int minutesAway) => minutesAway > FarMinutes;
+
+    /// <summary>Whether <paramref name="arrival"/> is soon but the route's next departure is far after it: the last bus before the gap.</summary>
+    public static bool IsLastBus(Arrival arrival, int minutesAway, IReadOnlyList<Arrival>? later)
+    {
+        if (IsFar(minutesAway))
+        {
+            return false;
+        }
+
+        Arrival? following = later?.FirstOrDefault(a => a.Status != ArrivalStatus.Canceled);
+        return following is not null && (following.PredictedTime - arrival.PredictedTime).TotalMinutes > FarMinutes;
+    }
 }
 
 /// <summary>One route's row: its next departure (real-time or scheduled), then a strip of its upcoming times.</summary>
@@ -139,10 +167,12 @@ public sealed class ArrivalItem
         RouteForeground = new SolidColorBrush(MapHelpers.ContrastingText(routeColor));
 
         int minutes = arrival.MinutesAway(now);
-        MinutesText = minutes == 0 ? "Due" : minutes.ToString(CultureInfo.CurrentCulture);
-        UnitText = minutes == 0 ? string.Empty : "min";
-
         string clock = arrival.PredictedTime.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
+        bool far = ServiceGap.IsFar(minutes);
+        MinutesText = far ? clock : minutes == 0 ? "Due" : minutes.ToString(CultureInfo.CurrentCulture);
+        UnitText = far || minutes == 0 ? string.Empty : "min";
+
+        bool lastBus = arrival.Status != ArrivalStatus.Canceled && ServiceGap.IsLastBus(arrival, minutes, later);
         string? status = arrival.Status switch
         {
             ArrivalStatus.Canceled => "Canceled",
@@ -150,6 +180,11 @@ public sealed class ArrivalItem
             _ when tooSoonToWalk => "Too soon to walk there",
             _ => null,
         };
+        if (lastBus)
+        {
+            status = status is null ? "Last bus!" : $"{status} · Last bus!";
+        }
+
         string kind = arrival.IsRealTime ? "Departs" : "Scheduled";
         DetailText = status is null ? $"{kind} {clock}" : $"{kind} {clock} · {status}";
         RowOpacity = arrival.Status == ArrivalStatus.Canceled || tooSoonToWalk ? 0.5 : 1;
@@ -165,7 +200,7 @@ public sealed class ArrivalItem
             TripEtaText = $"{destinationName} by {eta.ToLocalTime().ToString("t", CultureInfo.CurrentCulture)}{changes}";
         }
 
-        string when = minutes == 0 ? "due now" : $"in {minutes} minutes";
+        string when = far ? $"at {clock}" : minutes == 0 ? "due now" : $"in {minutes} minutes";
         string trip = TripEtaText.Length > 0 ? $" {TripEtaText}." : string.Empty;
         AutomationName = $"Route {RouteLabel} to {Destination}, {when}. {DetailText}.{trip} Show on map";
         TimesAutomationName = $"Upcoming route {RouteLabel} departures";

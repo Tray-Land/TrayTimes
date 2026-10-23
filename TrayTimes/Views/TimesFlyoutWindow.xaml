@@ -76,7 +76,7 @@
                             VerticalAlignment="Center"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ClockText}" />
+                            Text="{x:Bind ChipClockText}" />
                     </StackPanel>
                 </Button>
             </DataTemplate>
