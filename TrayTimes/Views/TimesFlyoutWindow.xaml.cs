@@ -166,6 +166,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly Dictionary<string, double> _stripOffsets = []; // each route row's time strip, by row key
     private bool _keepListScroll;
     private int _entranceStep;
+    private int _chipStep;
+    private readonly HashSet<string> _shownChips = [];
     private (string Key, DateTime Until)? _pendingPop; // A bell or star just clicked, to animate once its row is rebuilt.
     private DateTimeOffset? _lastFetchedAt;
     private bool _captionShown;
@@ -553,6 +555,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         // A fresh list: every row rises in again rather than silently swapping, scrolled back to the start.
         _listSignature = null;
         _shownRows.Clear();
+        _shownChips.Clear();
         _lastMinutes.Clear();
         _stripOffsets.Clear();
         _keepListScroll = false;
@@ -1208,6 +1211,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         // A row keeps its animation history only while it stays listed; one that leaves and returns is new again.
         HashSet<string> listed = [.. groups.SelectMany(g => g.Keys)];
         _shownRows.IntersectWith(listed);
+        _shownChips.IntersectWith(groups.SelectMany(g => g.Arrivals).SelectMany(a => a.Times).Select(t => t.Key));
         foreach (string gone in _lastMinutes.Keys.Where(k => !listed.Contains(k)).ToList())
         {
             _lastMinutes.Remove(gone);
@@ -1768,9 +1772,21 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void ArrivalRow_Loaded(object sender, RoutedEventArgs e)
     {
+        _chipStep = 0; // A row's chips load before the row does; the next row's start over.
         if (sender is FrameworkElement { DataContext: ArrivalItem item } row && _shownRows.Add(item.Key))
         {
-            Motion.Enter(row, _entranceStep++);
+            int step = _entranceStep++;
+            Motion.Enter(row, step);
+            Motion.Grow(row, step);
+        }
+    }
+
+    /// <summary>A new bus's chip rises in just after its row, each chip a beat after the one before it.</summary>
+    private void Chip_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: BusTimeItem item } chip && _shownChips.Add(item.Key))
+        {
+            Motion.Enter(chip, _entranceStep + 1 + _chipStep++, rise: 8);
         }
     }
 

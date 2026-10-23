@@ -44,41 +44,44 @@
                 x:Key="BusTimeTemplate"
                 x:DataType="views:BusTimeItem"
                 x:DefaultBindMode="OneTime">
-                <Button
-                    MinHeight="30"
-                    Padding="10,3"
-                    AutomationProperties.AutomationId="{x:Bind Key}"
-                    AutomationProperties.Name="{x:Bind TrackLabel}"
-                    Click="TrackButton_Click"
-                    ContextRequested="TrackButton_ContextRequested"
-                    CornerRadius="15"
-                    IsEnabled="{x:Bind CanTrack}"
-                    Opacity="{x:Bind ChipOpacity}"
-                    ToolTipService.ToolTip="{x:Bind TrackLabel}">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Grid VerticalAlignment="Center" Loaded="Bell_Loaded">
-                            <FontIcon
-                                FontSize="12"
-                                Glyph="&#xEA8F;"
-                                Visibility="{x:Bind TrackOutlineVisibility}" />
-                            <!--  Tracked: solid gold bell emoji  -->
-                            <FontIcon
-                                FontFamily="Segoe UI Emoji"
-                                FontSize="12"
-                                Glyph="&#x1F514;"
-                                Visibility="{x:Bind TrackedBellVisibility}" />
-                        </Grid>
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            Style="{StaticResource BodyStrongTextBlockStyle}"
-                            Text="{x:Bind MinutesText}" />
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ChipClockText}" />
-                    </StackPanel>
-                </Button>
+                <!--  The wrapper carries the entrance animation, so it doesn't override the chip's own dimming  -->
+                <Grid Loaded="Chip_Loaded">
+                    <Button
+                        MinHeight="30"
+                        Padding="10,3"
+                        AutomationProperties.AutomationId="{x:Bind Key}"
+                        AutomationProperties.Name="{x:Bind TrackLabel}"
+                        Click="TrackButton_Click"
+                        ContextRequested="TrackButton_ContextRequested"
+                        CornerRadius="15"
+                        IsEnabled="{x:Bind CanTrack}"
+                        Opacity="{x:Bind ChipOpacity}"
+                        ToolTipService.ToolTip="{x:Bind TrackLabel}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Grid VerticalAlignment="Center" Loaded="Bell_Loaded">
+                                <FontIcon
+                                    FontSize="12"
+                                    Glyph="&#xEA8F;"
+                                    Visibility="{x:Bind TrackOutlineVisibility}" />
+                                <!--  Tracked: solid gold bell emoji  -->
+                                <FontIcon
+                                    FontFamily="Segoe UI Emoji"
+                                    FontSize="12"
+                                    Glyph="&#x1F514;"
+                                    Visibility="{x:Bind TrackedBellVisibility}" />
+                            </Grid>
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                Text="{x:Bind MinutesText}" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Text="{x:Bind ChipClockText}" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
             </DataTemplate>
 
             <DataTemplate

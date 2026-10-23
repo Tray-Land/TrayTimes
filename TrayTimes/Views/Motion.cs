@@ -1,7 +1,11 @@
 using System.Numerics;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
+using Windows.Foundation;
 using Windows.UI.ViewManagement;
 
 namespace TrayTimes.Views;
@@ -51,6 +55,47 @@ internal static class Motion
             Schedule(slide, delay, EnterDuration);
             visual.StartAnimation("Translation.Y", slide);
         }
+    }
+
+    /// <summary>
+    /// Opens the element from no height to its full height, on the same cascade as <see cref="Enter"/>, so the rows
+    /// below ease down to make room instead of jumping. Call once the element has been laid out.
+    /// </summary>
+    public static void Grow(FrameworkElement element, int step = 0)
+    {
+        double target = element.ActualHeight;
+        if (!IsEnabled || target <= 0)
+        {
+            return;
+        }
+
+        RectangleGeometry clip = new();
+        void Resize(object? sender, SizeChangedEventArgs e) => clip.Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
+        element.SizeChanged += Resize;
+        element.Clip = clip;
+        element.Height = 0;
+
+        DoubleAnimation grow = new()
+        {
+            From = 0,
+            To = target,
+            Duration = EnterDuration,
+            BeginTime = TimeSpan.FromMilliseconds(Math.Min(step, MaxStaggerSteps) * StaggerMilliseconds),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            EnableDependentAnimation = true, // Height is a layout property.
+        };
+        Storyboard.SetTarget(grow, element);
+        Storyboard.SetTargetProperty(grow, "Height");
+        Storyboard storyboard = new();
+        storyboard.Children.Add(grow);
+        storyboard.Completed += (_, _) =>
+        {
+            storyboard.Stop();
+            element.SizeChanged -= Resize;
+            element.ClearValue(FrameworkElement.HeightProperty); // Back to sizing itself, so later changes still fit.
+            element.Clip = null;
+        };
+        storyboard.Begin();
     }
 
     /// <summary>Fades the element out, then calls <paramref name="completed"/> (straight away when animations are off).</summary>
