@@ -49,6 +49,16 @@ public sealed class ApiCallLog
     /// <summary>Every endpoint's calls today and so far this calendar month, for the call budget.</summary>
     public TransitUsage Usage(DateOnly today) => new(CountSince(today, today, null), CountSince(MonthStart(today), today, null));
 
+    /// <summary>
+    /// The month's total if the last 7 days' daily rate holds for the days left after today:
+    /// the calls so far plus that rate for each remaining day.
+    /// </summary>
+    public static int EstimateMonth(ApiCallCounts total, DateOnly today)
+    {
+        int daysLeft = DateTime.DaysInMonth(today.Year, today.Month) - today.Day;
+        return total.ThisMonth + (int)Math.Round(total.Last7Days / 7.0 * daysLeft);
+    }
+
     private static DateOnly MonthStart(DateOnly day) => new(day.Year, day.Month, 1);
 
     private static string DayKey(DateOnly day) => day.ToString(DayFormat, CultureInfo.InvariantCulture);

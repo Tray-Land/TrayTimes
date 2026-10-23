@@ -41,6 +41,32 @@ public sealed class ApiCallLogTests
     }
 
     [TestMethod]
+    public void EstimateMonth_WeekPaceContinues_AddsDailyRateForRemainingDays()
+    {
+        // Arrange: 15 days left after Oct 16, 70 calls in 7 days = 10 a day.
+        ApiCallCounts total = new(12, 70, 200);
+
+        // Act
+        int estimate = ApiCallLog.EstimateMonth(total, Today);
+
+        // Assert
+        Assert.AreEqual(350, estimate);
+    }
+
+    [TestMethod]
+    public void EstimateMonth_LastDayOfMonth_ReturnsCallsSoFar()
+    {
+        // Arrange
+        ApiCallCounts total = new(12, 70, 200);
+
+        // Act
+        int estimate = ApiCallLog.EstimateMonth(total, new DateOnly(2026, 10, 31));
+
+        // Assert
+        Assert.AreEqual(200, estimate);
+    }
+
+    [TestMethod]
     public void Summarize_MultipleEndpoints_SplitsByEndpointBusiestThisMonthFirst()
     {
         // Arrange
