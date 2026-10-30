@@ -24,7 +24,7 @@ The transit code sits behind `ITransitService` (`TrayTimes.Core\Transit\`). The 
 Download [TrayTimes.appinstaller](https://github.com/Tray-Land/TrayTimes/releases/latest/download/TrayTimes.appinstaller) and open it. Windows installs the right version for your PC (x64 or ARM64), plus the Windows App Runtime if it's missing, and keeps Tray Times up to date: it checks for a new release when the app starts and in the background.
 
 - Requires Windows 10 1809 (build 17763) or later, x64 or ARM64.
-- Installed 1.0.0 from the `.msix` files? Open the `.appinstaller` once. It upgrades the app in place and turns on automatic updates. Favorite places carry over; stops saved by the MCTS BusTime version don't (see below).
+- Installed 1.0.0 from the `.msix` files? Open the `.appinstaller` once. It upgrades the app in place and turns on automatic updates. Favorite places carry over; stops saved by the earlier BusTime version don't (see below).
 
 ## Project layout
 
@@ -50,7 +50,7 @@ Using the Transit API means keeping to its terms:
 - **Before going public,** email apis@transitapp.com at least 10 business days ahead, and answer their requests for integration details or changes.
 - **Before publishing** any press release, store listing, or other material that mentions Transit or the API, or uses a Transit trademark, send it to apis@transitapp.com for approval.
 
-The first launch of this version clears favorites saved by the earlier MCTS BusTime version (their stop IDs mean nothing to Transit) and starts a new call tally. Favorite places carry over.
+The first launch of this version clears favorites saved by the earlier BusTime version (their stop IDs mean nothing to Transit) and starts a new call tally. Favorite places carry over.
 
 ### Command-line builds
 

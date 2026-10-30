@@ -1,6 +1,6 @@
 # Transit API optimization plan
 
-> **Superseded (2026-10-15).** This plan optimized the MCTS BusTime build. That provider, its GTFS timetable, and the stop-directory crawl were replaced by the Transit API; see [transit-app-migration.md](transit-app-migration.md). The request-sharing, cooldown, and cancellation designs below were carried over. The BusTime-specific steps and measurements are kept as history.
+> **Superseded (2026-10-15).** This plan optimized the earlier BusTime build. That provider, its GTFS timetable, and the stop-directory crawl were replaced by the Transit API; see [transit-app-migration.md](transit-app-migration.md). The request-sharing, cooldown, and cancellation designs below were carried over. The BusTime-specific steps and measurements are kept as history.
 
 ## Purpose and operating rules
 
@@ -282,7 +282,7 @@ Every implementation session must append a concise execution-log entry containin
 | Route catalog: concurrent miss + cached consumer | 1 | 1 | Unchanged | `GetRouteCatalogAsync_ConcurrentAndCachedConsumers_CountsOneHttpAttemptAndLabelsReuse` |
 | Route catalog after flyout teardown/recreation | Refetched (teardown cleared cache) | **0** until intentional invalidation | Removed | `GetRouteCatalogAsync_FlyoutClearAndRecreatedConsumer_DoesNotDiscardAppMetadata` |
 | Settings picker recreated, same route/direction | Directions + stops + patterns refetched (code-derived) | **0** after initial stops + shape = 2 | Removed | `GetAsync_ConcurrentConsumersAndFreshWindowRecreation_CountsOnePhysicalAttempt`, step 07 evidence |
-| Stop directory: cold build / weekly update / "Update now" | 1 + routes + directions (**148** for MCTS, measured offline in step 09) | **148** | Unchanged (09 deferred) | Step 09 log; complete crawl now also persists picker metadata |
+| Stop directory: cold build / weekly update / "Update now" | 1 + routes + directions (**148** for the BusTime build, measured offline in step 09) | **148** | Unchanged (09 deferred) | Step 09 log; complete crawl now also persists picker metadata |
 | Stop directory: warm disk load | 0 | 0 | Unchanged | `StopIndexServiceTests` |
 | Stop directory: failed rebuild, repeated callers | Full crawl per caller | One shared build; automatic retry waits 5 min doubling to 1 h; early abort on rate limit/key/cooldown/>25% failures | Bounded | `BuildAsync_AutomaticAfterFailure_IsRefusedWithoutCrawling`, `RebuildAsync_FreshCachesAndConcurrentManualCalls_RefreshesOnceAndPersistsCompleteMetadata` |
 | GTFS feed | Conditional GET weekly, not a BusTime call | Unchanged | - | Not charged to the key |
@@ -293,7 +293,7 @@ Every implementation session must append a concise execution-log entry containin
 
 #### Documentation changes
 
-- `README.md` line 13: "around 100 requests" replaced with the actual formula and MCTS count (148). Added an "At a glance" summary to the API budget section with the measured per-minute figures above and their conditions.
+- `README.md` line 13: "around 100 requests" replaced with the actual formula and BusTime count (148). Added an "At a glance" summary to the API budget section with the measured per-minute figures above and their conditions.
 - `TrayTimes\Services\StopIndexService.cs` doc comment: "about a hundred requests" corrected to the formula and 148. Comment-only; no behavior change.
 - Reviewed the rest of the README API-budget section (metadata lifetimes, cadences, sharing/batching, vehicle reuse, passed-bus recovery, failures/cancellation, place discovery, GTFS re-merge) against the step 02-08 logs; no other inaccuracies found.
 
@@ -326,7 +326,7 @@ Expected: full suite passes (451 at the end of step 08, with no tests added sinc
 ### 2026-10-12 - Step 09 (deferred)
 
 - Selected only 09; no in_progress/blocked row existed. Read the full plan, `AGENTS.md`, and the directory/timetable sources (`StopIndexService`, `StopDirectoryBuilder`, `StopDirectoryMetadata`, `ScheduleService`, `GtfsTimetable`). No code changes; per the developer's standing preference, no build/run was started by the agent.
-- **Evidence method (no API calls):** copied the app's cached `LocalState` files to a session scratch folder and compared them offline: `stop-index.json` (legacy, no ordered metadata, built 2026-10-07, 3,714 stops) against `schedule.zip` (MCTS feed, Last-Modified 2026-07-22, checked 2026-10-07). One-off analysis script lives only in the session scratchpad (Python was used because it is a JSON-to-1M-row CSV join). Representative single-agency snapshot, not a multi-week or multi-agency study.
+- **Evidence method (no API calls):** copied the app's cached `LocalState` files to a session scratch folder and compared them offline: `stop-index.json` (legacy, no ordered metadata, built 2026-10-07, 3,714 stops) against `schedule.zip` (agency feed, Last-Modified 2026-07-22, checked 2026-10-07). One-off analysis script lives only in the session scratchpad (Python was used because it is a JSON-to-1M-row CSV join). Representative single-agency snapshot, not a multi-week or multi-agency study.
 - **Feed shape:** `agency, calendar_dates, fare_*, routes, shapes, stop_times (1.0M rows), stops (3,696), trips (19,275)`. No `calendar.txt`. All stops `location_type=0`; `stop_code == stop_id` for all 3,696.
 - **Current crawl cost:** 49 routes, 98 route-directions -> **1 + 49 + 98 = 148 BusTime requests** per cold build/weekly update/manual "Update now"/fallback; warm load 0. (README's "about a hundred" understates it.) GTFS is a separate conditional GET (9.26 MB ZIP on change, usually 304), not charged to the BusTime key.
 - **Stop IDs:** 3,688 shared. **26 BusTime-only** (e.g. `00000252`, `000025`, `1000011`, `100006`), absent from `stops.txt` entirely; **8 GTFS-only** (e.g. `0001`, `0481`, `2622`). A GTFS directory would drop 26 stops BusTime predicts for and add 8 it may not.

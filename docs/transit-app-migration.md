@@ -1,6 +1,6 @@
 # Transit API migration plan
 
-Replace the Milwaukee-only MCTS BusTime and GTFS data sources with the [Transit API v4](https://api-doc.transitapp.com/v4.html) so Tray Times works wherever Transit has data. Calls are scarce, so every design choice below is judged by how many requests it costs.
+Replace the Milwaukee-only BusTime and GTFS data sources with the [Transit API v4](https://api-doc.transitapp.com/v4.html) so Tray Times works wherever Transit has data. Calls are scarce, so every design choice below is judged by how many requests it costs.
 
 Created: 2026-10-15. Branch: `feature/transit-app-api`.
 
@@ -68,7 +68,7 @@ Notes from the spec that shape the client:
 | Polling every listed bus's position every 15 s | On-demand `vehicles` for the selected row |
 | Milwaukee address bias and US-only geocoding | Biased to the user's own places instead; worldwide |
 
-Saved MCTS favorites are dropped on first run (developer decision, 2026-10-15). Favorite places (home, work, school, custom) are plain coordinates and carry over unchanged.
+Saved BusTime favorites are dropped on first run (developer decision, 2026-10-15). Favorite places (home, work, school, custom) are plain coordinates and carry over unchanged.
 
 ## Request budget governor
 
@@ -126,7 +126,7 @@ The table below records the Phase 1 tabbed build. For the current board/planner,
 ## Phase 1 acceptance checklist (developer)
 
 1. Add `TransitApiKey` to `TrayTimes\OAuth.resw` (see the sample), build, and run.
-2. First run: old MCTS favorites are gone; Settings shows the Transit API key as configured and a usage card with monthly totals.
+2. First run: old BusTime favorites are gone; Settings shows the Transit API key as configured and a usage card with monthly totals.
 3. Settings → Add a stop: search a stop by name or code near the map, add it, and see it in Favorites with live and scheduled times. Browse by route: load routes for the map's area, pick a route, direction, and stop.
 4. Favorites flyout: times, scheduled times ("Scheduled"), canceled trips, the "late" detail, route colors, and the route line on the map.
 5. Select a row: that route's vehicles appear, and the trip's own vehicle is highlighted.
