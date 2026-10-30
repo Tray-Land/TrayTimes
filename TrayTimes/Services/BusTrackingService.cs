@@ -95,11 +95,11 @@ internal sealed class BusTrackingService
             else
             {
                 TimeSpan maxAge = Interval(bus, _time.GetLocalNow());
-                PredictionSnapshot snapshot = await _predictions.GetAsync([bus.StopId], maxAge, combineBrowsing: true);
+                PredictionSnapshot snapshot = await _predictions.GetAsync(new[] { bus.StopId }, maxAge, combineBrowsing: true);
                 TimeSpan currentInterval = Interval(bus, _time.GetLocalNow());
                 if (currentInterval < maxAge && generation == _generation)
                 {
-                    snapshot = await _predictions.GetAsync([bus.StopId], currentInterval, combineBrowsing: true);
+                    snapshot = await _predictions.GetAsync(new[] { bus.StopId }, currentInterval, combineBrowsing: true);
                 }
 
                 arrivals = snapshot.Arrivals;
@@ -187,7 +187,7 @@ internal sealed class BusTrackingService
             TrackingAlert.Earlier => ("Your ride is coming sooner", $"{route} now leaves {bus.StopName} at {clock} ({inMinutes})."),
             _ => ("Your ride was canceled", $"{route} at {bus.StopName} was canceled. Tracking has stopped."),
         };
-        NotificationService.Show(title, text, alert == TrackingAlert.Canceled ? [] : [NotificationAction.StopTracking]);
+        NotificationService.Show(title, text, alert == TrackingAlert.Canceled ? Array.Empty<NotificationAction>() : new[] { NotificationAction.StopTracking });
     }
 
     private static void SetKeepAwake(bool keepAwake) =>

@@ -161,7 +161,9 @@ public sealed class ArrivalItem
         Arrival = arrival;
 
         // Canceled trips after the next one aren't coming, so they're left out of the strip.
-        Times = [new BusTimeItem(arrival, stopLocation, now, tracked), .. (later ?? []).Where(a => a.Status != ArrivalStatus.Canceled).Select(a => new BusTimeItem(a, stopLocation, now, tracked))];
+        Times = new[] { new BusTimeItem(arrival, stopLocation, now, tracked) }
+            .Concat((later ?? []).Where(a => a.Status != ArrivalStatus.Canceled).Select(a => new BusTimeItem(a, stopLocation, now, tracked)))
+            .ToList();
         StopLocation = stopLocation;
         RouteBackground = new SolidColorBrush(routeColor);
         RouteForeground = new SolidColorBrush(MapHelpers.ContrastingText(routeColor));

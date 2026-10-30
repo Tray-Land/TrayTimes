@@ -72,7 +72,7 @@ internal sealed class ArrivalsMonitor
                 return;
             }
 
-            Predictions.SetBrowsingStops(TransitConsumer.Favorites, [.. SettingsService.Stops.Select(s => s.StopId)]);
+            Predictions.SetBrowsingStops(TransitConsumer.Favorites, SettingsService.Stops.Select(s => s.StopId).ToList());
             _timer.Interval = RefreshInterval;
             _timer.Start();
             if (_stopsChanged || Latest.FetchedAt is not { } at || _time.GetLocalNow() - at >= Predictions.BrowsingInterval)

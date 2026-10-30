@@ -133,10 +133,22 @@ public sealed class PlaceArrivalsMonitor<TContext>(
     private Task? _discoveryTask;
     private CancellationTokenSource? _discoveryCancellation;
     private CancellationTokenSource? _predictionCancellation;
+    private PlaceStops? _discovery;
+
+    // Discovery's StopIds, worked out once: the property walks every plan itinerary each time it's read.
+    private IReadOnlyList<string> _stopIds = [];
 
     public event EventHandler? Updated;
 
-    public PlaceStops? Discovery { get; private set; }
+    public PlaceStops? Discovery
+    {
+        get => _discovery;
+        private set
+        {
+            _discovery = value;
+            _stopIds = value?.StopIds ?? [];
+        }
+    }
 
     public PredictionSnapshot? Snapshot { get; private set; }
 
@@ -205,7 +217,7 @@ public sealed class PlaceArrivalsMonitor<TContext>(
         ++_loading;
         Updated?.Invoke(this, EventArgs.Empty);
         Task arrivals = Discovery is { } found
-            ? RefreshPredictionsAsync(found, version, force)
+            ? RefreshPredictionsAsync(found, _stopIds, version, force)
             : Task.CompletedTask;
         Task discovery = Task.CompletedTask;
         try
@@ -310,11 +322,13 @@ public sealed class PlaceArrivalsMonitor<TContext>(
             return;
         }
 
-        bool sameStops = Discovery is { } previous
-            && previous.StopIds.ToHashSet(StringComparer.Ordinal).SetEquals(found.StopIds);
+        bool hadDiscovery = Discovery is not null;
+        IReadOnlyList<string> previousStops = _stopIds;
         bool force = _forceDiscovery;
         _forceDiscovery = false;
         Discovery = found;
+        IReadOnlyList<string> stopIds = _stopIds;
+        bool sameStops = hadDiscovery && previousStops.ToHashSet(StringComparer.Ordinal).SetEquals(stopIds);
         _resolvedLocation = location.Point;
         _hasLocation = true;
         if (!sameStops)
@@ -324,10 +338,11 @@ public sealed class PlaceArrivalsMonitor<TContext>(
 
         RegisterStops();
         Updated?.Invoke(this, EventArgs.Empty);
-        await RefreshPredictionsAsync(found, version, force);
+        await RefreshPredictionsAsync(found, stopIds, version, force);
     }
 
-    private async Task RefreshPredictionsAsync(PlaceStops found, int version, bool force)
+    /// <param name="stopIds"><paramref name="found"/>'s <see cref="PlaceStops.StopIds"/>.</param>
+    private async Task RefreshPredictionsAsync(PlaceStops found, IReadOnlyList<string> stopIds, int version, bool force)
     {
         if (!IsCurrent(version))
         {
@@ -340,7 +355,7 @@ public sealed class PlaceArrivalsMonitor<TContext>(
         try
         {
             Task<PredictionSnapshot> pending = predictions.GetAsync(
-                found.StopIds, predictions.BrowsingInterval,
+                stopIds, predictions.BrowsingInterval,
                 force, combineBrowsing: true, cancellationToken: cancellation.Token);
             previous?.Cancel();
             PredictionSnapshot snapshot = await pending;
@@ -367,5 +382,5 @@ public sealed class PlaceArrivalsMonitor<TContext>(
 
     /// <summary>Registers this monitor's stops under its own consumer only, so another monitor's stay registered.</summary>
     private void RegisterStops() =>
-        predictions.SetBrowsingStops(_consumer, _isForeground && Discovery is { } found ? found.StopIds : []);
+        predictions.SetBrowsingStops(_consumer, _isForeground ? _stopIds : []);
 }
