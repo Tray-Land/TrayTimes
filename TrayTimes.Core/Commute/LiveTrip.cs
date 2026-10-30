@@ -19,6 +19,9 @@ public sealed record LiveRide(RideLeg Ride, RideLine Line, DateTimeOffset Starts
 /// <param name="LeaveBy">When to leave the origin: the first ride's departure less the walk to it.</param>
 public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Legs, DateTimeOffset LeaveBy, DateTimeOffset Arrives, bool IsLive = true)
 {
+    /// <summary>How long the trip takes from leaving to arriving: its walks, its rides, and the waits for transfers between them.</summary>
+    public TimeSpan Duration => Arrives - LeaveBy;
+
     /// <summary>Preserves a future plan's leg times instead of moving its walks or boarding a bus running now.</summary>
     public static LiveTrip Scheduled(TripItinerary itinerary)
     {

@@ -200,6 +200,32 @@ public sealed class LiveTripTests
     }
 
     [TestMethod]
+    public void Duration_LateFirstBusMissesTheTransfer_CountsTheWaitForTheNextOne()
+    {
+        // Arrange: leave 8:05 for the late 14, and wait at "b" from 8:27 for the 8:40 30.
+        Arrival[] batch = [Live("a", Fourteen, 10, "14-1"), Live("b", Thirty, 25, "30-1"), Live("b", Thirty, 40, "30-2")];
+
+        // Act
+        LiveTrip trip = LiveTrip.Compute(TransferTrip(), batch, Now)!;
+
+        // Assert: 8:05 to 8:53.
+        Assert.AreEqual(TimeSpan.FromMinutes(48), trip.Duration);
+    }
+
+    [TestMethod]
+    public void Duration_FirstBusLeavesLater_LeavesOutTheWaitBeforeLeaving()
+    {
+        // Arrange: the 8:05 14 is canceled, so the rider leaves at 8:15 for the 8:20.
+        Arrival[] batch = [Live("a", Fourteen, 5, "14-1", ArrivalStatus.Canceled), Live("a", Fourteen, 20, "14-2")];
+
+        // Act
+        LiveTrip trip = LiveTrip.Compute(OneRide(Planned(5, 20, "14-1"), Planned(20, 35, "14-2")), batch, Now)!;
+
+        // Assert: 8:15 to 8:35.
+        Assert.AreEqual(TimeSpan.FromMinutes(20), trip.Duration);
+    }
+
+    [TestMethod]
     public void Best_SeveralOptions_TakesTheOneThatGetsThereFirstAtLiveTimes()
     {
         // Arrange: the planner's first option, the 30 from "c", arrives first as planned, but it runs 25 minutes late.
