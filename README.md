@@ -19,6 +19,13 @@ Click the tray icon for a departures board and a suggested trip, anywhere [Trans
 
 The transit code sits behind `ITransitService` (`TrayTimes.Core\Transit\`). The endpoint review is in [the migration plan](docs/transit-app-migration.md); the board/planner design, measured request counts, and acceptance evidence are in [the completed board and trip planner plan](docs/board-and-trip-planner-plan.md). Sign-in is a separate, unstarted phase, planned in [docs/transit-login-feasibility.md](docs/transit-login-feasibility.md).
 
+## Install
+
+Download [TrayTimes.appinstaller](https://github.com/Tray-Land/TrayTimes/releases/latest/download/TrayTimes.appinstaller) and open it. Windows installs the right version for your PC (x64 or ARM64), plus the Windows App Runtime if it's missing, and keeps Tray Times up to date: it checks for a new release when the app starts and in the background.
+
+- Requires Windows 10 1809 (build 17763) or later, x64 or ARM64.
+- Installed 1.0.0 from the `.msix` files? Open the `.appinstaller` once. It upgrades the app in place and turns on automatic updates. Favorite places carry over; stops saved by the MCTS BusTime version don't (see below).
+
 ## Project layout
 
 - `TrayTimes/`: the WinUI 3 app. `Views/` and `Controls/` hold the UI; `Services/` holds code that needs Windows (settings storage, location, the transit cache file, tray placement).
@@ -58,9 +65,15 @@ dotnet test .\TrayTimes.Tests\TrayTimes.Tests.csproj -c Debug -p:Platform=$Platf
 winapp run .\TrayTimes\TrayTimes.csproj -c Debug --arch $Platform.ToLowerInvariant() -p Platform=$Platform --no-build --detach
 ```
 
-`build-msix-for-gh.ps1` publishes x64 and ARM64 MSIX packages, signs them using the maintainer's local `sign-msix` function, and creates a draft release; pass `-SkipRelease` to build and sign without tagging or uploading.
-
 Keep named controls distinct from properties used by `x:Bind` in data templates. For example, the flyout's `EmptyStateText` control must not be named `EmptyText`, which is a bound `StopGroupItem` property. That collision produces WMC1507 in Visual Studio; the standalone XAML compiler used by CLI builds instead fails with WMC9999 while loading the warning's error-message resource.
+
+### Releases
+
+1. Bump `Identity/@Version` in `TrayTimes\Package.appxmanifest`, then commit and push.
+2. From a PowerShell session that has the maintainer's `sign-msix` function, run `.\build-msix-for-gh.ps1`. It builds a signed x64 + ARM64 `.msixbundle` and the `TrayTimes.appinstaller` feed, checks them, and creates a draft GitHub release.
+3. Publish the draft as the latest release without changing its tag (the feed's download addresses use it), then run `.\build-msix-for-gh.ps1 -VerifyPublished`.
+
+`.\build-msix-for-gh.ps1 -SkipRelease -NoSign` checks the whole build without signing. The script is a copy of the one in the `winui-tray-app` skill; fix it there, not here.
 
 ## API budget
 
