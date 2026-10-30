@@ -124,7 +124,8 @@ internal sealed record TestDeparture(
     bool Canceled = false,
     string Headsign = "Downtown",
     DateTimeOffset? Scheduled = null,
-    string? Shape = null);
+    string? Shape = null,
+    string? SearchKey = null);
 
 /// <summary>Fake Transit API HTTP: counts attempts, records stop IDs, and answers with fixture JSON.</summary>
 internal sealed class RequestTestHandler : HttpMessageHandler
@@ -194,6 +195,7 @@ internal sealed class RequestTestHandler : HttpMessageHandler
                         is_real_time = d.RealTime,
                         is_cancelled = d.Canceled,
                         rt_trip_id = d.TripId,
+                        trip_search_key = d.SearchKey,
                         internal_itinerary_id = $"{route.Key.RouteId}:{direction.Key}:{d.Headsign}",
                     }),
                 }),

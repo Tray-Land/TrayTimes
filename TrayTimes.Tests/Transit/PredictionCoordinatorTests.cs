@@ -429,6 +429,41 @@ public sealed class PredictionCoordinatorTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task GetAsync_UrgentCallerJoinsATimersUnsentBatch_SendsItAsUrgent(bool sameStop)
+    {
+        // Arrange
+        Scenario scenario = new(Window);
+        List<TransitPriority> priorities = [];
+        scenario.Handler.RespondAsync = (request, _) =>
+        {
+            priorities.Add(TransitRequestDiagnostics.CurrentPriority);
+            return Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(RequestTestHandler.StopIds(request))));
+        };
+        Task<PredictionSnapshot> favorites;
+        using (TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, TransitTrigger.Timer))
+        {
+            favorites = scenario.Coordinator.GetAsync(["fav"], TimeSpan.FromSeconds(60));
+        }
+
+        // Act: a trip check claims the open batch, or finds its stop already in it.
+        Task<PredictionSnapshot> trip;
+        using (TransitRequestDiagnostics.BeginScope(TransitConsumer.ActiveTrip, TransitTrigger.Timer))
+        {
+            trip = scenario.Coordinator.GetAsync([sameStop ? "fav" : "trip"], TimeSpan.FromSeconds(60));
+        }
+
+        scenario.Clock.Advance(Window);
+        await Task.WhenAll(favorites, trip);
+
+        // Assert
+        Assert.AreEqual(1, scenario.Handler.Attempts);
+        CollectionAssert.AreEqual(new[] { TransitPriority.Urgent }, priorities);
+        Assert.AreEqual(TransitConsumer.ActiveTrip, scenario.Service.Diagnostics.Snapshot.First(o => o.Phase == TransitRequestPhase.Started).Consumer);
+    }
+
+    [TestMethod]
     public async Task GetAsync_StopsRegisteredWhileBatchWaits_RideAlongAndAreReused()
     {
         // Arrange

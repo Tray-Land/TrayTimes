@@ -90,6 +90,7 @@ public sealed class PredictionCoordinator
         }
 
         int max = _service.MaxStopsPerRequest;
+        (TransitConsumer, TransitTrigger) scope = TransitRequestDiagnostics.CurrentScope;
         TimeSpan fillAge = BrowsingInterval / 2;
         Dictionary<string, StopSnapshot> snapshots = new(StringComparer.Ordinal);
         Dictionary<string, Request> requested = new(StringComparer.Ordinal);
@@ -158,7 +159,7 @@ public sealed class PredictionCoordinator
 
             while (queue.Count > 0)
             {
-                Request request = new(++_sequence) { CombineBrowsing = combineBrowsing && !force };
+                Request request = new(++_sequence, scope) { CombineBrowsing = combineBrowsing && !force };
                 Claim(request, queue, max, ids, requested);
                 starts.Add(request);
                 waiters.Add(request);
@@ -172,6 +173,10 @@ public sealed class PredictionCoordinator
             foreach (Request request in waiters)
             {
                 ++request.Waiters;
+                if (!request.IsSent)
+                {
+                    request.Join(scope);
+                }
             }
         }
 
@@ -256,6 +261,7 @@ public sealed class PredictionCoordinator
             }
 
             string[] ids;
+            (TransitConsumer Consumer, TransitTrigger Trigger) scope;
             lock (_gate)
             {
                 request.Cancellation.Token.ThrowIfCancellationRequested();
@@ -276,9 +282,16 @@ public sealed class PredictionCoordinator
 
                 request.Send(_time.GetTimestamp(), _time.GetLocalNow());
                 ids = [.. request.Ids];
+                scope = request.Scope;
             }
 
-            DepartureBoard board = await _service.GetDeparturesAsync(ids, includeShapes: false, request.Cancellation.Token);
+            // Sent for its most urgent caller, not whichever opened it, so the budget and cooldown don't hold back tracking.
+            DepartureBoard board;
+            using (TransitRequestDiagnostics.BeginScope(scope.Consumer, scope.Trigger))
+            {
+                board = await _service.GetDeparturesAsync(ids, includeShapes: false, request.Cancellation.Token);
+            }
+
             Dictionary<string, StopSnapshot> result = ids.ToDictionary(id => id,
                 id => new StopSnapshot(board.Arrivals.Where(a => a.StopId == id).ToArray(),
                     request.StartedAt, request.FetchedAt, request.Sequence), StringComparer.Ordinal);
@@ -384,10 +397,13 @@ public sealed class PredictionCoordinator
     private sealed record StopSnapshot(IReadOnlyList<Arrival> Arrivals, long StartedAt, DateTimeOffset FetchedAt, long Sequence);
 
     /// <summary>One HTTP batch. Its stops can still be added to until it's sent.</summary>
-    private sealed class Request(long sequence)
+    private sealed class Request(long sequence, (TransitConsumer Consumer, TransitTrigger Trigger) scope)
     {
         public List<string> Ids { get; } = [];
         public long Sequence { get; } = sequence;
+
+        /// <summary>The scope it's sent under: its most urgent caller's.</summary>
+        public (TransitConsumer Consumer, TransitTrigger Trigger) Scope { get; private set; } = scope;
         public bool CombineBrowsing { get; set; }
         public bool IsSent { get; private set; }
         public long StartedAt { get; private set; }
@@ -396,6 +412,15 @@ public sealed class PredictionCoordinator
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource<IReadOnlyDictionary<string, StopSnapshot>> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>A caller waits on this unsent batch: it's sent under that caller's scope if it's more urgent.</summary>
+        public void Join((TransitConsumer Consumer, TransitTrigger Trigger) caller)
+        {
+            if (TransitRequestDiagnostics.PriorityOf(caller) > TransitRequestDiagnostics.PriorityOf(Scope))
+            {
+                Scope = caller;
+            }
+        }
 
         public void Send(long startedAt, DateTimeOffset fetchedAt)
         {

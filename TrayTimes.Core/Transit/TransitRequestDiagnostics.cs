@@ -71,7 +71,10 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
     public static (TransitConsumer Consumer, TransitTrigger Trigger) CurrentScope => Context.Value;
 
     /// <summary>Tracking and an active trip are urgent; anything the rider just did is manual; timers and the rest are automatic.</summary>
-    public static TransitPriority CurrentPriority => Context.Value switch
+    public static TransitPriority CurrentPriority => PriorityOf(Context.Value);
+
+    /// <summary>The priority of requests made under <paramref name="scope"/> (see <see cref="CurrentPriority"/>).</summary>
+    public static TransitPriority PriorityOf((TransitConsumer Consumer, TransitTrigger Trigger) scope) => scope switch
     {
         (TransitConsumer.Tracking or TransitConsumer.ActiveTrip, _) => TransitPriority.Urgent,
         (_, TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
