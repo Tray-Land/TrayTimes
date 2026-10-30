@@ -132,7 +132,7 @@ public partial class App : Application
         _budget = new TransitBudget(ApiUsageService.GetUsage, SettingsService.TransitBudget);
         MetadataTransitService transit = new(new CooldownTransitService(client, budget: _budget));
         _cache = new TransitCacheService(transit, _dispatcher);
-        _ = _cache.LoadAsync();
+        Task cacheLoaded = _cache.LoadAsync();
         PredictionCoordinator departures = new(transit, browsingInterval: () => _budget.ReuseAge, coalesceWindow: DeparturesCoalesceWindow);
         _monitor = new ArrivalsMonitor(transit, _dispatcher, predictions: departures, budget: _budget);
         _monitor.Updated += (_, _) => UpdateTooltip();
@@ -162,17 +162,19 @@ public partial class App : Application
         NotificationService.Register();
 
         InitializeTrayIcon();
-        _ = RestoreTripThenShowAsync(isStartupTask);
+        _ = RestoreTripThenShowAsync(isStartupTask, cacheLoaded);
     }
 
     /// <summary>
     /// A trip saved before a restart waits for the rider: a manual launch then opens the flyout, which shows its
     /// Resume card; a startup launch has no window, so it asks in a notification.
     /// </summary>
-    private async Task RestoreTripThenShowAsync(bool isStartupTask)
+    private async Task RestoreTripThenShowAsync(bool isStartupTask, Task cacheLoaded)
     {
         try
         {
+            // The flyout's discovery reads the saved metadata, so what's already on disk doesn't cost calls again.
+            await cacheLoaded;
             await Trips.RestoreAsync(offerResume: isStartupTask);
         }
         finally
@@ -494,7 +496,7 @@ public partial class App : Application
 
         if (_tracker?.Current is { } bus)
         {
-            lines.Add(AppStrings.Format("TooltipTrackingFormat", bus.RouteDisplayId, bus.StopName, Minutes([bus.MinutesAway(now)])));
+            lines.Add(AppStrings.Format("TooltipTrackingFormat", AppStrings.Route(bus.RouteDisplayId), bus.StopName, Minutes(new[] { bus.MinutesAway(now) })));
         }
 
         if (snapshot.Error is not null && snapshot.FetchedAt is null)
@@ -513,7 +515,7 @@ public partial class App : Application
             IReadOnlyList<SavedStop> saved = SettingsService.Stops;
             foreach (SavedStop stop in _flyout.SavedStopIds.SelectMany(id => saved.Where(s => s.StopId == id)))
             {
-                string label = stop.AllRoutes ? stop.StopName : AppStrings.Format("TooltipStopLineFormat", stop.RouteDisplayId, stop.DirectionName);
+                string label = stop.AllRoutes ? stop.DisplayName : AppStrings.Format("TooltipStopLineFormat", AppStrings.Route(stop.RouteDisplayId), stop.DirectionName);
                 int[] minutes = [.. snapshot.For(stop).Where(a => a.Status != ArrivalStatus.Canceled).Take(2).Select(a => a.MinutesAway(now))];
                 string when = minutes.Length == 0 ? AppStrings.Get("TooltipNoArrivals") : Minutes(minutes);
                 stops.Add(AppStrings.Format("TooltipStopFormat", label, when));

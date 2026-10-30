@@ -111,17 +111,17 @@ public sealed class SuggestionCardItem
             title = AppStrings.Format("SuggestionTitleFormat", to, leave);
             detail = transfers == 0 ? AppStrings.Format("SuggestionArriveFormat", arrive) : AppStrings.Format("SuggestionArriveTransfersFormat", arrive, changes);
             name = AppStrings.Format("SuggestionTripNameFormat", to, spokenLeave, arrive, transfers == 0 ? AppStrings.Get("SuggestionNoTransfers") : changes);
-            tooltip = AppStrings.Format("TooltipTripFormat", to, leave, rides[0].Line.Route.DisplayId, Clock(rides[0].Starts));
+            tooltip = AppStrings.Format("TooltipTripFormat", to, leave, AppStrings.Route(rides[0].Line.Route.DisplayId), Clock(rides[0].Starts));
         }
 
         string note = leg.IsGuess && leg.From is { } from ? AppStrings.Format("SuggestionGuessedFormat", from.Name) : string.Empty;
         return new SuggestionCardItem($"trip|{leg.To.Id}", MapHelpers.PlaceGlyph(leg.To.Kind), title, detail)
         {
             Note = note,
-            Routes = [.. rides.Select((r, i) => new RouteChipItem(
+            Routes = rides.Select((r, i) => new RouteChipItem(
                 r.Line.Route.DisplayId,
                 MapHelpers.ParseRouteColor(r.Departure?.RouteColor ?? r.Line.Route.Color),
-                isTransfer: i > 0))],
+                isTransfer: i > 0)).ToList(),
             Trip = trip,
             Leg = leg,
             AutomationName = note.Length == 0 ? name : AppStrings.Format("SuggestionNameWithNoteFormat", name, note),
@@ -142,10 +142,10 @@ public sealed class SuggestionCardItem
         return new SuggestionCardItem($"active|{trip.Leg.To.Id}", MapHelpers.PlaceGlyph(trip.Leg.To.Kind), TripMessages.CardTitle(trip, step, now),
             AppStrings.Format("SuggestionArriveFormat", TripMessages.When(live.Arrives, now)))
         {
-            Routes = [.. live.Legs.OfType<LiveRide>().Select((r, i) => new RouteChipItem(
+            Routes = live.Legs.OfType<LiveRide>().Select((r, i) => new RouteChipItem(
                 r.Line.Route.DisplayId,
                 MapHelpers.ParseRouteColor(r.Departure?.RouteColor ?? r.Line.Route.Color),
-                isTransfer: i > 0))],
+                isTransfer: i > 0)).ToList(),
             Trip = live,
             Leg = trip.Leg,
             AutomationName = TripMessages.CardName(trip, step, now),

@@ -40,7 +40,7 @@ namespace TrayTimes.Views;
 /// </summary>
 public sealed partial class TimesFlyoutWindow : WindowEx
 {
-    private const int PopupWidth = 400;
+    private const int PopupWidth = 440;
     private const int PopupHeight = 680;
     private const int RoutesPerStop = 4;
     private const int RoutesPerNearbyStop = 3;
@@ -616,8 +616,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             {
                 Arrival? next = stop.SelectMany(favorites.For).Where(a => a.Status != ArrivalStatus.Canceled).MinBy(a => a.PredictedTime);
                 string? when = next is null ? null
-                    : next.MinutesAway(now) == 0 ? AppStrings.Format("JumpNextDueFormat", next.RouteDisplayId)
-                    : AppStrings.Format("JumpNextFormat", next.RouteDisplayId, next.MinutesAway(now));
+                    : next.MinutesAway(now) == 0 ? AppStrings.Format("JumpNextDueFormat", AppStrings.Route(next.RouteDisplayId))
+                    : AppStrings.Format("JumpNextFormat", AppStrings.Route(next.RouteDisplayId), next.MinutesAway(now));
                 PlaceMenu.Items.Add(CenterItem(new NearStop(stop.First()), shown, when));
             }
 
@@ -659,7 +659,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private static string CenterLabel(BoardCenter center) => center switch
     {
         NearPlace near => AppStrings.Format("CenterNearFormat", near.Place.Name),
-        NearStop near => StopName(near.Stop.StopName),
+        NearStop near => StopName(near.Stop.DisplayName),
         AllSavedStops => AppStrings.Get("CenterAllSaved"),
         _ => AppStrings.Get("CenterNearYou"),
     };
@@ -1004,7 +1004,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private static string CenterName(BoardCenter center) => center switch
     {
         NearPlace near => near.Place.Name,
-        NearStop near => StopName(near.Stop.StopName),
+        NearStop near => StopName(near.Stop.DisplayName),
         _ => string.Empty,
     };
 
@@ -1118,9 +1118,10 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             now);
 
         // A stop whose every line is listed at a stop saved with All routes has nothing left to show.
-        IReadOnlyList<StopGroupItem> groups = [.. _placeStops
+        IReadOnlyList<StopGroupItem> groups = _placeStops
             .Where(n => savedIds.Contains(n.Stop.Id) || n.Stop.Routes.Count == 0 || n.Stop.Routes.Any(r => listed(new StopLine(n.Stop.Id, r.RouteId, r.DirectionId))))
-            .Select(n => BuildBoardGroup(n, savedIds.Contains(n.Stop.Id), row))];
+            .Select(n => BuildBoardGroup(n, savedIds.Contains(n.Stop.Id), row))
+            .ToList();
 
         if (_placeNotice is { } notice)
         {
@@ -1510,7 +1511,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         if (_onlyTripId is not null)
         {
-            vehicles = [.. vehicles.Where(v => v.TripId == _onlyTripId)];
+            vehicles = vehicles.Where(v => v.TripId == _onlyTripId).ToList();
         }
 
         HashSet<string> seen = [];
@@ -1565,7 +1566,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _frameWithVehicle = null;
             if (trip is not null)
             {
-                _ = MapHelpers.FrameAsync(Map, [stop, trip.Location], MapAnimationKind.Default);
+                _ = MapHelpers.FrameAsync(Map, new[] { stop, trip.Location }, MapAnimationKind.Default);
             }
         }
     }
@@ -1640,7 +1641,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         Vehicle? known = arrival.TripId is null ? null : _vehicles.Values.FirstOrDefault(v => v.TripId == arrival.TripId);
         SelectVehicle(known?.Id);
         _frameWithVehicle = known is null ? stop : null;
-        _ = MapHelpers.FrameAsync(Map, known is null ? [stop] : [stop, known.Location], MapAnimationKind.Default);
+        _ = MapHelpers.FrameAsync(Map, known is null ? new[] { stop } : new[] { stop, known.Location }, MapAnimationKind.Default);
         _ = RefreshVehiclesAsync(TransitTrigger.VehicleSelected);
     }
 
@@ -1990,7 +1991,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (sender is FrameworkElement { DataContext: StopGroupItem group })
         {
             DeselectVehicle();
-            _ = MapHelpers.FrameAsync(Map, [group.Location], MapAnimationKind.Default, singlePointZoom: 16);
+            _ = MapHelpers.FrameAsync(Map, new[] { group.Location }, MapAnimationKind.Default, singlePointZoom: 16);
         }
     }
 
