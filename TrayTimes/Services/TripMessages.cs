@@ -372,13 +372,22 @@ internal static class TripMessages
         : minutes == 1 ? AppStrings.Get("TripInOneMinuteSpoken")
         : AppStrings.Format("TripInMinutesSpokenFormat", minutes);
 
-    /// <summary>"4 min" (spoken: "4 minutes", "1 minute"), at least a minute.</summary>
+    /// <summary>"4 min", or "1 hr 5 min" from an hour (spoken: "4 minutes", "1 hour 5 minutes"), at least a minute.</summary>
     private static string Duration(TimeSpan duration, bool spoken)
     {
-        int minutes = WalkMinutes(duration);
-        return !spoken ? AppStrings.Format("TripDurationFormat", minutes)
+        (int hours, int minutes) = Math.DivRem(WalkMinutes(duration), 60);
+        string minuteText = !spoken ? AppStrings.Format("TripDurationFormat", minutes)
             : minutes == 1 ? AppStrings.Get("TripDurationOneMinuteSpoken")
             : AppStrings.Format("TripDurationSpokenFormat", minutes);
+        if (hours == 0)
+        {
+            return minuteText;
+        }
+
+        string hourText = !spoken ? AppStrings.Format("TripHoursFormat", hours)
+            : hours == 1 ? AppStrings.Get("TripOneHourSpoken")
+            : AppStrings.Format("TripHoursSpokenFormat", hours);
+        return minutes == 0 ? hourText : AppStrings.Format("TripHoursMinutesFormat", hourText, minuteText);
     }
 
     private static int Minutes(DateTimeOffset at, DateTimeOffset now) => Math.Max(0, (int)Math.Ceiling((at - now).TotalMinutes));

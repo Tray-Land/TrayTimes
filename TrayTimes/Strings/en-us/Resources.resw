@@ -1238,6 +1238,22 @@
     <value>{0} min</value>
     <comment>{0} is a number of minutes. Used inside other trip texts, such as "Walk 4 min to...".</comment>
   </data>
+  <data name="TripHoursFormat" xml:space="preserve">
+    <value>{0} hr</value>
+    <comment>{0} is a number of hours. Used in place of, or before, TripDurationFormat for an hour or more, such as "1 hr 5 min".</comment>
+  </data>
+  <data name="TripHoursMinutesFormat" xml:space="preserve">
+    <value>{0} {1}</value>
+    <comment>An hour or more, e.g. "1 hr 5 min". {0} is the hours (TripHoursFormat, or TripHoursSpokenFormat for screen readers); {1} the minutes (TripDurationFormat, or TripDurationSpokenFormat).</comment>
+  </data>
+  <data name="TripHoursSpokenFormat" xml:space="preserve">
+    <value>{0} hours</value>
+    <comment>Read by screen readers in place of TripHoursFormat. {0} is a number of hours, 2 or more.</comment>
+  </data>
+  <data name="TripOneHourSpoken" xml:space="preserve">
+    <value>1 hour</value>
+    <comment>Read by screen readers in place of TripHoursFormat.</comment>
+  </data>
   <data name="TripDurationSpokenFormat" xml:space="preserve">
     <value>{0} minutes</value>
     <comment>Read by screen readers in place of TripDurationFormat. {0} is a number of minutes, 2 or more.</comment>
