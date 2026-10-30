@@ -174,6 +174,67 @@ public sealed class TransitAppServiceTests
     }
 
     [TestMethod]
+    public async Task GetDeparturesAsync_RouteAlerts_MapsEachListedRoutesAlertsByRouteId()
+    {
+        // Arrange: shaped like a live response, with an effect the spec doesn't list and the same route at two stops.
+        long t0 = Now.ToUnixTimeSeconds();
+        string detour = $$"""
+            {"title":"Temporary Reroute","description":"#9 buses will operate via Ashland.","effect":"DETOUR","cause":"CONSTRUCTION","severity":"Warning",
+             "created_at":{{t0}},"informed_entities":[{"global_route_id":"CTA:9"}],"active_periods":[{"start":{{t0 - 3600}},"end":null}]}
+            """;
+        string body = $$"""
+            {"route_departures":[
+              {"global_route_id":"CTA:9","route_short_name":"9","global_stop_id":"CTA:1","merged_itineraries":[],"alerts":[{{detour}},
+                {"description":"The elevator at Chicago is out of service.","effect":"ACCESSIBILITY_ISSUE","cause":"TECHNICAL_PROBLEM","severity":"Info",
+                 "created_at":{{t0}},"informed_entities":[],"active_periods":[{"start":null,"end":{{t0 + 7200}}}]},
+                {"title":" ","description":"","effect":"SOMETHING_NEW","cause":"","severity":"Severe","created_at":{{t0}},"informed_entities":[]}]},
+              {"global_route_id":"CTA:9","route_short_name":"9","global_stop_id":"CTA:2","merged_itineraries":[],"alerts":[{{detour}}]},
+              {"global_route_id":"CTA:49","route_short_name":"49","global_stop_id":"CTA:1","merged_itineraries":[],"alerts":[]}]}
+            """;
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(body)) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        DepartureBoard board = await service.GetDeparturesAsync(["CTA:1", "CTA:2"]);
+
+        // Assert
+        Assert.IsEmpty(board.Alerts["CTA:49"]);
+        IReadOnlyList<ServiceAlert> alerts = board.Alerts["CTA:9"];
+        Assert.HasCount(2, alerts);
+        Assert.AreEqual(new ServiceAlert("Temporary Reroute", "#9 buses will operate via Ashland.", AlertSeverity.Warning, AlertEffect.Detour,
+            AlertCause.Construction, alerts[0].Periods), alerts[0]);
+        Assert.AreEqual(new AlertPeriod(Now.AddHours(-1), null), alerts[0].Periods.Single());
+        ServiceAlert elevator = alerts[1];
+        Assert.AreEqual(string.Empty, elevator.Title);
+        Assert.AreEqual(AlertEffect.AccessibilityIssue, elevator.Effect);
+        Assert.AreEqual(AlertCause.TechnicalProblem, elevator.Cause);
+        Assert.AreEqual(AlertSeverity.Info, elevator.Severity);
+        Assert.AreEqual(new AlertPeriod(null, Now.AddHours(2)), elevator.Periods.Single());
+    }
+
+    [TestMethod]
+    public async Task GetDeparturesAsync_UnknownAlertNames_ReadAsUnknown()
+    {
+        // Arrange
+        string body = """
+            {"route_departures":[{"global_route_id":"R:1","global_stop_id":"S:1","merged_itineraries":[],
+              "alerts":[{"title":"Heads up","description":"Something.","effect":"SOMETHING_NEW","cause":"1","severity":"Extreme","created_at":0,"informed_entities":[]}]}]}
+            """;
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(body)) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        DepartureBoard board = await service.GetDeparturesAsync(["S:1"]);
+
+        // Assert
+        ServiceAlert alert = board.Alerts["R:1"].Single();
+        Assert.AreEqual(AlertEffect.UnknownEffect, alert.Effect);
+        Assert.AreEqual(AlertCause.UnknownCause, alert.Cause);
+        Assert.AreEqual(AlertSeverity.Unknown, alert.Severity);
+        Assert.IsEmpty(alert.Periods);
+    }
+
+    [TestMethod]
     public async Task GetNearbyLinesAsync_Routes_ListsEachDirectionWithItsClosestStopAndShape()
     {
         // Arrange

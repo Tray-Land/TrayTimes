@@ -76,6 +76,7 @@ public sealed class TransitAppService : ITransitService
         HashSet<string> requested = new(ids, StringComparer.Ordinal);
         List<Arrival> arrivals = [];
         List<RoutePattern> shapes = [];
+        Dictionary<string, IReadOnlyList<ServiceAlert>> alerts = new(StringComparer.Ordinal);
         foreach (RouteDto dto in response.RouteDepartures ?? [])
         {
             if (MapRoute(dto) is not { } route)
@@ -83,6 +84,8 @@ public sealed class TransitAppService : ITransitService
                 continue;
             }
 
+            // A route listed at several stops carries its alerts at each.
+            alerts[route.Id] = [.. (alerts.GetValueOrDefault(route.Id) ?? []).Concat(MapAlerts(dto.Alerts)).DistinctBy(a => (a.Title, a.Description))];
             foreach (MergedItineraryDto merged in dto.MergedItineraries ?? [])
             {
                 string? stopId = NonEmpty(dto.GlobalStopId) ?? NonEmpty(merged.ClosestStop?.GlobalStopId);
@@ -99,7 +102,7 @@ public sealed class TransitAppService : ITransitService
             }
         }
 
-        return new DepartureBoard(SortDistinct(arrivals), shapes);
+        return new DepartureBoard(SortDistinct(arrivals), shapes, alerts);
     }
 
     public async Task<NearbyLines> GetNearbyLinesAsync(GeoPoint point, int radiusMeters, CancellationToken cancellationToken = default)
@@ -508,6 +511,36 @@ public sealed class TransitAppService : ITransitService
         VehicleKind vehicle = VehicleKinds.FromRouteType(dto.RouteType is { } type && double.IsFinite(type) ? (int)type : null);
         return new TransitRoute(id, display ?? name ?? id, name ?? display ?? id, NormalizeColor(dto.RouteColor), NonEmpty(dto.ModeName), vehicle);
     }
+
+    /// <summary>A route's alerts, leaving out any with neither a title nor a description.</summary>
+    private static IEnumerable<ServiceAlert> MapAlerts(List<AlertDto>? alerts)
+    {
+        foreach (AlertDto dto in alerts ?? [])
+        {
+            string? title = NonEmpty(dto.Title);
+            string? description = NonEmpty(dto.Description);
+            if (title is null && description is null)
+            {
+                continue;
+            }
+
+            yield return new ServiceAlert(
+                title ?? string.Empty,
+                description ?? string.Empty,
+                AlertName<AlertSeverity>(dto.Severity),
+                AlertName<AlertEffect>(dto.Effect),
+                AlertName<AlertCause>(dto.Cause),
+                [.. (dto.ActivePeriods ?? []).Select(p => new AlertPeriod(UnixOrNull(p.Start), UnixOrNull(p.End)))]);
+        }
+    }
+
+    /// <summary>"NO_SERVICE" as <see cref="AlertEffect.NoService"/>, and so on; a name the app doesn't know as the type's unknown (first) value.</summary>
+    private static T AlertName<T>(string? name)
+        where T : struct, Enum =>
+        NonEmpty(name)?.Replace("_", string.Empty, StringComparison.Ordinal) is { } key && key.All(char.IsAsciiLetter)
+            && Enum.TryParse(key, ignoreCase: true, out T value) ? value : default;
+
+    private static DateTimeOffset? UnixOrNull(double? seconds) => seconds is { } s && double.IsFinite(s) ? FromUnix(s) : null;
 
     private static TransitStop? MapStop(StopDto? dto)
     {

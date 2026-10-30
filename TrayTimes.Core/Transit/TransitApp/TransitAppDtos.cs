@@ -73,6 +73,36 @@ internal sealed class RouteDto
     public List<MergedItineraryDto>? MergedItineraries { get; set; }
 
     public List<ItineraryDto>? Itineraries { get; set; }
+
+    /// <summary>Every service alert of the route (in a plan, only those that affect it).</summary>
+    public List<AlertDto>? Alerts { get; set; }
+}
+
+/// <summary>
+/// A service alert. Effect and cause are GTFS-realtime names ("DETOUR", "HOLIDAY"), and severity is Transit's
+/// ("Warning"); they're read as strings, as Transit sends names its spec doesn't list ("ACCESSIBILITY_ISSUE").
+/// </summary>
+internal sealed class AlertDto
+{
+    public string? Title { get; set; }
+
+    public string? Description { get; set; }
+
+    public string? Severity { get; set; }
+
+    public string? Effect { get; set; }
+
+    public string? Cause { get; set; }
+
+    public List<AlertPeriodDto>? ActivePeriods { get; set; }
+}
+
+/// <summary>Unix times; either can be null for an open end.</summary>
+internal sealed class AlertPeriodDto
+{
+    public double? Start { get; set; }
+
+    public double? End { get; set; }
 }
 
 internal sealed class DisplayShortNameDto

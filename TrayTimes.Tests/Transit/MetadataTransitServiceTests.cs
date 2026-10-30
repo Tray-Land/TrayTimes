@@ -729,6 +729,28 @@ public sealed class MetadataTransitServiceTests
         Assert.AreEqual("S:newer", lines.Lines.Single().Stop.Id);
     }
 
+    [TestMethod]
+    public async Task GetDeparturesAsync_RouteAlerts_LeavesThemInAlertsAndAResponseWithoutThemClearsThem()
+    {
+        // Arrange
+        Scenario scenario = new();
+        string withAlert = """
+            {"route_departures":[{"global_route_id":"R:1","global_stop_id":"S:1","merged_itineraries":[],
+              "alerts":[{"title":"Detour","description":"Buses detour via Oak St.","effect":"DETOUR","cause":"CONSTRUCTION","severity":"Warning","created_at":0,"informed_entities":[]}]}]}
+            """;
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(withAlert));
+
+        // Act
+        await scenario.Metadata.GetDeparturesAsync(["S:1"]);
+        IReadOnlyList<ServiceAlert> recorded = scenario.Metadata.Alerts.For("R:1", RequestTestClock.Start);
+        scenario.Handler.RespondAsync = scenario.Respond;
+        await scenario.Metadata.GetDeparturesAsync(["S:1"]);
+
+        // Assert
+        Assert.AreEqual("Detour", recorded.Single().Title);
+        Assert.IsEmpty(scenario.Metadata.Alerts.For("R:1", RequestTestClock.Start));
+    }
+
     private static string Shape(int points = 3) =>
         GeoMath.EncodePolyline(Enumerable.Range(0, points).Select(i => new GeoPoint(43 + (i * 0.01), -88)));
 

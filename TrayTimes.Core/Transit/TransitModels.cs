@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
 
 namespace TrayTimes.Transit;
@@ -75,10 +76,13 @@ public sealed record Arrival(
     public int MinutesAway(DateTimeOffset now) => Math.Max(0, (int)Math.Floor((PredictedTime - now).TotalMinutes));
 }
 
-/// <summary>Departures at several stops, plus the route shapes that came with them when asked for.</summary>
-public sealed record DepartureBoard(IReadOnlyList<Arrival> Arrivals, IReadOnlyList<RoutePattern> Shapes)
+/// <summary>
+/// Departures at several stops, plus the route shapes that came with them when asked for, and the service alerts
+/// of each route listed, by route ID (empty for a route with none).
+/// </summary>
+public sealed record DepartureBoard(IReadOnlyList<Arrival> Arrivals, IReadOnlyList<RoutePattern> Shapes, IReadOnlyDictionary<string, IReadOnlyList<ServiceAlert>> Alerts)
 {
-    public static DepartureBoard Empty { get; } = new([], []);
+    public static DepartureBoard Empty { get; } = new([], [], ReadOnlyDictionary<string, IReadOnlyList<ServiceAlert>>.Empty);
 }
 
 public enum VehicleOccupancy

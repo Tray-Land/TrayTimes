@@ -7,7 +7,8 @@ namespace TrayTimes.Transit;
 /// trip plans, stop searches, and route shapes. Lookups by place reuse a result for a nearby
 /// point. Each caller cancels only its own waiter on a shared load. Departures pass through, but
 /// ask for shapes when a stop hasn't been seen with them lately, so drawing routes never costs a
-/// request of its own. Results can be exported and seeded across runs.
+/// request of its own, and leave their routes' service alerts in <see cref="Alerts"/>. Results
+/// (except alerts, which are live) can be exported and seeded across runs.
 /// </summary>
 public sealed class MetadataTransitService : ITransitService
 {
@@ -76,11 +77,15 @@ public sealed class MetadataTransitService : ITransitService
 
     public TransitRequestDiagnostics? Diagnostics => _inner.Diagnostics;
 
+    /// <summary>The service alerts of every route seen in departures lately.</summary>
+    public AlertBook Alerts { get; } = new();
+
     public async Task<DepartureBoard> GetDeparturesAsync(IReadOnlyCollection<string> stopIds, bool includeShapes = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stopIds);
         bool withShapes = includeShapes || stopIds.Any(id => !IsCovered(id));
         DepartureBoard board = await _inner.GetDeparturesAsync(stopIds, withShapes, cancellationToken);
+        Alerts.Record(board.Alerts);
         if (withShapes)
         {
             DateTimeOffset now = _time.GetUtcNow();
