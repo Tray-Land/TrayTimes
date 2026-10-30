@@ -231,7 +231,7 @@ internal sealed class ActiveTripService
         if (offerResume)
         {
             (string title, string text) = TripMessages.ResumePrompt(saved);
-            NotificationService.Show(title, text, [NotificationAction.ResumeTrip, NotificationAction.EndTrip]);
+            NotificationService.Show(title, text, new[] { NotificationAction.ResumeTrip, NotificationAction.EndTrip });
         }
 
         Changed?.Invoke(this, EventArgs.Empty);
@@ -392,7 +392,8 @@ internal sealed class ActiveTripService
         {
             try
             {
-                plan = await _metadata.ReplanTripAsync(trip.Progress.ReplanFrom(now) ?? trip.Leg.Origin, trip.Destination);
+                // CanReplan is this trip's guard, so the shared one (another trip's or a suggestion's replan) doesn't apply.
+                plan = await _metadata.ForceReplanTripAsync(trip.Progress.ReplanFrom(now) ?? trip.Leg.Origin, trip.Destination, trip.Progress.ReplanTime(now));
             }
             catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or TransitApiException)
             {
@@ -426,7 +427,7 @@ internal sealed class ActiveTripService
         {
             _toldNoConnection = true;
             (string title, string text) = TripMessages.NoConnection(trip);
-            NotificationService.Show(title, text, [NotificationAction.EndTrip]);
+            NotificationService.Show(title, text, new[] { NotificationAction.EndTrip });
         }
 
         return update;
@@ -446,7 +447,7 @@ internal sealed class ActiveTripService
 
         _toldReplanWait = true;
         (string title, string text) = TripMessages.ReplanWait(Current!, last + ReplanGuard.Interval);
-        NotificationService.Show(title, text, [NotificationAction.EndTrip]);
+        NotificationService.Show(title, text, new[] { NotificationAction.EndTrip });
     }
 
     /// <summary>Takes on the trip's next state: sends its alert, saves it when it changed, and schedules the next wake.</summary>
@@ -484,7 +485,7 @@ internal sealed class ActiveTripService
     {
         (string title, string text) = TripMessages.Alert(Current!, alert, before, now);
         bool canMiss = alert != TripAlert.GetOffSoon && !step.AwaitsReplan && step.Kind is TripStepKind.ToStop or TripStepKind.Transfer;
-        NotificationService.Show(title, text, canMiss ? [NotificationAction.MissedIt, NotificationAction.EndTrip] : [NotificationAction.EndTrip]);
+        NotificationService.Show(title, text, canMiss ? new[] { NotificationAction.MissedIt, NotificationAction.EndTrip } : new[] { NotificationAction.EndTrip });
     }
 
     /// <summary>

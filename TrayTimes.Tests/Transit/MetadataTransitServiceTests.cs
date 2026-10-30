@@ -337,6 +337,38 @@ public sealed class MetadataTransitServiceTests
     }
 
     [TestMethod]
+    public async Task ForceReplanTripAsync_SharedGuardHeldByAnotherReplan_PlansAgainAndHoldsTheGuard()
+    {
+        // Arrange: a suggestion planned about this trip again a minute ago.
+        Scenario scenario = new();
+        await scenario.Metadata.ReplanTripAsync(Home, Work);
+        scenario.Clock.Advance(TimeSpan.FromMinutes(1));
+
+        // Act
+        TripPlan forced = await scenario.Metadata.ForceReplanTripAsync(Home, new TripDestination(Work), default);
+        TripPlan held = await scenario.Metadata.ReplanTripAsync(Home, Work);
+
+        // Assert
+        Assert.AreEqual(2, scenario.Handler.Attempts);
+        Assert.AreSame(forced, held);
+    }
+
+    [TestMethod]
+    public async Task ForceReplanTripAsync_LeaveAtTime_PlansForThatTime()
+    {
+        // Arrange
+        Scenario scenario = new();
+        TripTime time = new(TripTimeMode.LeaveAt, scenario.Clock.GetUtcNow().AddHours(1));
+
+        // Act
+        TripPlan forced = await scenario.Metadata.ForceReplanTripAsync(Home, new TripDestination(Work), time);
+
+        // Assert
+        Assert.IsTrue(scenario.Metadata.IsCurrentPlan(Home, new TripDestination(Work), time, forced));
+        Assert.IsFalse(scenario.Metadata.IsCurrentPlan(Home, Work, forced));
+    }
+
+    [TestMethod]
     public async Task ReplanTripAsync_TripStaysInfeasible_PlansAgainOncePerInterval()
     {
         // Arrange: every refresh finds the trip infeasible and asks again, from a drifting location fix.

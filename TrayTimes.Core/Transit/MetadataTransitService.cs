@@ -134,16 +134,17 @@ public sealed class MetadataTransitService : ITransitService
     public Task<TripPlan> ReplanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default)
         => ReplanTripAsync(from, new TripDestination(to), cancellationToken);
 
-    public Task<TripPlan> ReplanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default)
-    {
-        var key = PlanKey(from, to);
-        if (_replans.TryAcquire(from, to.Location))
-        {
-            _plans.Forget(key);
-        }
+    public Task<TripPlan> ReplanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default) =>
+        ReplanTripAsync(from, to, default, force: false, cancellationToken);
 
-        return _plans.GetAsync(key, LoadPlan(from, to), cancellationToken);
-    }
+    /// <summary>
+    /// Plans a trip again now, for a caller that keeps its own once-per-<see cref="ReplanGuard.Interval"/> guard (an
+    /// active trip), so another caller's replan of about the same places can't hand it back the plan it gave up on.
+    /// It still holds the shared guard for other callers.
+    /// </summary>
+    /// <param name="time">When the trip leaves, so a leave-at time the rider hasn't reached yet is kept.</param>
+    public Task<TripPlan> ForceReplanTripAsync(GeoPoint from, TripDestination to, TripTime time, CancellationToken cancellationToken = default) =>
+        ReplanTripAsync(from, to, time, force: true, cancellationToken);
 
     /// <summary>
     /// Whether <paramref name="plan"/> is still the fresh cached plan for about this trip. Whoever holds a
@@ -340,6 +341,17 @@ public sealed class MetadataTransitService : ITransitService
         _plans.Nearest(k => k.Time == time && k.To.StopId == to.StopId && k.To.Persist == to.Persist
             && Within(k.To.Location, to.Location, SameDestinationMeters) is not null
                 ? Within(k.From, from, SamePlaceMeters) : null, (from, to, time));
+
+    private Task<TripPlan> ReplanTripAsync(GeoPoint from, TripDestination to, TripTime time, bool force, CancellationToken cancellationToken)
+    {
+        var key = PlanKey(from, to, time);
+        if (_replans.TryAcquire(from, to.Location) || force)
+        {
+            _plans.Forget(key);
+        }
+
+        return _plans.GetAsync(key, LoadPlan(from, to, time), cancellationToken);
+    }
 
     private Func<CancellationToken, Task<TripPlan>> LoadPlan(GeoPoint from, TripDestination to, TripTime time = default) =>
         token => WithShapesAsync(_inner.PlanTripAsync(from, to, time, token), r => r.Shapes);
