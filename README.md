@@ -2,6 +2,8 @@
 
 Click the tray icon for a departures board and a suggested trip, anywhere [Transit](https://transitapp.com) has data. Open the suggestion for every walking and transit leg, or plan somewhere else. Click away to hide the flyout; the app stays in the tray.
 
+![The Tray Times flyout showing the map, a suggested trip home, and departures near Home](docs/images/flyout.png)
+
 - **Launching:** every manual launch opens the departures flyout, even with nothing saved. Launching again opens the running instance's flyout instead of starting another instance. With **Start with Windows** enabled, Windows sign-in launches stay in the tray without opening a window.
 - **One departures board:** every open starts at **Near you**, with saved stops within about a kilometer pinned first, followed by the nearest other lines. Each other line direction appears once, at its closest stop; saved stops show the lines you saved, or all routes. Walk times and departures dimmed as too soon to reach apply only at Near you.
 - **Jump menu:** pick the place chip to show departures near Home, Work, another saved place, or a saved stop, or choose **All saved stops**. Saved-stop entries show their next departure from the existing batch, without a lookup. Star stops on the board, or add them in Settings by name/code search, the route → direction → stop browser, or the map.
