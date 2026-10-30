@@ -172,28 +172,42 @@
                         </Grid>
                     </Button>
 
-                    <!--  This route's upcoming buses; each chip's bell tracks that bus and alerts when it's time to head out  -->
-                    <ScrollViewer
-                        Margin="64,0,8,2"
-                        AutomationProperties.Name="{x:Bind TimesAutomationName}"
-                        HorizontalScrollBarVisibility="Auto"
-                        HorizontalScrollMode="Enabled"
-                        Loaded="TimeStrip_Loaded"
-                        VerticalScrollBarVisibility="Disabled"
-                        VerticalScrollMode="Disabled"
-                        ViewChanged="TimeStrip_ViewChanged">
-                        <!--  Bottom margin leaves room for the overlay scroll bar under the chips  -->
-                        <ItemsControl
-                            Margin="0,0,0,6"
-                            ItemTemplate="{StaticResource BusTimeTemplate}"
-                            ItemsSource="{x:Bind Times}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <StackPanel Orientation="Horizontal" Spacing="6" />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                        </ItemsControl>
-                    </ScrollViewer>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="64" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <!--  Under the route's badge: a warning sign that opens the route's service alerts, when it has any  -->
+                        <controls:AlertsButton
+                            Margin="12,0,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Alerts="{x:Bind Alerts}"
+                            Route="{x:Bind RouteLabel}" />
+                        <!--  This route's upcoming buses; each chip's bell tracks that bus and alerts when it's time to head out  -->
+                        <ScrollViewer
+                            Grid.Column="1"
+                            Margin="0,0,8,2"
+                            AutomationProperties.Name="{x:Bind TimesAutomationName}"
+                            HorizontalScrollBarVisibility="Auto"
+                            HorizontalScrollMode="Enabled"
+                            Loaded="TimeStrip_Loaded"
+                            VerticalScrollBarVisibility="Disabled"
+                            VerticalScrollMode="Disabled"
+                            ViewChanged="TimeStrip_ViewChanged">
+                            <!--  Bottom margin leaves room for the overlay scroll bar under the chips  -->
+                            <ItemsControl
+                                Margin="0,0,0,6"
+                                ItemTemplate="{StaticResource BusTimeTemplate}"
+                                ItemsSource="{x:Bind Times}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="6" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
                 </StackPanel>
             </DataTemplate>
 

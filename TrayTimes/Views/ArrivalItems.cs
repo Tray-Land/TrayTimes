@@ -146,6 +146,7 @@ public sealed class ArrivalItem
     /// <param name="tracked">The trip in tracking mode, if any, whose chip shows a gold bell.</param>
     /// <param name="destinationName">Where the rider is headed, with <paramref name="destinationEta"/> when they'd get there on this trip.</param>
     /// <param name="transfers">How many changes the trip to <paramref name="destinationName"/> takes after this ride.</param>
+    /// <param name="alerts">The route's service alerts, which a warning sign under its badge opens.</param>
     public ArrivalItem(
         Arrival arrival,
         GeoPoint stopLocation,
@@ -156,9 +157,11 @@ public sealed class ArrivalItem
         bool tooSoonToWalk = false,
         string? destinationName = null,
         DateTimeOffset? destinationEta = null,
-        int transfers = 0)
+        int transfers = 0,
+        IReadOnlyList<ServiceAlert>? alerts = null)
     {
         Arrival = arrival;
+        Alerts = alerts ?? [];
 
         // Canceled trips after the next one aren't coming, so they're left out of the strip.
         Times = new[] { new BusTimeItem(arrival, stopLocation, now, tracked) }
@@ -220,6 +223,8 @@ public sealed class ArrivalItem
 
     public Arrival Arrival { get; }
 
+    public IReadOnlyList<ServiceAlert> Alerts { get; }
+
     public GeoPoint StopLocation { get; }
 
     public string RouteLabel => Arrival.RouteDisplayId;
@@ -250,5 +255,12 @@ public sealed class ArrivalItem
     public string Key => $"{Arrival.StopId}|{Arrival.RouteId.ToUpperInvariant()}|{Arrival.DirectionId.ToUpperInvariant()}";
 
     /// <summary>Everything the row shows; equal signatures mean the row needn't be rebuilt.</summary>
-    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{TripEtaText}|{RowOpacity}|{string.Join(';', Times.Select(t => t.Signature))}";
+    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{TripEtaText}|{RowOpacity}|{string.Join(';', Times.Select(t => t.Signature))}|{AlertsSignature.Of(Alerts)}";
+}
+
+/// <summary>Telling whether a row's service alerts changed, for its signature.</summary>
+internal static class AlertsSignature
+{
+    public static string Of(IReadOnlyList<ServiceAlert> alerts) =>
+        string.Join(';', alerts.Select(a => $"{a.Severity}|{a.Title}|{a.Description.GetHashCode(StringComparison.Ordinal)}"));
 }

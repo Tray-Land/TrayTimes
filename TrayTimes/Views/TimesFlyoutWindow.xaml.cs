@@ -1375,7 +1375,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                     // A row that starts the suggested trip says when it gets the rider there.
                     destinationName: row.Suggestion?.Leg?.To.Name,
                     destinationEta: tooSoon || a.Status == ArrivalStatus.Canceled ? null : PlaceBoard.ArrivalAtDestination(a, trips),
-                    transfers: trips is not null && trips.TryGetValue(StopLine.Of(a), out TripTiming? timing) ? timing.Transfers : 0);
+                    transfers: trips is not null && trips.TryGetValue(StopLine.Of(a), out TripTiming? timing) ? timing.Transfers : 0,
+                    alerts: _monitor.Metadata.Alerts.For(a.RouteId, row.Now));
             })];
 
         return new StopGroupItem(stop.Id, title, string.Join(" · ", details), stop.Location, arrivals, row.EmptyText, stop, isSaved);

@@ -1333,4 +1333,100 @@
   <data name="TripCardTooltip" xml:space="preserve">
     <value>Show your trip's progress</value>
   </data>
+  <data name="AlertSignOneFormat" xml:space="preserve">
+    <value>{0} service alert: {1}</value>
+    <comment>The name and tooltip of the warning sign beside a route with one alert, which opens its details. {0} is a route ("Route 14", "Blue"); {1} the alert's headline.</comment>
+  </data>
+  <data name="AlertSignManyFormat" xml:space="preserve">
+    <value>{0} service alerts for {1}</value>
+    <comment>The name and tooltip of the warning sign beside a route with several alerts, which opens their details. {0} is how many; {1} a route ("Route 14", "Blue").</comment>
+  </data>
+  <data name="AlertsHeadingFormat" xml:space="preserve">
+    <value>{0} service alerts</value>
+    <comment>Heads a route's alert details. {0} is a route ("Route 14", "Blue").</comment>
+  </data>
+  <data name="AlertUntitled" xml:space="preserve">
+    <value>Service alert</value>
+    <comment>The headline of an alert the transit agency gave no title or effect.</comment>
+  </data>
+  <data name="AlertUntilFormat" xml:space="preserve">
+    <value>Until {0}</value>
+    <comment>When an alert in effect ends. {0} is a time, after its day when that isn't today ("Fri 6:00 PM").</comment>
+  </data>
+  <data name="AlertStartsFormat" xml:space="preserve">
+    <value>Starts {0}</value>
+    <comment>When an alert not yet in effect begins. {0} is a time, after its day when that isn't today ("Tue 5:00 AM").</comment>
+  </data>
+  <data name="AlertEffectNoService" xml:space="preserve">
+    <value>No service</value>
+    <comment>What a service alert does to the route.</comment>
+  </data>
+  <data name="AlertEffectReducedService" xml:space="preserve">
+    <value>Reduced service</value>
+    <comment>What a service alert does to the route.</comment>
+  </data>
+  <data name="AlertEffectSignificantDelays" xml:space="preserve">
+    <value>Significant delays</value>
+    <comment>What a service alert does to the route.</comment>
+  </data>
+  <data name="AlertEffectDetour" xml:space="preserve">
+    <value>Detour</value>
+    <comment>What a service alert does to the route.</comment>
+  </data>
+  <data name="AlertEffectAdditionalService" xml:space="preserve">
+    <value>Extra service</value>
+    <comment>What a service alert does to the route.</comment>
+  </data>
+  <data name="AlertEffectModifiedService" xml:space="preserve">
+    <value>Modified service</value>
+    <comment>What a service alert does to the route, such as a holiday schedule.</comment>
+  </data>
+  <data name="AlertEffectStopMoved" xml:space="preserve">
+    <value>Stop moved</value>
+    <comment>What a service alert does to the route.</comment>
+  </data>
+  <data name="AlertEffectAccessibilityIssue" xml:space="preserve">
+    <value>Accessibility issue</value>
+    <comment>What a service alert does to the route, such as an elevator out of service.</comment>
+  </data>
+  <data name="AlertCauseTechnicalProblem" xml:space="preserve">
+    <value>Technical problem</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseStrike" xml:space="preserve">
+    <value>Strike</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseDemonstration" xml:space="preserve">
+    <value>Demonstration</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseAccident" xml:space="preserve">
+    <value>Accident</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseHoliday" xml:space="preserve">
+    <value>Holiday</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseWeather" xml:space="preserve">
+    <value>Weather</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseMaintenance" xml:space="preserve">
+    <value>Maintenance</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseConstruction" xml:space="preserve">
+    <value>Construction</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCausePoliceActivity" xml:space="preserve">
+    <value>Police activity</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
+  <data name="AlertCauseMedicalEmergency" xml:space="preserve">
+    <value>Medical emergency</value>
+    <comment>Why a service alert was issued.</comment>
+  </data>
 </root>

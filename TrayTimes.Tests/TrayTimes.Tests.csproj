@@ -29,6 +29,7 @@
     <Compile Include="..\TrayTimes\Services\ActiveTripStore.cs" Link="Services\ActiveTripStore.cs" />
     <Compile Include="..\TrayTimes\Services\NotificationAction.cs" Link="Services\NotificationAction.cs" />
     <Compile Include="..\TrayTimes\Services\TripMessages.cs" Link="Services\TripMessages.cs" />
+    <Compile Include="..\TrayTimes\Services\AlertMessages.cs" Link="Services\AlertMessages.cs" />
     <Compile Include="..\TrayTimes\Views\AppStrings.cs" Link="Views\AppStrings.cs" />
     <Compile Include="..\TrayTimes\Views\SavedStopRow.cs" Link="Views\SavedStopRow.cs" />
     <Compile Include="..\TrayTimes\Services\ApiUsageService.cs" Link="Services\ApiUsageService.cs" />
