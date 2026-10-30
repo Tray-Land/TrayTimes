@@ -134,5 +134,5 @@ public sealed class RouteArrivalsTests
     }
 
     private static Arrival CreateArrival(int minutes, string routeId, string directionId = "NORTH") =>
-        new("100", routeId, routeId, directionId, "Downtown", "5301", Now.AddMinutes(minutes), false, false, false, ArrivalStatus.Scheduled);
+        new("100", routeId, routeId, directionId, "Downtown", Now.AddMinutes(minutes), TripId: $"trip-{minutes}");
 }

@@ -1,3 +1,4 @@
+using TrayTimes.Commute;
 using TrayTimes.Transit;
 
 namespace TrayTimes.Tracking;
@@ -32,7 +33,7 @@ public sealed record TrackedBus(
     string RouteDisplayId,
     string DirectionId,
     string Destination,
-    string? VehicleId,
+    string? TripId,
     DateTimeOffset PredictedTime,
     DateTimeOffset? DueSince,
     DateTimeOffset? AlertedTime)
@@ -47,9 +48,6 @@ public sealed record TrackedBus(
 
     /// <summary>How far a prediction must move after the head-out alert to alert again.</summary>
     public static readonly TimeSpan ShiftThreshold = TimeSpan.FromMinutes(3);
-
-    /// <summary>How far apart predictions can be and still be the same trip, when there's no vehicle ID.</summary>
-    public static readonly TimeSpan MatchTolerance = TimeSpan.FromMinutes(10);
 
     /// <summary>How long before a scheduled time the rider's bus is first looked for in real-time data.</summary>
     public static readonly TimeSpan RealTimeLookahead = TimeSpan.FromMinutes(15);
@@ -74,7 +72,7 @@ public sealed record TrackedBus(
             arrival.RouteDisplayId,
             arrival.DirectionId,
             arrival.Destination,
-            arrival.VehicleId,
+            arrival.TripId,
             arrival.PredictedTime,
             // A scheduled time can't say the bus is due; only a real-time prediction can.
             DueSince: minutes == 0 && arrival.IsRealTime ? now : null,
@@ -85,6 +83,13 @@ public sealed record TrackedBus(
             IsScheduled = !arrival.IsRealTime,
         };
     }
+
+    /// <summary>
+    /// True once there's nothing left to watch for: the grace after the ride was due has run out,
+    /// or (never seen due) it's long past its last known time. No poll can change that.
+    /// </summary>
+    public bool IsOver(DateTimeOffset now) =>
+        DueSince is { } dueSince ? now >= dueSince + PassedGrace : now >= PredictedTime + LostGrace;
 
     /// <summary>Whole minutes until the bus arrives, pinned to zero once it has been due.</summary>
     public int MinutesAway(DateTimeOffset now) =>
@@ -97,42 +102,32 @@ public sealed record TrackedBus(
     public bool IsAwaitingRealTime(int leadMinutes, DateTimeOffset now) =>
         IsScheduled && now < PredictedTime - TimeSpan.FromMinutes(Math.Max(RealTimeLookahead.TotalMinutes, leadMinutes));
 
-    /// <summary>Polls less often far away or after confirmed passage; scheduled buses are checked every minute.</summary>
+    /// <summary>
+    /// Polls as rarely as the call budget needs while still catching a late change: every 3 minutes
+    /// far away or while only the timetable knows the trip, then every 90 and 60 seconds, and every
+    /// 90 seconds once passage is confirmed.
+    /// </summary>
     public TimeSpan RefreshInterval(DateTimeOffset now)
     {
         if (HasPassed)
         {
-            return TimeSpan.FromSeconds(30);
+            return TimeSpan.FromSeconds(90);
         }
 
         if (IsScheduled)
         {
-            return TimeSpan.FromMinutes(1);
+            return TimeSpan.FromMinutes(3);
         }
 
         double minutes = (PredictedTime - now).TotalMinutes;
-        return minutes > 10 ? TimeSpan.FromMinutes(1)
-            : minutes > 5 ? TimeSpan.FromSeconds(30)
-            : TimeSpan.FromSeconds(10);
+        return minutes > 10 ? TimeSpan.FromMinutes(3)
+            : minutes > 5 ? TimeSpan.FromSeconds(90)
+            : TimeSpan.FromSeconds(60);
     }
 
-    /// <summary>
-    /// This bus among a stop's arrivals: by vehicle when known, else the nearest prediction for the
-    /// same route and direction. Scheduled-only arrivals never match; there's no bus to follow.
-    /// </summary>
-    public Arrival? FindIn(IEnumerable<Arrival> arrivals)
-    {
-        IEnumerable<Arrival> candidates = arrivals.Where(a =>
-            a.IsRealTime
-            && a.StopId == StopId
-            && string.Equals(a.RouteId, RouteId, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(a.DirectionId, DirectionId, StringComparison.OrdinalIgnoreCase));
-
-        candidates = VehicleId is not null
-            ? candidates.Where(a => a.VehicleId == VehicleId)
-            : candidates.Where(a => Gap(a) <= MatchTolerance);
-        return candidates.MinBy(Gap);
-    }
+    /// <summary>This trip among a stop's departures (see <see cref="TripMatch.Find"/>).</summary>
+    public Arrival? FindIn(IEnumerable<Arrival> arrivals) =>
+        TripMatch.Find(arrivals, new StopLine(StopId, RouteId, DirectionId), TripId, PredictedTime);
 
     /// <summary>
     /// The row to light up in a list that may include timetable rows: this bus's real-time match, else,
@@ -169,14 +164,15 @@ public sealed record TrackedBus(
 
                 bus = this with
                 {
-                    IsScheduled = false,
+                    IsScheduled = !match.IsRealTime,
                     HasPassed = false,
                     MissingPredictionCount = 0,
                     LastPredictionFetchedAt = fetchedAt,
-                    VehicleId = match.VehicleId ?? VehicleId,
+                    TripId = match.TripId ?? TripId,
                     Destination = match.Destination,
                     PredictedTime = match.PredictedTime,
-                    DueSince = DueSince ?? (match.MinutesAway(now) == 0 ? now : null),
+                    // Only a real-time departure can say the ride is due; a timetable time can't know it's late.
+                    DueSince = DueSince ?? (match.IsRealTime && match.MinutesAway(now) == 0 ? now : null),
                 };
             }
             else if (fetchedAt != LastPredictionFetchedAt)
@@ -209,11 +205,6 @@ public sealed record TrackedBus(
             }
         }
 
-        bool ended = bus.DueSince is { } dueSince
-            ? now >= dueSince + PassedGrace
-            : now >= bus.PredictedTime + LostGrace;
-        return new TrackingStep(bus, alert, ended);
+        return new TrackingStep(bus, alert, bus.IsOver(now));
     }
-
-    private TimeSpan Gap(Arrival arrival) => (arrival.PredictedTime - PredictedTime).Duration();
 }

@@ -1,6 +1,5 @@
 using TrayTimes.Models;
 using TrayTimes.Transit;
-using TrayTimes.Transit.Gtfs;
 
 // Only platform boundaries are doubled: tests compile the production monitor, tracker, and tally.
 namespace Microsoft.UI.Dispatching
@@ -78,35 +77,46 @@ namespace TrayTimes.Services
         }
     }
 
-    internal sealed class ScheduleService(TimeProvider? timeProvider = null)
-    {
-        public event EventHandler? Loaded;
-
-        public GtfsTimetable? Timetable { get; set; }
-
-        public IReadOnlyList<Arrival> AddScheduled(IReadOnlyList<Arrival> live, IReadOnlyCollection<string> stopIds)
-        {
-            DateTimeOffset now = (timeProvider ?? TimeProvider.System).GetLocalNow();
-            return Timetable is { } timetable
-                ? ArrivalMerge.WithSchedule(live, timetable.GetArrivals(stopIds, now, now.AddHours(3)))
-                : live;
-        }
-
-        public void RaiseLoaded() => Loaded?.Invoke(this, EventArgs.Empty);
-    }
-
     internal static class ConnectivityService
     {
-        public static bool IsInternetAvailable => true;
+        public static event EventHandler? NetworkStatusChanged;
+
+        public static bool IsInternetAvailable { get; set; } = true;
+
+        /// <summary>Goes on or offline, and says so as Windows would (on the test's thread).</summary>
+        public static void SetOnline(bool online)
+        {
+            IsInternetAvailable = online;
+            NetworkStatusChanged?.Invoke(null, EventArgs.Empty);
+        }
+
+        public static void Reset()
+        {
+            NetworkStatusChanged = null;
+            IsInternetAvailable = true;
+        }
     }
 
     internal static class NotificationService
     {
         public static List<string> Titles { get; } = [];
 
+        /// <summary>Each notification shown: its title and its buttons.</summary>
+        public static List<(string Title, NotificationAction[] Buttons)> Shown { get; } = [];
+
         public static void Clear() { }
 
-        public static void Show(string title, string text, bool canStopTracking) => Titles.Add(title);
+        public static void Show(string title, string text, IReadOnlyList<NotificationAction> buttons)
+        {
+            Titles.Add(title);
+            Shown.Add((title, [.. buttons]));
+        }
+
+        public static void Reset()
+        {
+            Titles.Clear();
+            Shown.Clear();
+        }
     }
 }
 

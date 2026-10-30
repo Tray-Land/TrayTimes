@@ -16,9 +16,6 @@ public sealed record CooldownPolicy
     /// <summary>Wait after an HTTP 429 that carries no Retry-After.</summary>
     public TimeSpan RateLimitDefaultWait { get; init; } = TimeSpan.FromSeconds(60);
 
-    /// <summary>Wait after the service reports an exhausted request quota in its response body.</summary>
-    public TimeSpan QuotaExhaustedWait { get; init; } = TimeSpan.FromMinutes(5);
-
     public TimeSpan RateLimitMaximumWait { get; init; } = TimeSpan.FromHours(1);
 
     /// <summary>How long automatic requests stay off after a rejected key; one manual retry is still allowed.</summary>
@@ -26,11 +23,11 @@ public sealed record CooldownPolicy
 }
 
 /// <summary>
-/// Stops requests to a failing or rate-limiting service. Every physical request goes through the
-/// wrapped service; while a hold is active a request is refused here with an exception, never
-/// with empty data.
+/// The one gate every physical request passes. It stops requests to a failing or rate-limiting
+/// service, then takes a slot from the call budget. While a hold is active, or the budget refuses,
+/// a request is refused here with an exception, never with empty data.
 /// <list type="bullet">
-/// <item>Rate limit (429, Retry-After, exhausted quota): nothing is sent until the provider's window ends.</item>
+/// <item>Rate limit (429, or 503 with Retry-After): nothing is sent until the provider's window ends.</item>
 /// <item>Rejected key: automatic and tracking requests pause for a long time; a user-initiated retry may try again.</item>
 /// <item>Ordinary failure (timeout, transport, HTTP error): automatic requests wait out a doubling hold-off;
 /// user-initiated requests may retry after a short spacing; tracking is never held by it.</item>
@@ -42,6 +39,7 @@ public sealed class CooldownTransitService : ITransitService
     private readonly ITransitService _inner;
     private readonly TimeProvider _time;
     private readonly CooldownPolicy _policy;
+    private readonly TransitBudget? _budget;
     private readonly FailureBackoff _backoff;
     private readonly Lock _gate = new();
     private DateTimeOffset _rateLimitedUntil = DateTimeOffset.MinValue;
@@ -49,17 +47,17 @@ public sealed class CooldownTransitService : ITransitService
     private string _rejectedMessage = string.Empty;
     private DateTimeOffset _lastFailureAt = DateTimeOffset.MinValue;
 
-    public CooldownTransitService(ITransitService inner, TimeProvider? time = null, CooldownPolicy? policy = null)
+    /// <param name="budget">The call budget each sent request takes a slot from; null for none.</param>
+    public CooldownTransitService(ITransitService inner, TimeProvider? time = null, CooldownPolicy? policy = null, TransitBudget? budget = null)
     {
         _inner = inner;
         _time = time ?? TimeProvider.System;
         _policy = policy ?? new CooldownPolicy();
+        _budget = budget;
         _backoff = new FailureBackoff(_time, _policy.FailureInitialDelay, _policy.FailureMaximumDelay);
     }
 
-    private enum Priority { Automatic, Manual, Urgent }
-
-    public string AgencyName => _inner.AgencyName;
+    public string ProviderName => _inner.ProviderName;
 
     public bool IsConfigured => _inner.IsConfigured;
 
@@ -67,45 +65,57 @@ public sealed class CooldownTransitService : ITransitService
 
     public TransitRequestDiagnostics? Diagnostics => _inner.Diagnostics;
 
-    public Task<IReadOnlyList<TransitRoute>> GetRoutesAsync(CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Routes, 0, () => _inner.GetRoutesAsync(cancellationToken), cancellationToken);
+    public Task<DepartureBoard> GetDeparturesAsync(IReadOnlyCollection<string> stopIds, bool includeShapes = false, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.Departures, stopIds.Count, () => _inner.GetDeparturesAsync(stopIds, includeShapes, cancellationToken), cancellationToken);
 
-    public Task<IReadOnlyList<TransitDirection>> GetDirectionsAsync(string routeId, CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Directions, 1, () => _inner.GetDirectionsAsync(routeId, cancellationToken), cancellationToken);
+    public Task<NearbyLines> GetNearbyLinesAsync(GeoPoint point, int radiusMeters, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.NearbyRoutes, 1, () => _inner.GetNearbyLinesAsync(point, radiusMeters, cancellationToken), cancellationToken);
 
-    public Task<IReadOnlyList<TransitStop>> GetStopsAsync(string routeId, string directionId, CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Stops, 1, () => _inner.GetStopsAsync(routeId, directionId, cancellationToken), cancellationToken);
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, GeoPoint to, CancellationToken cancellationToken = default) =>
+        PlanTripAsync(from, new TripDestination(to), cancellationToken);
 
-    public Task<IReadOnlyList<Arrival>> GetArrivalsAsync(IReadOnlyCollection<string> stopIds, CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Predictions, stopIds.Count, () => _inner.GetArrivalsAsync(stopIds, cancellationToken), cancellationToken);
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, CancellationToken cancellationToken = default) =>
+        PlanTripAsync(from, to, default, cancellationToken);
 
-    public Task<IReadOnlyList<Vehicle>> GetVehiclesAsync(IReadOnlyCollection<string> vehicleIds, CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Vehicles, vehicleIds.Count, () => _inner.GetVehiclesAsync(vehicleIds, cancellationToken), cancellationToken);
+    public Task<TripPlan> PlanTripAsync(GeoPoint from, TripDestination to, TripTime time, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.Plan, 1, () => _inner.PlanTripAsync(from, to, time, cancellationToken), cancellationToken);
 
-    public Task<IReadOnlyList<RoutePattern>> GetPatternsAsync(string routeId, CancellationToken cancellationToken = default) =>
-        RunAsync(TransitEndpoint.Patterns, 1, () => _inner.GetPatternsAsync(routeId, cancellationToken), cancellationToken);
+    public Task<IReadOnlyList<TransitStop>> SearchStopsAsync(GeoPoint near, string query, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.SearchStops, 1, () => _inner.SearchStopsAsync(near, query, cancellationToken), cancellationToken);
 
-    private static Priority CurrentPriority()
+    /// <summary>Two requests (networks, then routes), so it takes two budget slots.</summary>
+    public Task<IReadOnlyList<TransitRoute>> GetRoutesNearAsync(GeoPoint point, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.Routes, 1, () => _inner.GetRoutesNearAsync(point, cancellationToken), cancellationToken, slots: 2);
+
+    public Task<RouteDetails> GetRouteDetailsAsync(string routeId, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.RouteDetails, 1, () => _inner.GetRouteDetailsAsync(routeId, cancellationToken), cancellationToken);
+
+    public Task<IReadOnlyList<Vehicle>> GetVehiclesAsync(string routeId, string? directionId = null, CancellationToken cancellationToken = default) =>
+        RunAsync(TransitEndpoint.Vehicles, 1, () => _inner.GetVehiclesAsync(routeId, directionId, cancellationToken), cancellationToken);
+
+    private async Task<T> RunAsync<T>(TransitEndpoint endpoint, int batchSize, Func<Task<T>> call, CancellationToken cancellationToken, int slots = 1)
     {
-        (TransitConsumer consumer, TransitTrigger trigger) = TransitRequestDiagnostics.CurrentScope;
-        if (consumer == TransitConsumer.Tracking)
-        {
-            return Priority.Urgent;
-        }
-
-        return trigger is TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
-            or TransitTrigger.ModeChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
-            or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection
-            ? Priority.Manual
-            : Priority.Automatic;
-    }
-
-    private async Task<T> RunAsync<T>(TransitEndpoint endpoint, int batchSize, Func<Task<T>> call, CancellationToken cancellationToken)
-    {
-        if (CheckGate() is { } refusal)
+        TransitPriority priority = TransitRequestDiagnostics.CurrentPriority;
+        if (CheckGate(priority) is { } refusal)
         {
             Diagnostics?.RecordSuppressed(endpoint, batchSize);
             throw refusal;
+        }
+
+        if (_budget is not null && _inner.IsConfigured)
+        {
+            try
+            {
+                for (int i = 0; i < slots; i++)
+                {
+                    await _budget.AcquireAsync(priority, cancellationToken);
+                }
+            }
+            catch (TransitApiException)
+            {
+                Diagnostics?.RecordSuppressed(endpoint, batchSize);
+                throw;
+            }
         }
 
         DateTimeOffset startedAt = _time.GetUtcNow();
@@ -127,9 +137,8 @@ public sealed class CooldownTransitService : ITransitService
         }
     }
 
-    private Exception? CheckGate()
+    private Exception? CheckGate(TransitPriority priority)
     {
-        Priority priority = CurrentPriority();
         lock (_gate)
         {
             DateTimeOffset now = _time.GetUtcNow();
@@ -141,7 +150,7 @@ public sealed class CooldownTransitService : ITransitService
             bool rejected = _rejectedUntil > now;
             TimeSpan sinceFailure = now - _lastFailureAt;
             bool spaced = sinceFailure >= _policy.ManualMinimumSpacing;
-            if (rejected && (priority != Priority.Manual || !spaced))
+            if (rejected && (priority != TransitPriority.Manual || !spaced))
             {
                 return new TransitApiException(_rejectedMessage, TransitApiFailureKind.Authentication);
             }
@@ -149,12 +158,12 @@ public sealed class CooldownTransitService : ITransitService
             TimeSpan ordinary = _backoff.Remaining;
             if (ordinary > TimeSpan.Zero)
             {
-                if (priority == Priority.Automatic)
+                if (priority == TransitPriority.Automatic)
                 {
                     return new TransitCooldownException(ordinary);
                 }
 
-                if (priority == Priority.Manual && !spaced)
+                if (priority == TransitPriority.Manual && !spaced)
                 {
                     return new TransitCooldownException(_policy.ManualMinimumSpacing - sinceFailure);
                 }
@@ -183,9 +192,6 @@ public sealed class CooldownTransitService : ITransitService
         {
             case TransitRateLimitException limited:
                 HoldForRateLimit(now, limited.RetryAfter ?? _policy.RateLimitDefaultWait);
-                break;
-            case TransitApiException { Kind: TransitApiFailureKind.RateLimit }:
-                HoldForRateLimit(now, _policy.QuotaExhaustedWait);
                 break;
             case TransitApiException { Kind: TransitApiFailureKind.Authentication } rejected:
                 HoldForRejection(now, rejected.Message);

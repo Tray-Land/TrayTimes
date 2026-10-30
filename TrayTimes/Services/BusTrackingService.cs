@@ -9,22 +9,26 @@ using Windows.Win32.System.Power;
 namespace TrayTimes.Services;
 
 /// <summary>
-/// Tracking mode: follows the one bus the rider rang the bell on, independent of the flyout.
-/// Polls just that stop (faster as the bus gets close; a scheduled-only bus is looked for in real-time data every minute once it's within 15 minutes of its time), sends head-out and time-change alerts,
-/// optionally keeps the PC awake, and stops on its own once the bus has passed. Lives on the UI
-/// thread and raises <see cref="Changed"/> there.
+/// Tracking mode: follows the one ride the rider rang the bell on, independent of the flyout.
+/// Polls that stop (more often as the ride gets close, and less often when the call budget is
+/// tight; a scheduled-only trip isn't looked for until 15 minutes before its time), sends head-out
+/// and time-change alerts, optionally keeps the PC awake, and stops on its own once the ride has
+/// passed. Its requests carry any due browsing stops along. Lives on the UI thread and raises
+/// <see cref="Changed"/> there.
 /// </summary>
 internal sealed class BusTrackingService
 {
     private readonly DispatcherQueueTimer _timer;
     private readonly TimeProvider _time;
     private readonly PredictionCoordinator _predictions;
+    private readonly TransitBudget? _budget;
     private int _generation;
     private bool _refreshing;
 
-    public BusTrackingService(ITransitService service, DispatcherQueue dispatcher, TimeProvider? timeProvider = null, PredictionCoordinator? predictions = null)
+    public BusTrackingService(ITransitService service, DispatcherQueue dispatcher, TimeProvider? timeProvider = null, PredictionCoordinator? predictions = null, TransitBudget? budget = null)
     {
         _time = timeProvider ?? TimeProvider.System;
+        _budget = budget;
         _predictions = predictions ?? new PredictionCoordinator(service, _time);
         _timer = dispatcher.CreateTimer();
         _timer.IsRepeating = false;
@@ -82,19 +86,20 @@ internal sealed class BusTrackingService
         DateTimeOffset? predictionFetchedAt = null;
         try
         {
-            // A scheduled bus has no real-time data until shortly before it's due, so don't ask yet.
-            if (bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, _time.GetLocalNow()))
+            // A scheduled ride has no real-time data until shortly before it's due, so don't ask yet;
+            // and once its grace is over no answer could change anything, so don't spend a call.
+            if (bus.IsAwaitingRealTime(SettingsService.HeadOutMinutes, _time.GetLocalNow()) || bus.IsOver(_time.GetLocalNow()))
             {
                 arrivals = null;
             }
             else
             {
-                TimeSpan maxAge = bus.RefreshInterval(_time.GetLocalNow());
-                PredictionSnapshot snapshot = await _predictions.GetAsync([bus.StopId], maxAge);
-                TimeSpan currentInterval = bus.RefreshInterval(_time.GetLocalNow());
+                TimeSpan maxAge = Interval(bus, _time.GetLocalNow());
+                PredictionSnapshot snapshot = await _predictions.GetAsync(new[] { bus.StopId }, maxAge, combineBrowsing: true);
+                TimeSpan currentInterval = Interval(bus, _time.GetLocalNow());
                 if (currentInterval < maxAge && generation == _generation)
                 {
-                    snapshot = await _predictions.GetAsync([bus.StopId], currentInterval);
+                    snapshot = await _predictions.GetAsync(new[] { bus.StopId }, currentInterval, combineBrowsing: true);
                 }
 
                 arrivals = snapshot.Arrivals;
@@ -142,7 +147,7 @@ internal sealed class BusTrackingService
     {
         _timer.Stop();
         TrackedBus bus = Current!;
-        TimeSpan interval = bus.RefreshInterval(now);
+        TimeSpan interval = Interval(bus, now);
         if (bus.DueSince is { } dueSince)
         {
             TimeSpan remaining = dueSince + TrackedBus.PassedGrace - now;
@@ -155,6 +160,9 @@ internal sealed class BusTrackingService
         _timer.Interval = interval;
         _timer.Start();
     }
+
+    /// <summary>The trip's polling schedule, slowed when the call budget is tight.</summary>
+    private TimeSpan Interval(TrackedBus bus, DateTimeOffset now) => bus.RefreshInterval(now) * (_budget?.TrackingSlowdown ?? 1);
 
     private void End()
     {
@@ -174,12 +182,12 @@ internal sealed class BusTrackingService
 
         (string title, string text) = alert switch
         {
-            TrackingAlert.HeadOut => ("Time to head out", $"{route} reaches {bus.StopName} {inMinutes} ({clock})."),
-            TrackingAlert.Later => ("Your bus is running later", $"{route} now reaches {bus.StopName} at {clock} ({inMinutes})."),
-            TrackingAlert.Earlier => ("Your bus is coming sooner", $"{route} now reaches {bus.StopName} at {clock} ({inMinutes})."),
-            _ => ("Your bus was canceled", $"{route} at {bus.StopName} was canceled. Tracking has stopped."),
+            TrackingAlert.HeadOut => ("Time to head out", $"{route} leaves {bus.StopName} {inMinutes} ({clock})."),
+            TrackingAlert.Later => ("Your ride is running later", $"{route} now leaves {bus.StopName} at {clock} ({inMinutes})."),
+            TrackingAlert.Earlier => ("Your ride is coming sooner", $"{route} now leaves {bus.StopName} at {clock} ({inMinutes})."),
+            _ => ("Your ride was canceled", $"{route} at {bus.StopName} was canceled. Tracking has stopped."),
         };
-        NotificationService.Show(title, text, canStopTracking: alert != TrackingAlert.Canceled);
+        NotificationService.Show(title, text, alert == TrackingAlert.Canceled ? Array.Empty<NotificationAction>() : new[] { NotificationAction.StopTracking });
     }
 
     private static void SetKeepAwake(bool keepAwake) =>

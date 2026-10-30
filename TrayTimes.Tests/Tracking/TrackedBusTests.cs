@@ -19,6 +19,7 @@ public sealed class TrackedBusTests
         Assert.IsNull(bus.AlertedTime);
         Assert.IsNull(bus.DueSince);
         Assert.AreEqual("Farwell & North", bus.StopName);
+        Assert.AreEqual("5301", bus.TripId);
     }
 
     [TestMethod]
@@ -35,7 +36,7 @@ public sealed class TrackedBusTests
     public void Start_WhenDue_RecordsDueSince()
     {
         // Act
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddSeconds(30)), "Stop", Lead, Now);
 
         // Assert
         Assert.AreEqual(Now, bus.DueSince);
@@ -159,7 +160,7 @@ public sealed class TrackedBusTests
         DateTimeOffset later = Now.AddMinutes(3);
 
         // Act
-        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(3), isDue: true)], Lead, later);
+        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(3))], Lead, later);
 
         // Assert
         Assert.AreEqual(later, step.Bus.DueSince);
@@ -170,7 +171,7 @@ public sealed class TrackedBusTests
     public void Advance_FiveMinutesAfterDue_Ends()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddSeconds(30)), "Stop", Lead, Now);
 
         // Act
         TrackingStep step = bus.Advance([], Lead, Now + TrackedBus.PassedGrace);
@@ -181,20 +182,20 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
-    public void Advance_DueBusLeavesArrivals_RequiresTwoDistinctSuccessfulPollsToMarkPassed()
+    public void Advance_DueBusLeavesDepartures_RequiresTwoDistinctSuccessfulPollsToMarkPassed()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddSeconds(30)), "Stop", Lead, Now);
 
         // Act
         TrackingStep step = bus.Advance([], Lead, Now.AddMinutes(1));
 
         // Assert
         Assert.IsFalse(step.Bus.HasPassed);
-        Assert.AreEqual(TimeSpan.FromSeconds(10), step.Bus.RefreshInterval(Now.AddMinutes(1)));
-        step = step.Bus.Advance([], Lead, Now.AddMinutes(1).AddSeconds(10));
+        Assert.AreEqual(TimeSpan.FromSeconds(60), step.Bus.RefreshInterval(Now.AddMinutes(1)));
+        step = step.Bus.Advance([], Lead, Now.AddMinutes(2));
         Assert.IsTrue(step.Bus.HasPassed);
-        Assert.AreEqual(TimeSpan.FromSeconds(30), step.Bus.RefreshInterval(Now.AddMinutes(1).AddSeconds(10)));
+        Assert.AreEqual(TimeSpan.FromSeconds(90), step.Bus.RefreshInterval(Now.AddMinutes(2)));
         Assert.IsFalse(step.Ended);
     }
 
@@ -202,7 +203,7 @@ public sealed class TrackedBusTests
     public void Advance_RepeatedCachedMissingSnapshot_DoesNotConfirmPassageTwice()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         DateTimeOffset fetchedAt = Now.AddSeconds(10);
         bus = bus.Advance([], Lead, fetchedAt, fetchedAt).Bus;
 
@@ -212,7 +213,7 @@ public sealed class TrackedBusTests
 
         // Assert
         Assert.IsFalse(bus.HasPassed);
-        Assert.AreEqual(TimeSpan.FromSeconds(10), bus.RefreshInterval(Now.AddSeconds(30)));
+        Assert.AreEqual(TimeSpan.FromSeconds(60), bus.RefreshInterval(Now.AddSeconds(30)));
         Assert.IsTrue(bus.Advance([], Lead, Now.AddSeconds(40), Now.AddSeconds(40)).Bus.HasPassed);
     }
 
@@ -240,7 +241,7 @@ public sealed class TrackedBusTests
     public void Advance_FailedPollBetweenMissingSnapshots_ResetsUnconfirmedEvidence()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
 
         // Act
@@ -257,11 +258,11 @@ public sealed class TrackedBusTests
     public void Advance_ReappearanceBetweenMissingSnapshots_RestartsConfirmation()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
 
         // Act
-        bus = bus.Advance([CreateArrival(Now, isDue: true)], Lead, Now.AddSeconds(20)).Bus;
+        bus = bus.Advance([CreateArrival(Now)], Lead, Now.AddSeconds(20)).Bus;
         bus = bus.Advance([], Lead, Now.AddSeconds(30)).Bus;
 
         // Assert
@@ -273,7 +274,7 @@ public sealed class TrackedBusTests
     public void Advance_ConfirmedBusReappears_ClearsPassageWithoutRestartingGraceOrAlerts()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
         bus = bus.Advance([], Lead, Now.AddSeconds(20)).Bus;
 
@@ -284,7 +285,7 @@ public sealed class TrackedBusTests
         Assert.IsFalse(step.Bus.HasPassed);
         Assert.AreEqual(Now, step.Bus.DueSince);
         Assert.AreEqual(0, step.Bus.MinutesAway(Now.AddSeconds(50)));
-        Assert.AreEqual(TimeSpan.FromSeconds(10), step.Bus.RefreshInterval(Now.AddSeconds(50)));
+        Assert.AreEqual(TimeSpan.FromSeconds(60), step.Bus.RefreshInterval(Now.AddSeconds(50)));
         Assert.IsNull(step.Alert);
         Assert.IsFalse(step.Ended);
         Assert.IsTrue(step.Bus.Advance([CreateArrival(Now.AddMinutes(4))], Lead, Now + TrackedBus.PassedGrace).Ended);
@@ -294,7 +295,7 @@ public sealed class TrackedBusTests
     public void Advance_FailedPollAfterConfirmation_KeepsPassedDisplayAndGrace()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
         bus = bus.Advance([], Lead, Now.AddSeconds(20)).Bus;
 
@@ -303,7 +304,7 @@ public sealed class TrackedBusTests
 
         // Assert
         Assert.IsTrue(step.Bus.HasPassed);
-        Assert.AreEqual(TimeSpan.FromSeconds(30), step.Bus.RefreshInterval(Now.AddSeconds(50)));
+        Assert.AreEqual(TimeSpan.FromSeconds(90), step.Bus.RefreshInterval(Now.AddSeconds(50)));
         Assert.AreEqual(Now, step.Bus.DueSince);
         Assert.IsFalse(step.Ended);
         Assert.IsNull(step.Alert);
@@ -314,7 +315,7 @@ public sealed class TrackedBusTests
     public void Advance_MatchingCancellationAfterConfirmation_EndsAndAlerts()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         bus = bus.Advance([], Lead, Now.AddSeconds(10)).Bus;
         bus = bus.Advance([], Lead, Now.AddSeconds(20)).Bus;
 
@@ -330,7 +331,7 @@ public sealed class TrackedBusTests
     public void Advance_OlderSnapshotAfterFirstMiss_CannotConfirmPassage()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now, isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now), "Stop", Lead, Now);
         bus = bus.Advance([], Lead, Now.AddSeconds(20), Now.AddSeconds(20)).Bus;
 
         // Act
@@ -345,7 +346,7 @@ public sealed class TrackedBusTests
     public void Advance_FailedPollAfterDue_DoesNotMarkPassed()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddSeconds(30)), "Stop", Lead, Now);
 
         // Act
         TrackingStep step = bus.Advance(null, Lead, Now.AddMinutes(1));
@@ -358,7 +359,7 @@ public sealed class TrackedBusTests
     public void Advance_JustUnderFiveMinutesAfterDue_KeepsTracking()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddSeconds(30)), "Stop", Lead, Now);
 
         // Act
         TrackingStep step = bus.Advance([], Lead, Now + TrackedBus.PassedGrace - TimeSpan.FromSeconds(1));
@@ -394,44 +395,57 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
-    public void FindIn_KnownVehicle_MatchesByVehicleNotTime()
+    public void FindIn_KnownTrip_MatchesByTripNotTime()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), vehicleId: "5301"), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), tripId: "5301"), "Stop", Lead, Now);
 
         // Act
         Arrival? match = bus.FindIn([
-            CreateArrival(Now.AddMinutes(10), vehicleId: "5400"),
-            CreateArrival(Now.AddMinutes(25), vehicleId: "5301"),
+            CreateArrival(Now.AddMinutes(10), tripId: "5400"),
+            CreateArrival(Now.AddMinutes(25), tripId: "5301"),
         ]);
 
         // Assert
-        Assert.AreEqual("5301", match?.VehicleId);
+        Assert.AreEqual("5301", match?.TripId);
     }
 
     [TestMethod]
-    public void FindIn_KnownVehicleGone_ReturnsNull()
+    public void FindIn_KnownTripGone_ReturnsNull()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), vehicleId: "5301"), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), tripId: "5301"), "Stop", Lead, Now);
 
         // Act
-        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10), vehicleId: "5400")]);
+        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10), tripId: "5400")]);
 
         // Assert
         Assert.IsNull(match);
     }
 
     [TestMethod]
-    public void FindIn_NoVehicle_MatchesNearestTimeOnSameRouteAndDirection()
+    public void FindIn_KnownTripOnlyInTimetable_MatchesScheduledDeparture()
+    {
+        // Arrange: a feed without real-time data still lists the trip by its ID.
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(30), tripId: "t1"), "Stop", Lead, Now);
+
+        // Act
+        Arrival? match = bus.FindIn([CreateScheduled(Now.AddMinutes(30), tripId: "t1"), CreateArrival(Now.AddMinutes(29), tripId: "t2")]);
+
+        // Assert
+        Assert.AreEqual("t1", match?.TripId);
+    }
+
+    [TestMethod]
+    public void FindIn_NoTrip_MatchesNearestTimeOnSameRouteAndDirection()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), vehicleId: null), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), tripId: null), "Stop", Lead, Now);
 
         // Act
         Arrival? match = bus.FindIn([
             CreateArrival(Now.AddMinutes(10), routeId: "GRE"),
-            CreateArrival(Now.AddMinutes(10), directionId: "SOUTH"),
+            CreateArrival(Now.AddMinutes(10), directionId: "1"),
             CreateArrival(Now.AddMinutes(18)),
             CreateArrival(Now.AddMinutes(12)),
         ]);
@@ -441,51 +455,51 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
-    public void FindIn_NoVehicleAndNothingClose_ReturnsNull()
+    public void FindIn_NoTripAndNothingClose_ReturnsNull()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), vehicleId: null), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), tripId: null), "Stop", Lead, Now);
 
         // Act
-        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10) + TrackedBus.MatchTolerance + TimeSpan.FromMinutes(1))]);
+        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10) + TripMatch.Tolerance + TimeSpan.FromMinutes(1))]);
 
         // Assert
         Assert.IsNull(match);
     }
 
     [TestMethod]
-    public void FindIn_NoVehicleAndOnlyScheduledTime_ReturnsNull()
+    public void FindIn_NoTripAndOnlyScheduledTime_ReturnsNull()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), vehicleId: null), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(10), tripId: null), "Stop", Lead, Now);
 
         // Act
-        Arrival? match = bus.FindIn([CreateArrival(Now.AddMinutes(10), vehicleId: null) with { IsRealTime = false }]);
+        Arrival? match = bus.FindIn([CreateScheduled(Now.AddMinutes(10))]);
 
         // Assert
         Assert.IsNull(match);
     }
 
     [TestMethod]
-    public void Advance_NoVehicleThenOneAssigned_AdoptsVehicle()
+    public void Advance_NoTripThenOneKnown_AdoptsTrip()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(20), vehicleId: null), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(20), tripId: null), "Stop", Lead, Now);
 
         // Act
-        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(21), vehicleId: "5301")], Lead, Now.AddMinutes(1));
+        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(21), tripId: "5301")], Lead, Now.AddMinutes(1));
 
         // Assert
-        Assert.AreEqual("5301", step.Bus.VehicleId);
+        Assert.AreEqual("5301", step.Bus.TripId);
     }
 
     [TestMethod]
-    [DataRow(15.0, 60.0)]
-    [DataRow(10.0, 30.0)]
-    [DataRow(7.0, 30.0)]
-    [DataRow(5.0, 10.0)]
-    [DataRow(-2.0, 10.0)]
-    public void RefreshInterval_ByMinutesAway_MatchesCadence(double minutesAway, double expectedSeconds)
+    [DataRow(15.0, 180.0)]
+    [DataRow(10.0, 90.0)]
+    [DataRow(7.0, 90.0)]
+    [DataRow(5.0, 60.0)]
+    [DataRow(-2.0, 60.0)]
+    public void RefreshInterval_ByMinutesAway_MatchesBudgetCadence(double minutesAway, double expectedSeconds)
     {
         // Arrange
         TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(minutesAway)), "Stop", Lead, Now);
@@ -501,7 +515,7 @@ public sealed class TrackedBusTests
     public void MinutesAway_AfterDue_IsZero()
     {
         // Arrange
-        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddMinutes(1), isDue: true), "Stop", Lead, Now);
+        TrackedBus bus = TrackedBus.Start(CreateArrival(Now.AddSeconds(30)), "Stop", Lead, Now);
 
         // Act
         int minutes = bus.MinutesAway(Now.AddMinutes(-10));
@@ -564,7 +578,7 @@ public sealed class TrackedBusTests
     }
 
     [TestMethod]
-    public void RefreshInterval_ScheduledBus_IsEveryMinute()
+    public void RefreshInterval_ScheduledBus_IsEveryThreeMinutes()
     {
         // Arrange
         TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(8)), "Stop", Lead, Now);
@@ -573,22 +587,51 @@ public sealed class TrackedBusTests
         TimeSpan interval = bus.RefreshInterval(Now);
 
         // Assert
-        Assert.AreEqual(TimeSpan.FromMinutes(1), interval);
+        Assert.AreEqual(TimeSpan.FromMinutes(3), interval);
     }
 
     [TestMethod]
-    public void Advance_ScheduledBusGetsRealTimeMatch_AdoptsPredictionAndVehicle()
+    public void Advance_ScheduledBusGetsRealTimeMatch_AdoptsPredictionAndTrip()
     {
         // Arrange
         TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20)), "Stop", Lead, Now);
 
         // Act
-        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(23), vehicleId: "5301")], Lead, Now.AddMinutes(5));
+        TrackingStep step = bus.Advance([CreateArrival(Now.AddMinutes(23), tripId: "5301")], Lead, Now.AddMinutes(5));
 
         // Assert
         Assert.IsFalse(step.Bus.IsScheduled);
-        Assert.AreEqual("5301", step.Bus.VehicleId);
+        Assert.AreEqual("5301", step.Bus.TripId);
         Assert.AreEqual(Now.AddMinutes(23), step.Bus.PredictedTime);
+    }
+
+    [TestMethod]
+    public void Advance_ScheduledTripMatchedById_StaysScheduledAndNeverDue()
+    {
+        // Arrange: a feed without real-time data; the trip is still listed at its timetable time.
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20), tripId: "t1"), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance([CreateScheduled(Now.AddMinutes(20), tripId: "t1")], Lead, Now.AddMinutes(20));
+
+        // Assert
+        Assert.IsTrue(step.Bus.IsScheduled);
+        Assert.IsNull(step.Bus.DueSince);
+        Assert.IsFalse(step.Ended);
+    }
+
+    [TestMethod]
+    public void Advance_ScheduledTripCanceled_RaisesCanceledAndEnds()
+    {
+        // Arrange
+        TrackedBus bus = TrackedBus.Start(CreateScheduled(Now.AddMinutes(20), tripId: "t1"), "Stop", Lead, Now);
+
+        // Act
+        TrackingStep step = bus.Advance([CreateScheduled(Now.AddMinutes(20), tripId: "t1") with { Status = ArrivalStatus.Canceled }], Lead, Now.AddMinutes(6));
+
+        // Assert
+        Assert.AreEqual(TrackingAlert.Canceled, step.Alert);
+        Assert.IsTrue(step.Ended);
     }
 
     [TestMethod]
@@ -661,15 +704,14 @@ public sealed class TrackedBusTests
         Assert.IsNull(listed);
     }
 
-    private static Arrival CreateScheduled(DateTimeOffset time) =>
-        CreateArrival(time, vehicleId: null) with { IsRealTime = false };
+    private static Arrival CreateScheduled(DateTimeOffset time, string? tripId = null) =>
+        CreateArrival(time, tripId: tripId) with { IsRealTime = false };
 
     private static Arrival CreateArrival(
         DateTimeOffset predicted,
-        bool isDue = false,
-        string? vehicleId = "5301",
+        string? tripId = "5301",
         string routeId = "14",
-        string directionId = "NORTH",
+        string directionId = "0",
         ArrivalStatus status = ArrivalStatus.Scheduled) =>
-        new("100", routeId, routeId, directionId, "Downtown", vehicleId, predicted, isDue, false, false, status);
+        new("100", routeId, routeId, directionId, "Downtown", predicted, status, TripId: tripId);
 }

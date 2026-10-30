@@ -8,7 +8,10 @@ namespace TrayTimes.Services;
 /// </summary>
 internal static partial class EtaFont
 {
-    private const string FaceName = "Segoe UI Variable Small";
+    /// <summary>The face for a glyph such as a walking figure, which Render draws like text.</summary>
+    public const string IconFace = "Segoe Fluent Icons";
+
+    private const string TextFace = "Segoe UI Variable Small";
 
     private const uint DefaultCharset = 1;
     private const uint AntialiasedQuality = 4;
@@ -16,7 +19,8 @@ internal static partial class EtaFont
     private const int NormalWeight = 400;
 
     /// <summary>Draws <paramref name="text"/> as large as fits, centered on its ink, in a size-by-size square.</summary>
-    public static byte[]? Render(string text, int size)
+    /// <param name="faceName">The font to draw in; the system text font by default.</param>
+    public static byte[]? Render(string text, int size, string faceName = TextFace)
     {
         // Draw once at a nominal size to measure the ink, then again scaled so the ink fills the square.
         int canvas = size * 3;
@@ -24,7 +28,7 @@ internal static partial class EtaFont
         int em = size;
         for (int pass = 0; pass < 2; pass++)
         {
-            byte[] ink = Draw(text, canvas, em);
+            byte[] ink = Draw(text, faceName, canvas, em);
             if (!TryInkBounds(ink, canvas, out int left, out int top, out int width, out int height))
             {
                 return null;
@@ -41,7 +45,7 @@ internal static partial class EtaFont
         return null;
     }
 
-    private static unsafe byte[] Draw(string text, int canvas, int em)
+    private static unsafe byte[] Draw(string text, string faceName, int canvas, int em)
     {
         nint dc = CreateCompatibleDC(0);
         var header = new BitmapInfoHeader
@@ -54,7 +58,7 @@ internal static partial class EtaFont
         };
         nint bitmap = CreateDIBSection(dc, ref header, 0, out nint bits, 0, 0);
         nint oldBitmap = SelectObject(dc, bitmap);
-        nint font = CreateFont(-em, 0, 0, 0, NormalWeight, 0, 0, 0, DefaultCharset, 0, 0, AntialiasedQuality, 0, FaceName);
+        nint font = CreateFont(-em, 0, 0, 0, NormalWeight, 0, 0, 0, DefaultCharset, 0, 0, AntialiasedQuality, 0, faceName);
         nint oldFont = SelectObject(dc, font);
 
         var pixels = new Span<uint>((void*)bits, canvas * canvas);

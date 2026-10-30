@@ -1,14 +1,16 @@
 using System.Globalization;
-using System.Text;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Windows.AppLifecycle;
+using Microsoft.Windows.System.Power;
+using TrayTimes.Commute;
 using TrayTimes.Models;
 using TrayTimes.Services;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 using TrayTimes.Views;
+using Windows.Storage;
 using WinUIEx;
 
 namespace TrayTimes;
@@ -18,19 +20,27 @@ namespace TrayTimes;
 /// The notification-area icon toggles the arrivals flyout (pattern from github.com/TheJoeFin/Traydio).
 /// <para>Browsing mode: the flyout and its polling exist only while it's in use, and are torn down
 /// a minute after it's dismissed. Tracking mode: <see cref="BusTrackingService"/> follows one bus
-/// with no window open, showing its minutes away as the tray icon.</para>
+/// with no window open, showing its minutes away as the tray icon. Active trip mode:
+/// <see cref="ActiveTripService"/> follows a whole trip the same way, counting down to the rider's next
+/// action. One of the two is active at a time: starting a trip stops a tracked bus.</para>
 /// </summary>
 public partial class App : Application
 {
     private const string MutexName = "Local\\TrayTimes_SingleInstance";
     private const string ShowEventName = "Local\\TrayTimes_ShowFlyout";
     private const string AppName = "Tray Times";
-    private const int MaxTooltipLength = 127; // NOTIFYICONDATA.szTip limit
     private static readonly TimeSpan FlyoutLifetimeAfterDismiss = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan IdleCollectDelay = TimeSpan.FromSeconds(5);
 
-    // MCTS's published GTFS timetable, for scheduled times where BusTime has no prediction.
-    private static readonly Uri MctsScheduleUri = new("https://kamino.mcts.org/gtfs/google_transit.zip");
+    // How long the tray shows a trip step's icon, then its countdown, each time they swap.
+    private static readonly TimeSpan StepIconInterval = TimeSpan.FromSeconds(5);
+
+    // How long a new departures batch waits for the board's, the trip's, and the favorites' stops, so opening the flyout costs one call.
+    private static readonly TimeSpan DeparturesCoalesceWindow = TimeSpan.FromMilliseconds(750);
+    private static readonly TimeSpan ExitSaveTimeout = TimeSpan.FromSeconds(2);
+
+    // Files the earlier BusTime build kept in LocalState.
+    private static readonly string[] LegacyFiles = ["stop-index.json", "schedule.zip", "schedule.json", "schedule.zip.download"];
 
     private readonly EtaTrayIcon _etaIcon = new();
     private Mutex? _singleInstanceMutex;
@@ -41,8 +51,13 @@ public partial class App : Application
     private DispatcherQueue? _dispatcher;
     private ArrivalsMonitor? _monitor;
     private BusTrackingService? _tracker;
-    private StopIndexService? _stopIndex;
+    private ActiveTripService? _trips;
+    private TransitBudget? _budget;
+    private TransitCacheService? _cache;
     private DispatcherQueueTimer? _flyoutCloseTimer;
+    private DispatcherQueueTimer? _stepIconTimer;
+    private (TripStepKind Kind, int Leg)? _shownStep;
+    private bool _showStepGlyph;
 
     public App()
     {
@@ -59,7 +74,10 @@ public partial class App : Application
 
     internal BusTrackingService Tracker => _tracker ?? throw new InvalidOperationException("The app hasn't launched yet.");
 
-    internal StopIndexService StopIndex => _stopIndex ?? throw new InvalidOperationException("The app hasn't launched yet.");
+    /// <summary>The active trip, a saved one waiting to resume, or none.</summary>
+    internal ActiveTripService Trips => _trips ?? throw new InvalidOperationException("The app hasn't launched yet.");
+
+    internal TransitBudget Budget => _budget ?? throw new InvalidOperationException("The app hasn't launched yet.");
 
     private static void LogCrash(Exception? ex)
     {
@@ -103,66 +121,147 @@ public partial class App : Application
         _dispatcher = DispatcherQueue.GetForCurrentThread();
         _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ShowEventName);
         ThreadPool.RegisterWaitForSingleObject(_showEvent,
-            (_, _) => _dispatcher.TryEnqueue(ShowLaunchWindow), null, Timeout.Infinite, executeOnlyOnce: false);
+            (_, _) => _dispatcher.TryEnqueue(ShowFlyout), null, Timeout.Infinite, executeOnlyOnce: false);
 
-        BusTimeTransitService mcts = BusTimeTransitService.CreateMcts(Secrets.MctsApiKey);
-        mcts.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
-        mcts.Diagnostics.Observed += (_, observation) => ApiUsageService.Observe(observation);
-        MetadataTransitService transit = new(new CooldownTransitService(mcts));
-        _stopIndex = new StopIndexService(transit);
-        _monitor = new ArrivalsMonitor(transit, new ScheduleService(MctsScheduleUri, _stopIndex), _dispatcher);
+        MigrateSavedData();
+
+        // Every physical request goes client <- failure/budget gate <- shared caches; only cache misses cost a call.
+        TransitAppService client = new(Secrets.TransitApiKey, CultureInfo.CurrentUICulture.Name);
+        client.EndpointCalled += (_, endpoint) => ApiUsageService.Record(endpoint);
+        client.Diagnostics.Observed += (_, observation) => DiagnosticLogService.Observe(observation);
+        _budget = new TransitBudget(ApiUsageService.GetUsage, SettingsService.TransitBudget);
+        MetadataTransitService transit = new(new CooldownTransitService(client, budget: _budget));
+        _cache = new TransitCacheService(transit, _dispatcher);
+        Task cacheLoaded = _cache.LoadAsync();
+        PredictionCoordinator departures = new(transit, browsingInterval: () => _budget.ReuseAge, coalesceWindow: DeparturesCoalesceWindow);
+        _monitor = new ArrivalsMonitor(transit, _dispatcher, predictions: departures, budget: _budget);
         _monitor.Updated += (_, _) => UpdateTooltip();
-        _tracker = new BusTrackingService(transit, _dispatcher, predictions: _monitor.Predictions);
+        _tracker = new BusTrackingService(transit, _dispatcher, predictions: departures, budget: _budget);
         _tracker.Changed += (_, _) => OnTrackingChanged();
+        _trips = new ActiveTripService(transit, _tracker, new ActiveTripStore(ApplicationData.Current.LocalFolder.Path), _dispatcher,
+            predictions: departures, budget: _budget);
+        _trips.Changed += (_, _) => OnTrackingChanged();
+        WatchForWake();
 
         _flyoutCloseTimer = _dispatcher.CreateTimer();
         _flyoutCloseTimer.Interval = FlyoutLifetimeAfterDismiss;
         _flyoutCloseTimer.IsRepeating = false;
         _flyoutCloseTimer.Tick += (_, _) => CloseFlyout();
 
+        _stepIconTimer = _dispatcher.CreateTimer();
+        _stepIconTimer.Interval = StepIconInterval;
+        _stepIconTimer.IsRepeating = true;
+        _stepIconTimer.Tick += (_, _) =>
+        {
+            _showStepGlyph = !_showStepGlyph;
+            UpdateTrayIcon();
+        };
+
         NotificationService.Opened += (_, _) => _dispatcher.TryEnqueue(ShowFlyout);
-        NotificationService.StopTrackingRequested += (_, _) => _dispatcher.TryEnqueue(() => Tracker.Stop());
+        NotificationService.ActionRequested += (_, action) => _dispatcher.TryEnqueue(() => OnNotificationAction(action));
         NotificationService.Register();
 
         InitializeTrayIcon();
-        if (mcts.IsConfigured)
-        {
-            // Make sure the stop directory is on disk so Home/Work/Nearby are quick; failures retry
-            // on first use. Only the file is kept: the in-memory copy is dropped until needed.
-            _ = _stopIndex.GetAsync().ContinueWith(
-                t =>
-                {
-                    _ = t.Exception;
-                    _dispatcher.TryEnqueue(() =>
-                    {
-                        if (_flyout is null && _settings is null)
-                        {
-                            _stopIndex.Unload();
-                        }
-                    });
-                },
-                TaskScheduler.Default);
-        }
+        _ = RestoreTripThenShowAsync(isStartupTask, cacheLoaded);
+    }
 
-        if (!isStartupTask)
+    /// <summary>
+    /// A trip saved before a restart waits for the rider: a manual launch then opens the flyout, which shows its
+    /// Resume card; a startup launch has no window, so it asks in a notification.
+    /// </summary>
+    private async Task RestoreTripThenShowAsync(bool isStartupTask, Task cacheLoaded)
+    {
+        try
         {
-            ShowLaunchWindow();
+            // The flyout's discovery reads the saved metadata, so what's already on disk doesn't cost calls again.
+            await cacheLoaded;
+            await Trips.RestoreAsync(offerResume: isStartupTask);
+        }
+        finally
+        {
+            if (!isStartupTask)
+            {
+                // Even with nothing saved: the board near you needs no setup, and its card offers it.
+                ShowFlyout();
+            }
         }
     }
 
-    private void ShowLaunchWindow()
+    /// <summary>
+    /// Clears what the earlier BusTime build saved: its stop IDs and call tally mean nothing to Transit.
+    /// Favorite places are plain coordinates and carry over.
+    /// </summary>
+    private static void MigrateSavedData()
     {
-        if (!SettingsService.HasShownLaunchWindow
-            && SettingsService.Stops.Count == 0 && SettingsService.Places.Count == 0)
+        if (SettingsService.DataVersion >= SettingsService.CurrentDataVersion)
         {
-            ShowSettings();
-        }
-        else
-        {
-            ShowFlyout();
+            return;
         }
 
-        SettingsService.HasShownLaunchWindow = true;
+        SettingsService.SetStops([]);
+        ApiUsageService.StartOver();
+        foreach (string name in LegacyFiles)
+        {
+            try
+            {
+                File.Delete(Path.Combine(ApplicationData.Current.LocalFolder.Path, name));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                System.Diagnostics.Debug.WriteLine($"Couldn't delete a legacy cache file: {ex.GetType().Name}.");
+            }
+        }
+
+        SettingsService.DataVersion = SettingsService.CurrentDataVersion;
+    }
+
+    /// <summary>
+    /// Re-evaluates the trip as soon as the PC wakes, so its step and alerts catch up at once. Without
+    /// this, its timer still catches up when it fires, a little later.
+    /// </summary>
+    private void WatchForWake()
+    {
+        try
+        {
+            PowerManager.SystemSuspendStatusChanged += (_, _) =>
+            {
+                if (PowerManager.SystemSuspendStatus is SystemSuspendStatus.AutoResume or SystemSuspendStatus.ManualResume)
+                {
+                    _dispatcher?.TryEnqueue(() => _ = Trips.WakeAsync());
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Suspend notifications unavailable: {ex.GetType().Name}.");
+        }
+    }
+
+    /// <summary>A notification's button: on a tracked bus, an active trip, or a saved trip waiting to resume.</summary>
+    private void OnNotificationAction(NotificationAction action)
+    {
+        switch (action)
+        {
+            case NotificationAction.StopTracking:
+                Tracker.Stop();
+                break;
+            case NotificationAction.MissedIt:
+                _ = Trips.MissedAsync();
+                break;
+            case NotificationAction.EndTrip:
+                Trips.End();
+                break;
+            case NotificationAction.ResumeTrip:
+                _ = Trips.ResumeAsync();
+                break;
+        }
+    }
+
+    /// <summary>Applies a changed "keep awake" setting to tracking and the trip; the trip goes second, so an active one wins.</summary>
+    internal void ApplyKeepAwakeSetting()
+    {
+        Tracker.ApplyKeepAwakeSetting();
+        Trips.ApplyKeepAwakeSetting();
     }
 
     public void ShowSettings()
@@ -170,7 +269,7 @@ public partial class App : Application
         _flyout?.HidePopup();
         if (_settings is null)
         {
-            _settings = new SettingsWindow(Monitor, StopIndex);
+            _settings = new SettingsWindow(Monitor, Budget);
             _settings.Closed += (_, _) =>
             {
                 _settings = null;
@@ -209,7 +308,11 @@ public partial class App : Application
         exit.Click += (_, _) => ExitApp();
 
         menu.Items.Add(open);
-        if (Tracker.Current is { } bus)
+        if (Trips.IsActive)
+        {
+            AddTripItems(menu);
+        }
+        else if (Tracker.Current is { } bus)
         {
             MenuFlyoutItem stopTracking = new() { Text = $"Stop tracking route {bus.RouteDisplayId}", Icon = new FontIcon { Glyph = "" } };
             stopTracking.Click += (_, _) => Tracker.Stop();
@@ -220,6 +323,24 @@ public partial class App : Application
         menu.Items.Add(new MenuFlyoutSeparator());
         menu.Items.Add(exit);
         args.Flyout = menu;
+    }
+
+    /// <summary>Show trip, I missed it (while heading to or on a ride), and End trip.</summary>
+    private void AddTripItems(MenuFlyout menu)
+    {
+        MenuFlyoutItem show = new() { Text = AppStrings.Get("TrayShowTrip"), Icon = new FontIcon { Glyph = "" } };
+        show.Click += (_, _) => ShowFlyout();
+        menu.Items.Add(show);
+        if (Trips.Step is { CanMiss: true })
+        {
+            MenuFlyoutItem missed = new() { Text = AppStrings.Get("TrayMissedIt"), Icon = new FontIcon { Glyph = "" } };
+            missed.Click += (_, _) => _ = Trips.MissedAsync();
+            menu.Items.Add(missed);
+        }
+
+        MenuFlyoutItem end = new() { Text = AppStrings.Get("TrayEndTrip"), Icon = new FontIcon { Glyph = "" } };
+        end.Click += (_, _) => Trips.End();
+        menu.Items.Add(end);
     }
 
     private void ShowFlyout()
@@ -234,13 +355,14 @@ public partial class App : Application
         _flyoutCloseTimer?.Stop();
         if (_flyout is null)
         {
-            _flyout = new TimesFlyoutWindow(Monitor, Tracker, StopIndex);
+            _flyout = new TimesFlyoutWindow(Monitor, Tracker, Trips, Budget);
             _flyout.PopupHidden += (_, _) =>
             {
                 // Restart the countdown from this dismissal.
                 _flyoutCloseTimer?.Stop();
                 _flyoutCloseTimer?.Start();
             };
+            _flyout.SummaryChanged += (_, _) => UpdateTooltip();
         }
 
         return _flyout;
@@ -266,9 +388,6 @@ public partial class App : Application
     /// <summary>Called once no window is open.</summary>
     private void ReleaseIdleResources()
     {
-        StopIndex.Unload();
-        Monitor.Schedule.Unload();
-
         // An idle tray app allocates almost nothing, so the GC wouldn't run on its own to hand the
         // closed windows' memory back to Windows. Wait for WinUI to finish tearing the window down
         // first, or its objects are still referenced and just get promoted. Then run finalizers
@@ -289,7 +408,10 @@ public partial class App : Application
         UpdateTooltip();
     }
 
-    /// <summary>The tracked bus's minutes away while tracking; otherwise the app icon.</summary>
+    /// <summary>
+    /// During a trip, the step's icon and the minutes to the rider's next action (red when it's time to act) taking
+    /// turns, or the app icon while that's over 99 minutes away; while tracking, the bus's minutes away; otherwise the app icon.
+    /// </summary>
     private void UpdateTrayIcon()
     {
         if (_trayIcon is null)
@@ -297,19 +419,65 @@ public partial class App : Application
             return;
         }
 
-        if (_tracker?.Current is { } bus)
+        DateTimeOffset now = DateTimeOffset.Now;
+        if (_trips?.IsActive == true)
         {
-            _etaIcon.Show(_trayIcon, bus.MinutesAway(DateTimeOffset.Now), _tracker.IsTimeToGo, bus.HasPassed);
+            if (_trips.Step is { } step && ActiveTripService.BadgeMinutes(step, now) is { } minutes)
+            {
+                ShowTripIcon(_trayIcon, _trips.Current!, step, minutes);
+                return;
+            }
+        }
+        else if (_tracker?.Current is { } bus)
+        {
+            StopStepIcon();
+            _etaIcon.Show(_trayIcon, bus.MinutesAway(now), _tracker.IsTimeToGo, bus.HasPassed);
             return;
         }
 
+        StopStepIcon();
         _trayIcon.SetIcon(TrayIconPath);
         _etaIcon.Release();
     }
 
+    /// <summary>A new step starts with its icon (walking, or the bus), then the countdown; after that they swap every <see cref="StepIconInterval"/>.</summary>
+    private void ShowTripIcon(TrayIcon trayIcon, ActiveTrip trip, TripStep step, int minutes)
+    {
+        if (_shownStep != (step.Kind, step.Leg))
+        {
+            _shownStep = (step.Kind, step.Leg);
+            _showStepGlyph = true;
+            _stepIconTimer?.Stop(); // Starts again below, so the icon gets its whole turn.
+        }
+
+        if (_stepIconTimer is { IsRunning: false })
+        {
+            _stepIconTimer.Start();
+        }
+
+        string? glyph = trip.Progress.Trip.Legs.ElementAtOrDefault(step.Leg) switch
+        {
+            LiveWalk => MapHelpers.WalkGlyph,
+            LiveRide => MapHelpers.BusGlyph,
+            _ => null,
+        };
+        if (!_showStepGlyph || glyph is null || !_etaIcon.ShowGlyph(trayIcon, glyph, step.IsUrgent))
+        {
+            _etaIcon.Show(trayIcon, minutes, step.IsUrgent, passed: false);
+        }
+    }
+
+    private void StopStepIcon()
+    {
+        _stepIconTimer?.Stop();
+        _shownStep = null;
+    }
+
     /// <summary>
-    /// The tracked bus, then (while the flyout is in use) the next arrivals, e.g.
-    /// "14 Northbound: Due, 12 min". Times are dropped when the flyout is closed.
+    /// The active trip, e.g. "Trip to Work: get off at State St in 9 min (8:25)", and the tracked bus,
+    /// then (while the flyout is in use) the suggested trip, e.g. "Work: leave in 6 min, 14 at 8:12", and
+    /// as many of the saved stops near the board's center as fit, e.g. "14 Northbound: Due, 12 min".
+    /// Times are dropped when the flyout is closed.
     /// </summary>
     private void UpdateTooltip()
     {
@@ -319,45 +487,63 @@ public partial class App : Application
         }
 
         ArrivalsSnapshot snapshot = _monitor.Latest;
-        StringBuilder text = new(AppName);
         DateTimeOffset now = DateTimeOffset.Now;
+        List<string> lines = [AppName];
+        if (_trips?.Current is { } activeTrip)
+        {
+            lines.Add(TripMessages.Tooltip(activeTrip, _trips.IsPendingResume, now, SettingsService.HeadOutMinutes));
+        }
+
         if (_tracker?.Current is { } bus)
         {
-            int minutes = bus.MinutesAway(now);
-            text.AppendLine().Append($"Tracking {bus.RouteDisplayId} at {bus.StopName}: ")
-                .Append(minutes == 0 ? "Due" : $"{minutes.ToString(CultureInfo.CurrentCulture)} min");
+            lines.Add(AppStrings.Format("TooltipTrackingFormat", AppStrings.Route(bus.RouteDisplayId), bus.StopName, Minutes(new[] { bus.MinutesAway(now) })));
         }
 
         if (snapshot.Error is not null && snapshot.FetchedAt is null)
         {
-            text.AppendLine().Append(snapshot.Error);
+            lines.Add(snapshot.Error);
         }
-        else if (snapshot.FetchedAt is not null)
+
+        if (_flyout?.TripSummary is { } trip)
         {
-            foreach (SavedStop stop in SettingsService.Stops.Take(3))
+            lines.Add(trip);
+        }
+
+        List<string> stops = [];
+        if (_flyout is not null && snapshot.FetchedAt is not null)
+        {
+            IReadOnlyList<SavedStop> saved = SettingsService.Stops;
+            foreach (SavedStop stop in _flyout.SavedStopIds.SelectMany(id => saved.Where(s => s.StopId == id)))
             {
-                string label = stop.AllRoutes ? stop.StopName : $"{stop.RouteDisplayId} {stop.DirectionName}";
-                string[] times = [.. snapshot.For(stop)
-                    .Where(a => a.Status != ArrivalStatus.Canceled)
-                    .Take(2)
-                    .Select(a => a.MinutesAway(now) == 0 ? "Due" : a.MinutesAway(now).ToString(CultureInfo.CurrentCulture))];
-                string when = times.Length == 0 ? "no arrivals" : times[^1] == "Due" ? string.Join(", ", times) : $"{string.Join(", ", times)} min";
-                text.AppendLine().Append(label).Append(": ").Append(when);
+                string label = stop.AllRoutes ? stop.DisplayName : AppStrings.Format("TooltipStopLineFormat", AppStrings.Route(stop.RouteDisplayId), stop.DirectionName);
+                int[] minutes = [.. snapshot.For(stop).Where(a => a.Status != ArrivalStatus.Canceled).Take(2).Select(a => a.MinutesAway(now))];
+                string when = minutes.Length == 0 ? AppStrings.Get("TooltipNoArrivals") : Minutes(minutes);
+                stops.Add(AppStrings.Format("TooltipStopFormat", label, when));
             }
         }
 
-        string tooltip = text.ToString();
-        _trayIcon.Tooltip = tooltip.Length <= MaxTooltipLength ? tooltip : tooltip[..(MaxTooltipLength - 1)] + "…";
+        _trayIcon.Tooltip = TrayTooltip.Compose(lines, stops);
+    }
+
+    /// <summary>"4, 12 min", or "Due" when every figure is; the unit follows the last figure.</summary>
+    private static string Minutes(IReadOnlyList<int> minutes)
+    {
+        string due = AppStrings.Get("TooltipDue");
+        string figures = string.Join(", ", minutes.Select(m => m == 0 ? due : m.ToString(CultureInfo.CurrentCulture)));
+        return minutes[^1] == 0 ? figures : AppStrings.Format("TooltipMinutesFormat", figures);
     }
 
     private void ExitApp()
     {
         _flyoutCloseTimer?.Stop();
+        _stepIconTimer?.Stop();
         _tracker?.Stop();
+        _trips?.FlushAsync().Wait(ExitSaveTimeout); // The trip stays saved, so the next launch can offer to resume it.
         _monitor?.Clear();
         _flyout?.CloseWindow();
         _settings?.Close();
         NotificationService.Unregister();
+        _cache?.SaveAsync().Wait(ExitSaveTimeout);
 
         if (_trayIcon is not null)
         {

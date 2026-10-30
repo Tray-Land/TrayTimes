@@ -23,18 +23,17 @@ internal static class SettingsService
 
     public const int MaxHeadOutMinutes = 30;
 
+    /// <summary>The most favorite stops; they all share one departures request.</summary>
+    public const int MaxFavoriteStops = 20;
+
+    /// <summary>Saved data written by this version: 2 is the first using Transit IDs.</summary>
+    public const int CurrentDataVersion = 2;
+
     /// <summary>Raised after the saved stops list changes.</summary>
     public static event EventHandler? StopsChanged;
 
     /// <summary>Raised after a favorite place is added, changed, or removed.</summary>
     public static event EventHandler? PlacesChanged;
-
-    /// <summary>Whether a manual launch has already opened the app's first window.</summary>
-    public static bool HasShownLaunchWindow
-    {
-        get => Get(nameof(HasShownLaunchWindow), false);
-        set => Set(nameof(HasShownLaunchWindow), value);
-    }
 
     /// <summary>Favorite places: the Home, Work, and School slots that are set, then custom places.</summary>
     public static IReadOnlyList<FavoritePlace> Places
@@ -55,18 +54,6 @@ internal static class SettingsService
                 return [];
             }
         }
-    }
-
-    /// <summary>The flyout tab the user last chose.</summary>
-    public static FlyoutMode FlyoutMode
-    {
-        get
-        {
-            FlyoutMode mode = (FlyoutMode)Get(nameof(FlyoutMode), (int)FlyoutMode.Favorites);
-            return Enum.IsDefined(mode) ? mode : FlyoutMode.Favorites;
-        }
-
-        set => Set(nameof(FlyoutMode), (int)value);
     }
 
     /// <summary>Where the flyout's map was when it was last dismissed, so reopening picks up there.</summary>
@@ -92,6 +79,36 @@ internal static class SettingsService
         set => Set(nameof(FlyoutMapView), value is null ? null : JsonSerializer.Serialize(value, SettingsJsonContext.Default.MapView));
     }
 
+    /// <summary>The flyout's view the rider last picked (see <c>BoardCenter.ToKey</c>); opens there next time.</summary>
+    public static string? BoardCenterKey
+    {
+        get => Get<string?>(nameof(BoardCenterKey), null);
+        set => Set(nameof(BoardCenterKey), value);
+    }
+
+    /// <summary>The area the rider chose by postal code, where Settings' stop map opens when their location isn't available.</summary>
+    public static MapView? DefaultArea
+    {
+        get
+        {
+            if (Get<string?>(nameof(DefaultArea), null) is not { } json)
+            {
+                return null;
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize(json, SettingsJsonContext.Default.MapView);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        set => Set(nameof(DefaultArea), value is null ? null : JsonSerializer.Serialize(value, SettingsJsonContext.Default.MapView));
+    }
+
     /// <summary>How tall the user dragged the flyout's map, in DIPs; null keeps the default.</summary>
     public static double? FlyoutMapHeight
     {
@@ -111,6 +128,29 @@ internal static class SettingsService
     {
         get => Get(nameof(KeepAwakeWhileTracking), false);
         set => Set(nameof(KeepAwakeWhileTracking), value);
+    }
+
+    /// <summary>The version of the saved data; 1 (or missing) holds the earlier BusTime stop IDs.</summary>
+    public static int DataVersion
+    {
+        get => Get(nameof(DataVersion), 1);
+        set => Set(nameof(DataVersion), value);
+    }
+
+    /// <summary>The Transit API key's limits; Transit's free tier unless the developer changed them.</summary>
+    public static TransitBudgetPolicy TransitBudget
+    {
+        get => new()
+        {
+            CallsPerMinute = Math.Clamp(Get("TransitCallsPerMinute", TransitBudgetPolicy.DefaultCallsPerMinute), 1, 10_000),
+            CallsPerMonth = Math.Clamp(Get("TransitCallsPerMonth", TransitBudgetPolicy.DefaultCallsPerMonth), 1, 100_000_000),
+        };
+
+        set
+        {
+            Set("TransitCallsPerMinute", value.CallsPerMinute);
+            Set("TransitCallsPerMonth", value.CallsPerMonth);
+        }
     }
 
     /// <summary>Transit API call tally; a fresh one if none is saved or it can't be read.</summary>
@@ -166,10 +206,15 @@ internal static class SettingsService
     /// <summary>Adds (or replaces, if the same stop/route/direction is already saved) a stop.</summary>
     public static void AddStop(SavedStop stop)
     {
-        List<SavedStop> stops = [.. Stops.Where(s => s.Key != stop.Key)];
-        stops.Add(stop);
+        IReadOnlyList<SavedStop> current = Stops;
+        string? nickname = stop.Nickname ?? current.FirstOrDefault(s => s.StopId == stop.StopId && s.Nickname is not null)?.Nickname;
+        List<SavedStop> stops = [.. current.Where(s => s.Key != stop.Key)];
+        stops.Add(stop with { Nickname = nickname });
         SetStops(stops);
     }
+
+    /// <summary>Names (or, when blank, un-names) a saved stop; the nickname covers every route saved there.</summary>
+    public static void SetStopNickname(string stopId, string? nickname) => SetStops(SavedStop.WithNickname(Stops, stopId, nickname));
 
     public static void RemoveStop(SavedStop stop) => SetStops(Stops.Where(s => s.Key != stop.Key));
 

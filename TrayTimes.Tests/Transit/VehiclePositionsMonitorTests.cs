@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Net;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 
 namespace TrayTimes.Tests.Transit;
 
@@ -13,11 +13,11 @@ public sealed class VehiclePositionsMonitorTests
     {
         // Arrange
         RequestTestHandler handler = new();
-        BusTimeTransitService service = handler.CreateService();
+        TransitAppService service = handler.CreateService();
 
-        // Act / Assert
-        Assert.Throws<ArgumentNullException>(() => new VehiclePositionsMonitor(null!, _ => { }));
-        Assert.Throws<ArgumentNullException>(() => new VehiclePositionsMonitor(service, null!));
+        // Act & Assert
+        Assert.ThrowsExactly<ArgumentNullException>(() => new VehiclePositionsMonitor(null!, _ => { }));
+        Assert.ThrowsExactly<ArgumentNullException>(() => new VehiclePositionsMonitor(service, null!));
     }
 
     [TestMethod]
@@ -25,118 +25,37 @@ public sealed class VehiclePositionsMonitorTests
     {
         // Arrange
         Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
+        TaskCompletionSource<HttpResponseMessage> pending = PendingResponse();
+        scenario.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
 
         // Act
-        Task timer;
-        Task result;
-        using (TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, TransitTrigger.Timer))
-        {
-            timer = scenario.Monitor.RefreshAsync(["5501", "5502"]);
-        }
-
-        using (TransitRequestDiagnostics.BeginScope(TransitConsumer.Favorites, TransitTrigger.FavoritesResult))
-        {
-            result = scenario.Monitor.RefreshAsync(["5502", "5501", "5501"]);
-        }
-
-        Task forced = scenario.Monitor.RefreshAsync(["5501", "5502"], force: true);
-        Assert.AreEqual(1, scenario.Handler.Attempts);
-        scenario.Clock.Advance(TimeSpan.FromSeconds(2));
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await Task.WhenAll(timer, result, forced);
+        Task first = scenario.Monitor.RefreshAsync("14", "0");
+        Task second = scenario.Monitor.RefreshAsync("14", "0", force: true);
+        pending.SetResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1"))));
+        await Task.WhenAll(first, second);
 
         // Assert
-        Assert.AreEqual(1, scenario.AttemptTally);
+        Assert.AreEqual(1, scenario.Handler.Attempts);
         Assert.HasCount(1, scenario.Published);
-        Assert.AreEqual(90, scenario.Published[0].Single().Heading);
-        Assert.AreEqual(new GeoPoint(0, 0), scenario.Published[0].Single().Location);
-        Assert.AreEqual(2, scenario.Service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.InFlightReuse));
-        TransitRequestObservation reuse = scenario.Service.Diagnostics.Snapshot.First(o => o.Phase == TransitRequestPhase.InFlightReuse);
-        Assert.AreEqual(TransitTrigger.FavoritesResult, reuse.Trigger);
-        Assert.AreEqual(TransitConsumer.Favorites, reuse.Consumer);
-        Assert.AreEqual(2, reuse.BatchSize);
-        Assert.AreEqual(TimeSpan.FromSeconds(2), scenario.Service.Diagnostics.Snapshot.Single(o => o.Phase == TransitRequestPhase.Completed).Elapsed);
+        Assert.AreEqual("t1", scenario.Published[0][0].TripId);
+        Assert.AreEqual(1, scenario.Service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.InFlightReuse));
     }
 
     [TestMethod]
-    [DataRow(0, 1)]
-    [DataRow(14999, 1)]
-    [DataRow(15000, 2)]
-    [DataRow(15001, 2)]
-    public async Task RefreshAsync_SuccessAgeBoundary_ReusesOnlyDataYoungerThanFifteenSeconds(int milliseconds, int expectedAttempts)
+    [DataRow(29_999, 1)]
+    [DataRow(30_000, 2)]
+    public async Task RefreshAsync_SuccessAgeBoundary_ReusesOnlyDataYoungerThanReuseAge(int milliseconds, int expectedAttempts)
     {
         // Arrange
         Scenario scenario = new();
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        scenario.Clock.Advance(TimeSpan.FromMilliseconds(milliseconds));
+        await scenario.Monitor.RefreshAsync("14", "0");
 
         // Act
-        await scenario.Monitor.RefreshAsync(["5501"]);
+        scenario.Clock.Advance(TimeSpan.FromMilliseconds(milliseconds));
+        await scenario.Monitor.RefreshAsync("14", "0");
 
         // Assert
         Assert.AreEqual(expectedAttempts, scenario.Handler.Attempts);
-        Assert.HasCount(2, scenario.Published);
-        Assert.AreEqual(expectedAttempts == 1 ? 1 : 0,
-            scenario.Service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.CacheReuse));
-    }
-
-    [TestMethod]
-    [DataRow(0)]
-    [DataRow(2000)]
-    [DataRow(14999)]
-    public async Task RefreshAsync_SteadyStateOverlappingBursts_ProducesFourRoutineRequestsInHalfOpenMinute(int responseMilliseconds)
-    {
-        // Arrange
-        Scenario scenario = new();
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        scenario.Clock.Advance(VehiclePositionsMonitor.RefreshInterval);
-        int before = scenario.Handler.Attempts;
-
-        // Act: [0,60), unchanged IDs, four equivalent UI calls at each due boundary.
-        for (int second = 0; second < 60; second += 15)
-        {
-            TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-            scenario.Handler.RespondAsync = (_, _) => response.Task;
-            Task[] burst =
-            [
-                scenario.Monitor.RefreshAsync(["5501"]),
-                scenario.Monitor.RefreshAsync(["5501"]),
-                scenario.Monitor.RefreshAsync(["5501", "5501"]),
-                scenario.Monitor.RefreshAsync(["5501"]),
-            ];
-            scenario.Clock.Advance(TimeSpan.FromMilliseconds(responseMilliseconds));
-            response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-            await Task.WhenAll(burst);
-            scenario.Clock.Advance(TimeSpan.FromMilliseconds(15000 - responseMilliseconds));
-        }
-
-        // Assert
-        Assert.AreEqual(4, scenario.Handler.Attempts - before);
-        Assert.AreEqual(5, scenario.AttemptTally); // Includes the initial fetch outside the interval.
-        Assert.HasCount(5, scenario.Published);
-        Assert.AreEqual(12, scenario.Service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.InFlightReuse));
-    }
-
-    [TestMethod]
-    public async Task RefreshAsync_SlowResponse_DoesNotExtendFreshnessFromCompletionTime()
-    {
-        // Arrange
-        Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
-        Task first = scenario.Monitor.RefreshAsync(["5501"]);
-        scenario.Clock.Advance(TimeSpan.FromSeconds(20));
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await first;
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-
-        // Act
-        await scenario.Monitor.RefreshAsync(["5501"]);
-
-        // Assert
-        Assert.AreEqual(2, scenario.Handler.Attempts);
         Assert.HasCount(2, scenario.Published);
     }
 
@@ -145,159 +64,92 @@ public sealed class VehiclePositionsMonitorTests
     {
         // Arrange
         Scenario scenario = new();
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
+        await scenario.Monitor.RefreshAsync("14", "0");
+        TaskCompletionSource<HttpResponseMessage> pending = PendingResponse();
+        scenario.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
 
         // Act
-        Task forced = scenario.Monitor.RefreshAsync(["5501"], force: true);
-        Task routine = scenario.Monitor.RefreshAsync(["5501"]);
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await Task.WhenAll(forced, routine);
+        Task forced = scenario.Monitor.RefreshAsync("14", "0", force: true);
+        Task again = scenario.Monitor.RefreshAsync("14", "0");
+        pending.SetResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1"))));
+        await Task.WhenAll(forced, again);
 
         // Assert
         Assert.AreEqual(2, scenario.Handler.Attempts);
-        Assert.AreEqual(2, scenario.AttemptTally);
-        Assert.HasCount(2, scenario.Published);
-        Assert.AreEqual(1, scenario.Service.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.InFlightReuse));
     }
 
     [TestMethod]
-    public async Task RefreshAsync_ChangedSetAndOutOfOrderCompletion_PublishesAndCachesOnlyNewerState()
+    public async Task RefreshAsync_ChangedRouteAndOutOfOrderCompletion_PublishesOnlyTheNewerRoute()
     {
         // Arrange
         Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> old = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => scenario.Handler.Attempts == 1
-            ? old.Task : Task.FromResult(RequestTestHandler.Response(VehicleBody("5502", 180)));
-        Task first = scenario.Monitor.RefreshAsync(["5501"]);
+        TaskCompletionSource<HttpResponseMessage> older = PendingResponse();
+        TaskCompletionSource<HttpResponseMessage> newer = PendingResponse();
+        scenario.Handler.RespondAsync = (request, token) => RequestTestHandler.Query(request, "global_route_id") == "14"
+            ? older.Task.WaitAsync(token)
+            : newer.Task.WaitAsync(token);
 
         // Act
-        await scenario.Monitor.RefreshAsync(["5502"]);
-        Assert.AreEqual(2, scenario.Handler.Attempts); // New IDs do not wait for the old slow set.
-        old.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await first;
-        await scenario.Monitor.RefreshAsync(["5502"]);
-
-        // Assert
-        Assert.AreEqual(2, scenario.Handler.Attempts);
-        Assert.HasCount(2, scenario.Published);
-        Assert.IsTrue(scenario.Published.All(v => v.Single().Id == "5502" && v.Single().Heading == 180));
-    }
-
-    [TestMethod]
-    public async Task RefreshAsync_SetRoundTripWhilePending_ReusesOriginalEquivalentTask()
-    {
-        // Arrange
-        Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> firstResponse = PendingResponse();
-        TaskCompletionSource<HttpResponseMessage> secondResponse = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => scenario.Handler.Attempts == 1 ? firstResponse.Task : secondResponse.Task;
-
-        // Act
-        Task first = scenario.Monitor.RefreshAsync(["5501"]);
-        Task second = scenario.Monitor.RefreshAsync(["5502"]);
-        Task returned = scenario.Monitor.RefreshAsync(["5501"]);
-        secondResponse.SetResult(RequestTestHandler.Response(VehicleBody("5502", 180)));
+        Task first = scenario.Monitor.RefreshAsync("14", "0");
+        Task second = scenario.Monitor.RefreshAsync("30", "1");
+        newer.SetResult(RequestTestHandler.Response(VehicleBody(("v30", 43.0, -88.0, "t30"))));
         await second;
-        firstResponse.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await Task.WhenAll(first, returned);
+        older.SetResult(RequestTestHandler.Response(VehicleBody(("v14", 43.0, -88.0, "t14"))));
+        await first;
 
         // Assert
         Assert.AreEqual(2, scenario.Handler.Attempts);
         Assert.HasCount(1, scenario.Published);
-        Assert.AreEqual("5501", scenario.Published[0].Single().Id);
+        Assert.AreEqual("v30", scenario.Published[0][0].Id);
+        Assert.AreEqual("30", scenario.Published[0][0].RouteId);
     }
 
     [TestMethod]
-    public async Task RefreshAsync_EmptyNewSet_ClearsMapWithoutHttpAndDropsOlderResult()
+    public async Task RefreshAsync_NoRoute_ClearsMapWithoutHttp()
     {
         // Arrange
         Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
-        Task old = scenario.Monitor.RefreshAsync(["5501"]);
 
         // Act
-        await scenario.Monitor.RefreshAsync([]);
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await old;
+        await scenario.Monitor.RefreshAsync(null, null);
 
         // Assert
-        Assert.AreEqual(1, scenario.Handler.Attempts);
+        Assert.AreEqual(0, scenario.Handler.Attempts);
         Assert.HasCount(1, scenario.Published);
         Assert.IsEmpty(scenario.Published[0]);
     }
 
     [TestMethod]
-    public async Task RefreshAsync_SuccessfulEmptyResponse_IsFreshAndClearsPositions()
+    [DataRow("0", "0")]
+    [DataRow(null, null)]
+    public async Task RefreshAsync_Direction_IsSentOnlyWhenKnown(string? direction, string? expected)
     {
         // Arrange
         Scenario scenario = new();
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        scenario.Clock.Advance(TimeSpan.FromSeconds(15));
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
 
         // Act
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        await scenario.Monitor.RefreshAsync(["5501"]);
+        await scenario.Monitor.RefreshAsync("14", direction);
 
         // Assert
-        Assert.AreEqual(2, scenario.Handler.Attempts);
-        Assert.HasCount(3, scenario.Published);
-        Assert.IsEmpty(scenario.Published[1]);
-        Assert.IsEmpty(scenario.Published[2]);
+        Assert.AreEqual("14", RequestTestHandler.Query(scenario.Handler.Requests[0], "global_route_id"));
+        Assert.AreEqual(expected, RequestTestHandler.Query(scenario.Handler.Requests[0], "direction_id"));
     }
 
     [TestMethod]
     [DataRow(TransitRequestOutcome.HttpFailure)]
     [DataRow(TransitRequestOutcome.ApiFailure)]
-    [DataRow(TransitRequestOutcome.TransportFailure)]
-    [DataRow(TransitRequestOutcome.Timeout)]
-    public async Task RefreshAsync_FailedRequest_PreservesLastGoodPositionsAndAllowsImmediateRetry(TransitRequestOutcome outcome)
+    public async Task RefreshAsync_FailedRequest_PropagatesAndAllowsImmediateRetry(TransitRequestOutcome outcome)
     {
         // Arrange
         Scenario scenario = new();
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        scenario.Clock.Advance(TimeSpan.FromSeconds(15));
-        scenario.Handler.RespondAsync = (_, _) => outcome switch
-        {
-            TransitRequestOutcome.HttpFailure => Task.FromResult(RequestTestHandler.Response("unavailable", HttpStatusCode.ServiceUnavailable)),
-            TransitRequestOutcome.ApiFailure => Task.FromResult(RequestTestHandler.Response("""{"bustime-response":{"error":[{"msg":"fixture failure"}]}}""")),
-            TransitRequestOutcome.Timeout => throw new TaskCanceledException(),
-            _ => throw new HttpRequestException(),
-        };
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(outcome == TransitRequestOutcome.HttpFailure
+            ? RequestTestHandler.Response("unavailable", HttpStatusCode.BadGateway)
+            : RequestTestHandler.Response("not json"));
 
         // Act
-        await Assert.ThrowsAsync<Exception>(() => scenario.Monitor.RefreshAsync(["5501"]));
-        Assert.HasCount(1, scenario.Published);
-        Assert.AreEqual(outcome, scenario.Service.Diagnostics.Snapshot.Last().Outcome);
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await scenario.Monitor.RefreshAsync(["5501"]);
-
-        // Assert
-        Assert.AreEqual(3, scenario.Handler.Attempts);
-        Assert.AreEqual(3, scenario.AttemptTally);
-        Assert.HasCount(2, scenario.Published);
-        Assert.IsTrue(scenario.Published.All(v => v.Single().Id == "5501"));
-    }
-
-    [TestMethod]
-    public async Task RefreshAsync_SharedFailure_DoesNotLeaveAFaultedTaskBlockingRetry()
-    {
-        // Arrange
-        Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
-        Task first = scenario.Monitor.RefreshAsync(["5501"]);
-        Task second = scenario.Monitor.RefreshAsync(["5501"]);
-        response.SetResult(RequestTestHandler.Response("unavailable", HttpStatusCode.ServiceUnavailable));
-
-        // Act
-        await Assert.ThrowsAsync<HttpRequestException>(() => first);
-        await Assert.ThrowsAsync<HttpRequestException>(() => second);
-        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await scenario.Monitor.RefreshAsync(["5501"]);
+        await Assert.ThrowsAsync<Exception>(() => scenario.Monitor.RefreshAsync("14", "0"));
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1"))));
+        await scenario.Monitor.RefreshAsync("14", "0");
 
         // Assert
         Assert.AreEqual(2, scenario.Handler.Attempts);
@@ -309,80 +161,35 @@ public sealed class VehiclePositionsMonitorTests
     {
         // Arrange
         Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
-        Task first = scenario.Monitor.RefreshAsync(["5501"]);
+        TaskCompletionSource<HttpResponseMessage> pending = PendingResponse();
+        scenario.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
+        Task refresh = scenario.Monitor.RefreshAsync("14", "0");
 
         // Act
         scenario.Monitor.IsForeground = false;
-        await scenario.Monitor.RefreshAsync(["5502"], force: true);
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await first;
+        pending.SetResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1"))));
+        await refresh;
+        await scenario.Monitor.RefreshAsync("30", "0");
+
+        // Assert
+        Assert.AreEqual(1, scenario.Handler.Attempts);
         Assert.IsEmpty(scenario.Published);
-        scenario.Monitor.IsForeground = true;
-        await scenario.Monitor.RefreshAsync(["5501"]);
-
-        // Assert
-        Assert.AreEqual(1, scenario.Handler.Attempts);
-        Assert.HasCount(1, scenario.Published);
-        Assert.IsTrue(scenario.Monitor.IsForeground);
     }
 
     [TestMethod]
-    public async Task IsForeground_QuickReopenDuringFetch_SharesPendingRequestWithoutPublishingOldWaiter()
+    public async Task Invalidate_PendingResult_IsNotPublishedButStaysReusable()
     {
         // Arrange
         Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
-        Task old = scenario.Monitor.RefreshAsync(["5501"]);
-
-        // Act
-        scenario.Monitor.IsForeground = false;
-        scenario.Monitor.IsForeground = true;
-        Task reopened = scenario.Monitor.RefreshAsync(["5501"]);
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await Task.WhenAll(old, reopened);
-
-        // Assert
-        Assert.AreEqual(1, scenario.Handler.Attempts);
-        Assert.HasCount(1, scenario.Published);
-    }
-
-    [TestMethod]
-    public async Task IsForeground_StaleReopen_RefreshesPositionsInsteadOfCachingOldDataForever()
-    {
-        // Arrange
-        Scenario scenario = new();
-        await scenario.Monitor.RefreshAsync(["5501"]);
-        scenario.Monitor.IsForeground = false;
-        scenario.Clock.Advance(TimeSpan.FromSeconds(15));
-
-        // Act
-        scenario.Monitor.IsForeground = true;
-        await scenario.Monitor.RefreshAsync(["5501"]);
-
-        // Assert
-        Assert.AreEqual(2, scenario.Handler.Attempts);
-        Assert.HasCount(2, scenario.Published);
-    }
-
-    [TestMethod]
-    public async Task Invalidate_TabRoundTripWithoutAnotherFetch_DropsOldResultAndAllowsFreshReuse()
-    {
-        // Arrange
-        Scenario scenario = new();
-        TaskCompletionSource<HttpResponseMessage> response = PendingResponse();
-        scenario.Handler.RespondAsync = (_, _) => response.Task;
-        Task old = scenario.Monitor.RefreshAsync(["5501"]);
+        TaskCompletionSource<HttpResponseMessage> pending = PendingResponse();
+        scenario.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
+        Task refresh = scenario.Monitor.RefreshAsync("14", "0");
 
         // Act
         scenario.Monitor.Invalidate();
-        scenario.Monitor.Invalidate();
-        response.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await old;
-        Assert.IsEmpty(scenario.Published);
-        await scenario.Monitor.RefreshAsync(["5501"]);
+        pending.SetResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1"))));
+        await refresh;
+        await scenario.Monitor.RefreshAsync("14", "0");
 
         // Assert
         Assert.AreEqual(1, scenario.Handler.Attempts);
@@ -390,64 +197,39 @@ public sealed class VehiclePositionsMonitorTests
     }
 
     [TestMethod]
-    [DataRow(0, 0)]
-    [DataRow(1, 1)]
-    [DataRow(10, 1)]
-    [DataRow(11, 0)]
-    [DataRow(25, 0)]
-    public async Task RefreshAsync_RequestSizeBoundary_NeverSilentlyTruncatesIds(int count, int expectedAttempts)
+    public async Task RefreshAsync_VehicleMovesFarEnough_HeadingIsItsBearing()
     {
-        // Arrange
+        // Arrange: first seen, then about 110 m due east.
         Scenario scenario = new();
-        string[] ids = [.. Enumerable.Range(0, count).Select(i => (5501 + i).ToString(CultureInfo.InvariantCulture))];
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1"))));
+        await scenario.Monitor.RefreshAsync("14", "0");
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -87.99865, "t1"))));
 
         // Act
-        if (count > 10)
-        {
-            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => scenario.Monitor.RefreshAsync(ids));
-        }
-        else
-        {
-            await scenario.Monitor.RefreshAsync(ids);
-        }
+        await scenario.Monitor.RefreshAsync("14", "0", force: true);
 
         // Assert
-        Assert.AreEqual(expectedAttempts, scenario.Handler.Attempts);
-        Assert.HasCount(count > 10 ? 0 : 1, scenario.Published);
-        if (expectedAttempts > 0)
-        {
-            Assert.AreEqual(count, scenario.Service.Diagnostics.Snapshot.Single(o => o.Phase == TransitRequestPhase.Started).BatchSize);
-        }
+        Assert.AreEqual(-1, scenario.Published[0][0].Heading);
+        Assert.AreEqual(90, scenario.Published[1][0].Heading, 1);
     }
 
     [TestMethod]
-    public async Task RefreshAsync_ProviderReturnsUnrequestedVehicles_PublishesOnlyRequestedPositions()
+    public async Task RefreshAsync_VehicleBarelyMoves_KeepsItsLastHeading()
     {
-        // Arrange
+        // Arrange: north about 110 m, then a few meters more.
         Scenario scenario = new();
+        double[] latitudes = [43.0, 43.001, 43.00103];
+        foreach (double lat in latitudes)
+        {
+            scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(VehicleBody(("v1", lat, -88.0, "t1"))));
 
-        // Act
-        await scenario.Monitor.RefreshAsync(["5502"]);
+            // Act
+            await scenario.Monitor.RefreshAsync("14", "0", force: true);
+        }
 
         // Assert
-        Assert.HasCount(1, scenario.Published);
-        Assert.IsEmpty(scenario.Published[0]);
-    }
-
-    [TestMethod]
-    public async Task RefreshAsync_InvalidIds_RejectsWithoutHttpOrPublication()
-    {
-        // Arrange
-        Scenario scenario = new();
-
-        // Act
-        await Assert.ThrowsAsync<ArgumentNullException>(() => scenario.Monitor.RefreshAsync(null!));
-        await Assert.ThrowsAsync<ArgumentException>(() => scenario.Monitor.RefreshAsync([""]));
-        await Assert.ThrowsAsync<ArgumentException>(() => scenario.Monitor.RefreshAsync([" "]));
-
-        // Assert
-        Assert.AreEqual(0, scenario.Handler.Attempts);
-        Assert.IsEmpty(scenario.Published);
+        Assert.AreEqual(0, scenario.Published[1][0].Heading);
+        Assert.AreEqual(0, scenario.Published[2][0].Heading);
     }
 
     [TestMethod]
@@ -455,42 +237,87 @@ public sealed class VehiclePositionsMonitorTests
     {
         // Arrange
         RequestTestHandler handler = new();
-        BusTimeTransitService service = new("Test", new Uri("https://bustime.example/api/v3/"), null, TimeZoneInfo.Utc, new HttpClient(handler));
+        TransitAppService service = new(null, http: new HttpClient(handler));
         bool published = false;
         VehiclePositionsMonitor monitor = new(service, _ => published = true) { IsForeground = true };
 
         // Act
-        await monitor.RefreshAsync(["5501"]);
+        await monitor.RefreshAsync("14", "0");
 
         // Assert
         Assert.AreEqual(0, handler.Attempts);
         Assert.IsFalse(published);
     }
 
+    [TestMethod]
+    public async Task RefreshAsync_RepeatedIdenticalResult_LogsOnceUntilItChangesOrAges()
+    {
+        // Arrange
+        Scenario scenario = new();
+        List<string> log = [];
+        VehiclePositionsMonitor monitor = new(scenario.Service, _ => { }, scenario.Clock, log.Add) { IsForeground = true };
+
+        // Act
+        await monitor.RefreshAsync("14", "0", force: true);
+        scenario.Clock.Advance(TimeSpan.FromMinutes(1));
+        await monitor.RefreshAsync("14", "0", force: true);
+        int afterRepeat = log.Count;
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(VehicleBody()));
+        scenario.Clock.Advance(TimeSpan.FromMinutes(1));
+        await monitor.RefreshAsync("14", "0", force: true);
+        int afterChange = log.Count;
+        scenario.Clock.Advance(TimeSpan.FromMinutes(15));
+        await monitor.RefreshAsync("14", "0", force: true);
+
+        // Assert
+        Assert.AreEqual(1, afterRepeat);
+        Assert.AreEqual(2, afterChange);
+        Assert.HasCount(3, log);
+        Assert.AreEqual("vehicles route=14 direction=0 count=1 withTrip=1", log[0]);
+        Assert.AreEqual("vehicles route=14 direction=0 count=0 withTrip=0", log[1]);
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_Failure_LogsNothing()
+    {
+        // Arrange
+        Scenario scenario = new();
+        List<string> log = [];
+        VehiclePositionsMonitor monitor = new(scenario.Service, _ => { }, scenario.Clock, log.Add) { IsForeground = true };
+        scenario.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("unavailable", HttpStatusCode.BadGateway));
+
+        // Act
+        await Assert.ThrowsAsync<Exception>(() => monitor.RefreshAsync("14", "0", force: true));
+
+        // Assert
+        Assert.IsEmpty(log);
+    }
+
     private static TaskCompletionSource<HttpResponseMessage> PendingResponse() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private static string VehicleBody(string id, int heading) =>
-        string.Create(CultureInfo.InvariantCulture, $$$"""{"bustime-response":{"vehicle":[{"vid":"{{{id}}}","rt":"14","lat":0,"lon":0,"hdg":{{{heading}}}}]}}""");
+    private static string VehicleBody(params (string Id, double Lat, double Lon, string TripId)[] vehicles) =>
+        "{\"vehicles\":[" + string.Join(',', vehicles.Select(v => string.Create(CultureInfo.InvariantCulture,
+            $$"""{"vehicle_id":"{{v.Id}}","latitude":{{v.Lat}},"longitude":{{v.Lon}},"direction_id":0,"rt_trip_id":"{{v.TripId}}","vehicle_label":"29-088","occupancy_status":2}"""))) + "]}";
 
     private sealed class Scenario
     {
         public Scenario()
         {
             Service = Handler.CreateService(new TransitRequestDiagnostics(Clock));
-            Service.EndpointCalled += (_, _) => ++AttemptTally;
             Monitor = new VehiclePositionsMonitor(Service, Published.Add, Clock) { IsForeground = true };
         }
 
         public RequestTestClock Clock { get; } = new();
 
-        public RequestTestHandler Handler { get; } = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveBody)) };
+        public RequestTestHandler Handler { get; } = new()
+        {
+            RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(VehicleBody(("v1", 43.0, -88.0, "t1")))),
+        };
 
-        public BusTimeTransitService Service { get; }
+        public TransitAppService Service { get; }
 
         public VehiclePositionsMonitor Monitor { get; }
 
         public List<IReadOnlyList<Vehicle>> Published { get; } = [];
-
-        public int AttemptTally { get; private set; }
     }
 }

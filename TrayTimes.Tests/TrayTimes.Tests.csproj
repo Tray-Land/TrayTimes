@@ -16,11 +16,22 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Update="Transit\TransitApp\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- The app's English strings, for tests that read what the rider sees (ResourceLoader.UseEnglish). -->
+    <None Include="..\TrayTimes\Strings\en-us\Resources.resw" Link="Strings\Resources.resw" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\TrayTimes.Core\TrayTimes.Core.csproj" />
     <Compile Include="..\TrayTimes\Services\ArrivalsMonitor.cs" Link="Services\ArrivalsMonitor.cs" />
     <Compile Include="..\TrayTimes\Services\BusTrackingService.cs" Link="Services\BusTrackingService.cs" />
+    <Compile Include="..\TrayTimes\Services\ActiveTripService.cs" Link="Services\ActiveTripService.cs" />
+    <Compile Include="..\TrayTimes\Services\ActiveTripStore.cs" Link="Services\ActiveTripStore.cs" />
+    <Compile Include="..\TrayTimes\Services\NotificationAction.cs" Link="Services\NotificationAction.cs" />
+    <Compile Include="..\TrayTimes\Services\TripMessages.cs" Link="Services\TripMessages.cs" />
+    <Compile Include="..\TrayTimes\Views\AppStrings.cs" Link="Views\AppStrings.cs" />
+    <Compile Include="..\TrayTimes\Views\SavedStopRow.cs" Link="Views\SavedStopRow.cs" />
     <Compile Include="..\TrayTimes\Services\ApiUsageService.cs" Link="Services\ApiUsageService.cs" />
     <Compile Include="..\TrayTimes\Services\LocationService.cs" Link="Services\LocationService.cs" />
-    <Compile Include="..\TrayTimes\Services\StopIndexService.cs" Link="Services\StopIndexService.cs" />
   </ItemGroup>
 </Project>

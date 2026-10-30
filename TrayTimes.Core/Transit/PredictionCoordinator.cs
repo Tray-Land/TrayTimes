@@ -4,34 +4,49 @@ namespace TrayTimes.Transit;
 public sealed record PredictionSnapshot(IReadOnlyList<Arrival> Arrivals, DateTimeOffset FetchedAt);
 
 /// <summary>
-/// App-wide raw prediction sharing. Known browsing stops can share a due batch without delaying
-/// tracking; each caller owns its waiter, not the lifetime of other callers' shared HTTP work.
+/// App-wide departure sharing. Known browsing stops ride along in any due batch, so Favorites,
+/// Commute, Nearby, and tracking usually share one request. A new batch can wait a short
+/// coalescing window for other consumers' stops before it's sent. Each caller owns its waiter,
+/// not the lifetime of other callers' shared HTTP work.
 /// </summary>
 public sealed class PredictionCoordinator
 {
-    public static readonly TimeSpan BrowsingInterval = TimeSpan.FromSeconds(30);
-    public const int RetainedStops = 128;
+    /// <summary>The browsing refresh interval when the caller doesn't supply one.</summary>
+    public static readonly TimeSpan DefaultBrowsingInterval = TimeSpan.FromSeconds(60);
+
+    public const int RetainedStops = 256;
 
     private readonly Lock _gate = new();
     private readonly ITransitService _service;
     private readonly TimeProvider _time;
+    private readonly Func<TimeSpan> _browsingInterval;
+    private readonly TimeSpan _coalesceWindow;
     private readonly Dictionary<TransitConsumer, string[]> _browsing = [];
     private readonly Dictionary<string, Request> _pending = new(StringComparer.Ordinal);
     private readonly Dictionary<string, StopSnapshot> _cache = new(StringComparer.Ordinal);
+    private Request? _open;
     private long _sequence;
 
-    public PredictionCoordinator(ITransitService service, TimeProvider? timeProvider = null)
+    /// <param name="browsingInterval">How often browsing refreshes right now (it can follow the call budget).</param>
+    /// <param name="coalesceWindow">How long a new batch waits for other stops to join it before it's sent; zero sends at once.</param>
+    public PredictionCoordinator(ITransitService service, TimeProvider? timeProvider = null, Func<TimeSpan>? browsingInterval = null, TimeSpan coalesceWindow = default)
     {
         ArgumentNullException.ThrowIfNull(service);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(service.MaxStopsPerRequest);
+        ArgumentOutOfRangeException.ThrowIfLessThan(coalesceWindow, TimeSpan.Zero);
         _service = service;
         _time = timeProvider ?? TimeProvider.System;
+        _browsingInterval = browsingInterval ?? (() => DefaultBrowsingInterval);
+        _coalesceWindow = coalesceWindow;
     }
+
+    /// <summary>How often browsing refreshes right now.</summary>
+    public TimeSpan BrowsingInterval => _browsingInterval();
 
     /// <summary>Register known visible stops, or an empty set on hide/invalidation. Does no HTTP work.</summary>
     public void SetBrowsingStops(TransitConsumer consumer, IReadOnlyCollection<string> stopIds)
     {
-        if (consumer is not (TransitConsumer.Favorites or TransitConsumer.Commute or TransitConsumer.Nearby))
+        if (consumer is not (TransitConsumer.Favorites or TransitConsumer.Commute or TransitConsumer.Nearby or TransitConsumer.Trip))
         {
             throw new ArgumentOutOfRangeException(nameof(consumer));
         }
@@ -57,7 +72,7 @@ public sealed class PredictionCoordinator
 
     /// <summary>
     /// Share pending work and successful data strictly younger than maxAge. Force bypasses cached
-    /// success, never pending work. Tracking callers leave combineBrowsing false.
+    /// success, never pending work. With combineBrowsing, due browsing stops fill the caller's batch.
     /// </summary>
     public async Task<PredictionSnapshot> GetAsync(
         IReadOnlyCollection<string> stopIds,
@@ -74,9 +89,13 @@ public sealed class PredictionCoordinator
             return new PredictionSnapshot([], _time.GetLocalNow());
         }
 
+        int max = _service.MaxStopsPerRequest;
+        (TransitConsumer, TransitTrigger) scope = TransitRequestDiagnostics.CurrentScope;
+        TimeSpan fillAge = BrowsingInterval / 2;
         Dictionary<string, StopSnapshot> snapshots = new(StringComparer.Ordinal);
         Dictionary<string, Request> requested = new(StringComparer.Ordinal);
         HashSet<Request> waiters = [];
+        HashSet<Request> owned = [];
         List<Request> starts = [];
         int cachedCount = 0;
         int sharedCount = 0;
@@ -89,7 +108,14 @@ public sealed class PredictionCoordinator
                 {
                     requested[id] = pending;
                     waiters.Add(pending);
-                    ++sharedCount;
+                    if (!pending.IsSent)
+                    {
+                        owned.Add(pending); // It hasn't been sent, so its data will be as fresh as this caller's own.
+                    }
+                    else
+                    {
+                        ++sharedCount;
+                    }
                 }
                 else if (!force && IsFresh(id, maxAge))
                 {
@@ -107,54 +133,61 @@ public sealed class PredictionCoordinator
             {
                 // Fill the caller's batches, but don't start an unrelated extra batch or make
                 // this caller wait for/fail because of a batch containing none of its stops.
-                int capacity = (_service.MaxStopsPerRequest - required.Length % _service.MaxStopsPerRequest)
-                    % _service.MaxStopsPerRequest;
-                foreach (string id in _browsing.Values.SelectMany(s => s))
+                int capacity = (max - (required.Length % max)) % max;
+                foreach (string id in DueBrowsingStops(fillAge))
                 {
                     if (capacity == 0)
                     {
                         break;
                     }
 
-                    if (!_pending.ContainsKey(id) && !IsFresh(id, BrowsingInterval))
+                    if (missing.Add(id))
                     {
-                        if (missing.Add(id))
-                        {
-                            --capacity;
-                        }
+                        --capacity;
                     }
                 }
             }
 
-            foreach (string[] batch in required.Concat(missing.Except(required)).Chunk(_service.MaxStopsPerRequest))
+            Queue<string> queue = new(required.Concat(missing.Except(required)));
+            if (queue.Count > 0 && _open is { IsSent: false } open && open.Ids.Count < max)
             {
-                Request request = new(batch, ++_sequence, _time.GetTimestamp(), _time.GetLocalNow());
+                open.CombineBrowsing |= combineBrowsing && !force;
+                Claim(open, queue, max, ids, requested);
+                waiters.Add(open);
+                owned.Add(open);
+            }
+
+            while (queue.Count > 0)
+            {
+                Request request = new(++_sequence, scope) { CombineBrowsing = combineBrowsing && !force };
+                Claim(request, queue, max, ids, requested);
                 starts.Add(request);
                 waiters.Add(request);
-                foreach (string id in batch)
+                owned.Add(request);
+                if (_coalesceWindow > TimeSpan.Zero)
                 {
-                    _pending[id] = request;
-                    if (ids.Contains(id, StringComparer.Ordinal))
-                    {
-                        requested[id] = request;
-                    }
+                    _open = request;
                 }
             }
 
             foreach (Request request in waiters)
             {
                 ++request.Waiters;
+                if (!request.IsSent)
+                {
+                    request.Join(scope);
+                }
             }
         }
 
         if (cachedCount > 0)
         {
-            _service.Diagnostics?.RecordReuse(TransitEndpoint.Predictions, inFlight: false, cachedCount);
+            _service.Diagnostics?.RecordReuse(TransitEndpoint.Departures, inFlight: false, cachedCount);
         }
 
         if (sharedCount > 0)
         {
-            _service.Diagnostics?.RecordReuse(TransitEndpoint.Predictions, inFlight: true, sharedCount);
+            _service.Diagnostics?.RecordReuse(TransitEndpoint.Departures, inFlight: true, sharedCount);
         }
 
         try
@@ -173,7 +206,7 @@ public sealed class PredictionCoordinator
 
             // A slow shared response must not make tracking accept an old browsing snapshot.
             // Retry only reused stops; a caller's own slow HTTP attempt is unavoidable latency.
-            string[] expired = [.. ids.Where(id => (!requested.TryGetValue(id, out Request? r) || !starts.Contains(r))
+            string[] expired = [.. ids.Where(id => (!requested.TryGetValue(id, out Request? r) || !owned.Contains(r))
                 && _time.GetElapsedTime(snapshots[id].StartedAt) >= maxAge)];
             if (expired.Length > 0)
             {
@@ -196,6 +229,25 @@ public sealed class PredictionCoordinator
         }
     }
 
+    /// <summary>Takes ids from the queue into an unsent request, up to the batch size.</summary>
+    private void Claim(Request request, Queue<string> queue, int max, string[] callerIds, Dictionary<string, Request> requested)
+    {
+        while (queue.Count > 0 && request.Ids.Count < max)
+        {
+            string id = queue.Dequeue();
+            request.Ids.Add(id);
+            _pending[id] = request;
+            if (callerIds.Contains(id, StringComparer.Ordinal))
+            {
+                requested[id] = request;
+            }
+        }
+    }
+
+    /// <summary>Registered browsing stops that would be due before the next refresh and aren't already on their way.</summary>
+    private IEnumerable<string> DueBrowsingStops(TimeSpan fillAge) =>
+        _browsing.Values.SelectMany(s => s).Distinct(StringComparer.Ordinal).Where(id => !_pending.ContainsKey(id) && !IsFresh(id, fillAge));
+
     private bool IsFresh(string id, TimeSpan maxAge) =>
         _cache.TryGetValue(id, out StopSnapshot? cached) && _time.GetElapsedTime(cached.StartedAt) < maxAge;
 
@@ -203,10 +255,45 @@ public sealed class PredictionCoordinator
     {
         try
         {
-            request.Cancellation.Token.ThrowIfCancellationRequested();
-            IReadOnlyList<Arrival> arrivals = await _service.GetArrivalsAsync(request.Ids, request.Cancellation.Token);
-            Dictionary<string, StopSnapshot> result = request.Ids.ToDictionary(id => id,
-                id => new StopSnapshot(arrivals.Where(a => a.StopId == id).ToArray(),
+            if (_coalesceWindow > TimeSpan.Zero)
+            {
+                await Task.Delay(_coalesceWindow, _time, request.Cancellation.Token);
+            }
+
+            string[] ids;
+            (TransitConsumer Consumer, TransitTrigger Trigger) scope;
+            lock (_gate)
+            {
+                request.Cancellation.Token.ThrowIfCancellationRequested();
+                if (ReferenceEquals(_open, request))
+                {
+                    _open = null;
+                }
+
+                // Stops registered while the batch waited (another tab's discovery) can still ride along.
+                if (request.CombineBrowsing && _coalesceWindow > TimeSpan.Zero)
+                {
+                    foreach (string id in DueBrowsingStops(_browsingInterval() / 2).Take(_service.MaxStopsPerRequest - request.Ids.Count))
+                    {
+                        request.Ids.Add(id);
+                        _pending[id] = request;
+                    }
+                }
+
+                request.Send(_time.GetTimestamp(), _time.GetLocalNow());
+                ids = [.. request.Ids];
+                scope = request.Scope;
+            }
+
+            // Sent for its most urgent caller, not whichever opened it, so the budget and cooldown don't hold back tracking.
+            DepartureBoard board;
+            using (TransitRequestDiagnostics.BeginScope(scope.Consumer, scope.Trigger))
+            {
+                board = await _service.GetDeparturesAsync(ids, includeShapes: false, request.Cancellation.Token);
+            }
+
+            Dictionary<string, StopSnapshot> result = ids.ToDictionary(id => id,
+                id => new StopSnapshot(board.Arrivals.Where(a => a.StopId == id).ToArray(),
                     request.StartedAt, request.FetchedAt, request.Sequence), StringComparer.Ordinal);
             lock (_gate)
             {
@@ -282,6 +369,11 @@ public sealed class PredictionCoordinator
 
     private void RemovePending(Request request)
     {
+        if (ReferenceEquals(_open, request))
+        {
+            _open = null;
+        }
+
         foreach (string id in request.Ids)
         {
             if (_pending.TryGetValue(id, out Request? current) && ReferenceEquals(current, request))
@@ -304,15 +396,37 @@ public sealed class PredictionCoordinator
 
     private sealed record StopSnapshot(IReadOnlyList<Arrival> Arrivals, long StartedAt, DateTimeOffset FetchedAt, long Sequence);
 
-    private sealed class Request(string[] ids, long sequence, long startedAt, DateTimeOffset fetchedAt)
+    /// <summary>One HTTP batch. Its stops can still be added to until it's sent.</summary>
+    private sealed class Request(long sequence, (TransitConsumer Consumer, TransitTrigger Trigger) scope)
     {
-        public string[] Ids { get; } = ids;
+        public List<string> Ids { get; } = [];
         public long Sequence { get; } = sequence;
-        public long StartedAt { get; } = startedAt;
-        public DateTimeOffset FetchedAt { get; } = fetchedAt;
+
+        /// <summary>The scope it's sent under: its most urgent caller's.</summary>
+        public (TransitConsumer Consumer, TransitTrigger Trigger) Scope { get; private set; } = scope;
+        public bool CombineBrowsing { get; set; }
+        public bool IsSent { get; private set; }
+        public long StartedAt { get; private set; }
+        public DateTimeOffset FetchedAt { get; private set; }
         public int Waiters { get; set; }
         public CancellationTokenSource Cancellation { get; } = new();
         public TaskCompletionSource<IReadOnlyDictionary<string, StopSnapshot>> Completion { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>A caller waits on this unsent batch: it's sent under that caller's scope if it's more urgent.</summary>
+        public void Join((TransitConsumer Consumer, TransitTrigger Trigger) caller)
+        {
+            if (TransitRequestDiagnostics.PriorityOf(caller) > TransitRequestDiagnostics.PriorityOf(Scope))
+            {
+                Scope = caller;
+            }
+        }
+
+        public void Send(long startedAt, DateTimeOffset fetchedAt)
+        {
+            IsSent = true;
+            StartedAt = startedAt;
+            FetchedAt = fetchedAt;
+        }
     }
 }

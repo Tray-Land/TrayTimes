@@ -1,25 +1,25 @@
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
+using TrayTimes.Views;
 
 namespace TrayTimes.Services;
 
 /// <summary>
-/// Windows App SDK toast notifications for bus tracking. Every alert shares one tag, so a newer
-/// alert replaces the previous one in Action Center.
+/// Windows App SDK toast notifications for bus tracking and active trips. Every alert shares one tag, so a
+/// newer alert replaces the previous one in Action Center.
 /// </summary>
 internal static class NotificationService
 {
     private const string Tag = "tracking";
     private const string ActionKey = "action";
-    private const string StopTrackingAction = "stopTracking";
 
     private static bool _registered;
 
     /// <summary>Raised on a background thread when an alert is clicked (to open the flyout).</summary>
     public static event EventHandler? Opened;
 
-    /// <summary>Raised on a background thread when an alert's "Stop tracking" button is clicked.</summary>
-    public static event EventHandler? StopTrackingRequested;
+    /// <summary>Raised on a background thread when one of an alert's buttons is clicked.</summary>
+    public static event EventHandler<NotificationAction>? ActionRequested;
 
     public static void Register()
     {
@@ -45,7 +45,8 @@ internal static class NotificationService
         }
     }
 
-    public static void Show(string title, string text, bool canStopTracking)
+    /// <param name="buttons">The buttons to offer, in order.</param>
+    public static void Show(string title, string text, IReadOnlyList<NotificationAction> buttons)
     {
         if (!_registered)
         {
@@ -55,9 +56,9 @@ internal static class NotificationService
         AppNotificationBuilder builder = new AppNotificationBuilder()
             .AddText(title)
             .AddText(text);
-        if (canStopTracking)
+        foreach (NotificationAction action in buttons)
         {
-            builder.AddButton(new AppNotificationButton("Stop tracking").AddArgument(ActionKey, StopTrackingAction));
+            builder.AddButton(new AppNotificationButton(Label(action)).AddArgument(ActionKey, action.ToString()));
         }
 
         AppNotification notification = builder.BuildNotification();
@@ -75,11 +76,21 @@ internal static class NotificationService
         }
     }
 
+    private static string Label(NotificationAction action) => AppStrings.Get(action switch
+    {
+        NotificationAction.StopTracking => "NotificationStopTracking",
+        NotificationAction.MissedIt => "NotificationMissedIt",
+        NotificationAction.EndTrip => "NotificationEndTrip",
+        _ => "NotificationResumeTrip",
+    });
+
     private static void OnNotificationInvoked(AppNotificationManager sender, AppNotificationActivatedEventArgs args)
     {
-        if (args.Arguments.TryGetValue(ActionKey, out string? action) && action == StopTrackingAction)
+        // Case doesn't matter, so a toast from an older version ("stopTracking") still works.
+        if (args.Arguments.TryGetValue(ActionKey, out string? value)
+            && Enum.TryParse(value, ignoreCase: true, out NotificationAction action) && Enum.IsDefined(action))
         {
-            StopTrackingRequested?.Invoke(null, EventArgs.Empty);
+            ActionRequested?.Invoke(null, action);
         }
         else
         {

@@ -11,10 +11,12 @@ internal static class GeocodingService
 {
     private const string BaseUrl = "https://atlas.microsoft.com/search/";
 
-    // Bias results toward the transit agency's service area (downtown Milwaukee).
-    private static readonly GeoPoint BiasPoint = new(43.0389, -87.9065);
-
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    /// <summary>Where to bias results: the rider's home, else wherever the flyout's map was left, else nowhere (worldwide).</summary>
+    private static GeoPoint? BiasPoint =>
+        SettingsService.Places.FirstOrDefault(p => p.Kind == PlaceKind.Home)?.Location
+        ?? (SettingsService.FlyoutMapView is { } view ? new GeoPoint(view.Lat, view.Lon) : null);
 
     /// <summary>False without an Azure Maps key; callers should fall back to device location.</summary>
     public static bool IsAvailable => Secrets.AzureMapsKey is not null;
@@ -26,8 +28,9 @@ internal static class GeocodingService
             return [];
         }
 
+        string bias = BiasPoint is { } point ? string.Create(CultureInfo.InvariantCulture, $"&lat={point.Lat}&lon={point.Lon}") : string.Empty;
         string url = string.Create(CultureInfo.InvariantCulture,
-            $"{BaseUrl}address/json?api-version=1.0&typeahead=true&limit=5&countrySet=US&lat={BiasPoint.Lat}&lon={BiasPoint.Lon}&query={Uri.EscapeDataString(query.Trim())}&subscription-key={Uri.EscapeDataString(key)}");
+            $"{BaseUrl}address/json?api-version=1.0&typeahead=true&limit=5{bias}&query={Uri.EscapeDataString(query.Trim())}&subscription-key={Uri.EscapeDataString(key)}");
         using JsonDocument doc = await GetJsonAsync(url, cancellationToken);
 
         List<GeocodeResult> results = [];
@@ -48,6 +51,50 @@ internal static class GeocodingService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// Where a postal code is, or null if it isn't found. Uses Azure Maps when it has a key; otherwise
+    /// looks up a five-digit US ZIP code, which needs no key.
+    /// </summary>
+    public static async Task<GeoPoint?> FindPostalCodeAsync(string postalCode, CancellationToken cancellationToken = default)
+    {
+        string code = postalCode.Trim();
+        if (code.Length == 0)
+        {
+            return null;
+        }
+
+        if (IsAvailable)
+        {
+            IReadOnlyList<GeocodeResult> results = await SearchAsync(code, cancellationToken);
+            return results.Count > 0 ? results[0].Location : null;
+        }
+
+        if (code.Length != 5 || !code.All(char.IsAsciiDigit))
+        {
+            return null;
+        }
+
+        using HttpResponseMessage response = await Http.GetAsync($"https://api.zippopotam.us/us/{code}", cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        await using Stream stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using JsonDocument doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        if (doc.RootElement.TryGetProperty("places", out JsonElement places)
+            && places.GetArrayLength() > 0
+            && places[0].TryGetProperty("latitude", out JsonElement lat)
+            && places[0].TryGetProperty("longitude", out JsonElement lon)
+            && double.TryParse(lat.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double latitude)
+            && double.TryParse(lon.GetString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double longitude))
+        {
+            return new GeoPoint(latitude, longitude);
+        }
+
+        return null;
     }
 
     /// <summary>The street address nearest <paramref name="point"/>, or null if none is found.</summary>

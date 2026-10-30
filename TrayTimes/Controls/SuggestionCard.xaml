@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="TrayTimes.Controls.SuggestionCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:TrayTimes.Controls">
+
+    <UserControl.Resources>
+        <!--  One ride's route badge, after an arrow from the ride before it  -->
+        <DataTemplate
+            x:Key="RouteChipTemplate"
+            x:DataType="controls:RouteChipItem"
+            x:DefaultBindMode="OneTime">
+            <StackPanel Orientation="Horizontal" Spacing="4">
+                <FontIcon
+                    VerticalAlignment="Center"
+                    AutomationProperties.AccessibilityView="Raw"
+                    FontSize="10"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE72A;"
+                    Visibility="{x:Bind ArrowVisibility}" />
+                <Border
+                    MinWidth="28"
+                    Height="20"
+                    Padding="5,0"
+                    Background="{x:Bind Background}"
+                    CornerRadius="3">
+                    <TextBlock
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Foreground="{x:Bind Foreground}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind Label}" />
+                </Border>
+            </StackPanel>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <!--  Show() swaps in a new Item and calls Bindings.Update(), so one-time bindings stay current  -->
+    <Grid
+        Padding="6,8,8,0"
+        x:DefaultBindMode="OneTime"
+        ColumnSpacing="6">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!--  The trip: where to, when to leave, its rides, and when it gets there  -->
+        <Button
+            x:Name="TripButton"
+            AutomationProperties.AutomationId="SuggestionCard"
+            AutomationProperties.Name="{x:Bind Item.AutomationName}"
+            Click="TripButton_Click"
+            Style="{StaticResource RowButtonStyle}"
+            ToolTipService.ToolTip="{x:Bind Item.TripToolTip}"
+            Visibility="{x:Bind Item.TripVisibility}">
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon
+                    VerticalAlignment="Center"
+                    AutomationProperties.AccessibilityView="Raw"
+                    FontSize="20"
+                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                    Glyph="{x:Bind Item.Glyph}" />
+                <StackPanel Grid.Column="1" Spacing="2">
+                    <TextBlock
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="{x:Bind Item.Title}"
+                        TextTrimming="CharacterEllipsis" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ItemsControl
+                            VerticalAlignment="Center"
+                            AutomationProperties.AccessibilityView="Raw"
+                            ItemTemplate="{StaticResource RouteChipTemplate}"
+                            ItemsSource="{x:Bind Item.Routes}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="4" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind Item.Detail}"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind Item.Note}"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind Item.NoteVisibility}" />
+                </StackPanel>
+                <FontIcon
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    AutomationProperties.AccessibilityView="Raw"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE76C;" />
+            </Grid>
+        </Button>
+
+        <!--  In the trip's place: setting up, already there, planning, or no trip  -->
+        <Grid
+            Padding="8,6"
+            ColumnSpacing="12"
+            Visibility="{x:Bind Item.NoticeVisibility}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <FontIcon
+                VerticalAlignment="Center"
+                AutomationProperties.AccessibilityView="Raw"
+                FontSize="20"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Glyph="{x:Bind Item.Glyph}"
+                Visibility="{x:Bind Item.GlyphVisibility}" />
+            <ProgressRing
+                x:Uid="SuggestionPlanningRing"
+                Width="20"
+                Height="20"
+                VerticalAlignment="Center"
+                IsActive="{x:Bind Item.IsBusy}"
+                Visibility="{x:Bind Item.BusyVisibility}" />
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Spacing="2">
+                <TextBlock
+                    AutomationProperties.LiveSetting="Polite"
+                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                    Text="{x:Bind Item.Title}"
+                    TextWrapping="Wrap" />
+                <TextBlock
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{x:Bind Item.Detail}"
+                    TextWrapping="Wrap"
+                    Visibility="{x:Bind Item.DetailVisibility}" />
+            </StackPanel>
+            <Button
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="SuggestionActionButton"
+                Click="ActionButton_Click"
+                Content="{x:Bind Item.ActionText}"
+                Visibility="{x:Bind Item.ActionVisibility}" />
+        </Grid>
+
+        <!--  Beside the card, not in it, so there's no button inside a button  -->
+        <DropDownButton
+            x:Name="DestinationButton"
+            x:Uid="DestinationButton"
+            Grid.Column="1"
+            VerticalAlignment="Center"
+            AutomationProperties.AutomationId="DestinationButton"
+            Visibility="{x:Bind Item.DestinationVisibility}">
+            <DropDownButton.Flyout>
+                <MenuFlyout
+                    x:Name="DestinationMenu"
+                    Opening="DestinationMenu_Opening"
+                    Placement="BottomEdgeAlignedRight" />
+            </DropDownButton.Flyout>
+        </DropDownButton>
+        <Button
+            x:Name="SaveDestinationButton"
+            x:Uid="SaveDestinationButton"
+            Grid.Row="1"
+            Grid.ColumnSpan="2"
+            Margin="8,4,0,0"
+            AutomationProperties.AutomationId="SaveDestinationButton"
+            HorizontalAlignment="Left"
+            Click="SaveDestinationButton_Click"
+            Visibility="Collapsed" />
+    </Grid>
+</UserControl>

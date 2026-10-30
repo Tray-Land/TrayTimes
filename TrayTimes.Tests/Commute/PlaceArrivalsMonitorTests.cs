@@ -1,11 +1,9 @@
 using System.Net;
 using TrayTimes.Commute;
 using TrayTimes.Models;
-using TrayTimes.Services;
-using TrayTimes.Tests.Services;
 using TrayTimes.Tests.Transit;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 
 namespace TrayTimes.Tests.Commute;
 
@@ -13,13 +11,13 @@ namespace TrayTimes.Tests.Commute;
 public sealed class PlaceArrivalsMonitorTests
 {
     [TestMethod]
-    [DataRow(FlyoutMode.Nearby)]
-    [DataRow(FlyoutMode.Commute)]
-    public async Task RefreshAsync_StableLocation_SkipsDiscoveryAndStartsPredictionsBeforeSlowLocation(FlyoutMode mode)
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RefreshAsync_StableLocation_SkipsDiscoveryAndStartsPredictionsBeforeSlowLocation(bool suggestion)
     {
-        Fixture f = new(mode);
+        Fixture f = new(suggestion);
         await f.Monitor.RefreshAsync();
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
         TaskCompletionSource<PlaceLocation> location = new();
         f.Locate = _ => location.Task;
         TaskCompletionSource<bool> published = new();
@@ -46,11 +44,11 @@ public sealed class PlaceArrivalsMonitorTests
     }
 
     [TestMethod]
-    [DataRow(FlyoutMode.Nearby)]
-    [DataRow(FlyoutMode.Commute)]
-    public async Task IsForeground_QuickReopen_PreservesImmediateRowsAndOriginalTimestampWithoutHttp(FlyoutMode mode)
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task IsForeground_QuickReopen_PreservesImmediateRowsAndOriginalTimestampWithoutHttp(bool suggestion)
     {
-        Fixture f = new(mode);
+        Fixture f = new(suggestion);
         await f.Monitor.RefreshAsync();
         PlaceStops? discovery = f.Monitor.Discovery;
         PredictionSnapshot? snapshot = f.Monitor.Snapshot;
@@ -71,7 +69,7 @@ public sealed class PlaceArrivalsMonitorTests
     [TestMethod]
     public async Task Configure_DestinationOrPlaceChanges_ClearsOldCommuteBeforeAwaitingDiscovery()
     {
-        Fixture f = new(FlyoutMode.Commute);
+        Fixture f = new(suggestion: true);
         await f.Monitor.RefreshAsync();
         f.Context = f.Context with { DestinationId = "Home" };
 
@@ -91,9 +89,26 @@ public sealed class PlaceArrivalsMonitorTests
     }
 
     [TestMethod]
+    public async Task Configure_SamePlacesInANewList_KeepsTheTrip()
+    {
+        // Arrange: settings hand back a new list on every read.
+        Fixture f = new(suggestion: true);
+        await f.Monitor.RefreshAsync();
+        PlaceStops? trip = f.Monitor.Discovery;
+        f.Context = f.Context with { Places = [.. f.Context.Places] };
+
+        // Act
+        f.Configure();
+
+        // Assert
+        Assert.AreSame(trip, f.Monitor.Discovery);
+        Assert.IsNotNull(f.Monitor.Snapshot);
+    }
+
+    [TestMethod]
     public async Task Configure_ResetExplicitDestinationOnReopen_DoesNotDisplayPreviousTripAsCurrent()
     {
-        Fixture f = new(FlyoutMode.Commute);
+        Fixture f = new(suggestion: true);
         f.Context = f.Context with { DestinationId = "Home" };
         f.Configure();
         await f.Monitor.RefreshAsync();
@@ -110,37 +125,19 @@ public sealed class PlaceArrivalsMonitorTests
     }
 
     [TestMethod]
-    public async Task Configure_ModeChange_DoesNotPresentNearbyAsValidatedCommute()
+    public async Task Configure_CenterChange_DoesNotPresentTheOldBoardAsTheNewOne()
     {
         Fixture f = new();
         await f.Monitor.RefreshAsync();
-        f.Context = f.Context with { Mode = FlyoutMode.Commute };
+        FavoritePlace work = f.Context.Places.Single(p => p.Kind == PlaceKind.Work);
+        f.Center = new NearPlace(work);
 
         f.Configure();
 
         Assert.IsNull(f.Monitor.Discovery);
         Assert.IsNull(f.Monitor.Snapshot);
         await f.Monitor.RefreshAsync();
-        Assert.IsNotNull(f.Monitor.Discovery!.Leg);
-        Assert.HasCount(1, f.Monitor.Discovery.DirectRoutes!);
-    }
-
-    [TestMethod]
-    public async Task Configure_DirectoryTimestampChanged_ReresolvesWithoutRepeatingFreshPredictions()
-    {
-        Fixture f = new();
-        await f.Monitor.RefreshAsync();
-        f.DirectoryAt = f.DirectoryAt.AddDays(1);
-
-        f.Configure();
-        Assert.IsNull(f.Monitor.Discovery);
-        await f.Monitor.RefreshAsync();
-
-        Assert.AreEqual(2, f.Discoveries);
-        Assert.AreEqual(1, f.Handler.Attempts);
-        Assert.AreEqual(f.DirectoryAt, f.Monitor.Discovery!.DirectoryBuiltAt);
-        f.Configure();
-        Assert.IsNotNull(f.Monitor.Discovery);
+        Assert.AreEqual(work.Location, f.Monitor.Discovery!.Origin);
     }
 
     [TestMethod]
@@ -187,8 +184,7 @@ public sealed class PlaceArrivalsMonitorTests
         if (changedStops)
         {
             f.Ids = ["2"];
-            f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
-                RequestTestHandler.LiveBody.Replace("\"stpid\":\"1\"", "\"stpid\":\"2\"", StringComparison.Ordinal)));
+            f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["2"])));
         }
         f.Point = new GeoPoint(f.Point.Lat + 0.001, f.Point.Lon);
 
@@ -213,7 +209,7 @@ public sealed class PlaceArrivalsMonitorTests
         Fixture f = new();
         await f.Monitor.RefreshAsync();
         PlaceStops? old = f.Monitor.Discovery;
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
         f.Point = new GeoPoint(f.Point.Lat + 0.001, f.Point.Lon);
         TaskCompletionSource<PlaceStops> walking = new();
         f.Discover = (_, _, _) => walking.Task;
@@ -232,7 +228,7 @@ public sealed class PlaceArrivalsMonitorTests
         Assert.IsFalse(refresh.IsCompleted);
         Assert.AreSame(old, f.Monitor.Discovery);
         Assert.AreEqual(2, f.Handler.Attempts);
-        walking.SetResult(f.Found(f.Context, new PlaceLocation(f.Point)));
+        walking.SetResult(f.Found(f.Center, new PlaceLocation(f.Point)));
         await refresh;
         Assert.AreEqual(2, f.Handler.Attempts); // Same IDs reuse the just-published response.
         Assert.AreEqual(f.Point, f.Monitor.Discovery!.Origin);
@@ -247,7 +243,7 @@ public sealed class PlaceArrivalsMonitorTests
         TaskCompletionSource<HttpResponseMessage> http = new();
         f.Locate = _ => location.Task;
         f.Handler.RespondAsync = (_, token) => http.Task.WaitAsync(token);
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
 
         Task routine = f.Monitor.RefreshAsync();
         Task forced = f.Monitor.RefreshAsync(force: true);
@@ -327,10 +323,10 @@ public sealed class PlaceArrivalsMonitorTests
         TaskCompletionSource<PlaceStops> walking = new();
         f.Discover = (_, _, _) => walking.Task;
         Task refresh = f.Monitor.RefreshAsync();
-        f.Context = f.Context with { Mode = FlyoutMode.Commute };
+        f.Center = new NearPlace(f.Context.Places[0]);
 
         f.Configure();
-        walking.SetResult(f.Found(new PlaceContext(FlyoutMode.Nearby, [], null), new PlaceLocation(f.Point)));
+        walking.SetResult(f.Found(new NearYou(), new PlaceLocation(f.Point)));
         await refresh;
 
         Assert.IsNull(f.Monitor.Discovery);
@@ -384,7 +380,7 @@ public sealed class PlaceArrivalsMonitorTests
         Task stale = f.Monitor.RefreshAsync();
         await started.Task;
 
-        f.Context = f.Context with { Mode = FlyoutMode.Commute };
+        f.Center = new NearPlace(f.Context.Places[0]);
         f.Configure();
         await stale;
         await f.Monitor.RefreshAsync();
@@ -453,7 +449,7 @@ public sealed class PlaceArrivalsMonitorTests
     [TestMethod]
     public async Task Configure_GuessedTripCrossesNoon_InvalidatesBeforeShowingDifferentCommute()
     {
-        Fixture f = new(FlyoutMode.Commute);
+        Fixture f = new(suggestion: true);
         f.Clock.Advance(TimeSpan.FromHours(-9)); // 11 AM UTC in the fixture.
         f.Locate = _ => Task.FromResult(new PlaceLocation(null));
         await f.Monitor.RefreshAsync();
@@ -469,13 +465,13 @@ public sealed class PlaceArrivalsMonitorTests
     }
 
     [TestMethod]
-    [DataRow(FlyoutMode.Nearby)]
-    [DataRow(FlyoutMode.Commute)]
-    public async Task RefreshAsync_WarmHalfOpenMinuteAndReopen_CountsZeroRediscoveryAndTwoPredictions(FlyoutMode mode)
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task RefreshAsync_WarmOpenMinuteAndReopen_CountsZeroRediscoveryAndOneDeparturesCall(bool suggestion)
     {
-        Fixture f = new(mode);
+        Fixture f = new(suggestion);
         await f.Monitor.RefreshAsync();
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
         int initial = f.Handler.Attempts;
 
         for (int second = 0; second < 60; second += 15)
@@ -491,195 +487,21 @@ public sealed class PlaceArrivalsMonitorTests
             f.Clock.Advance(TimeSpan.FromSeconds(15));
         }
 
-        Assert.AreEqual(2, f.Handler.Attempts - initial);
+        Assert.AreEqual(1, f.Handler.Attempts - initial);
         Assert.AreEqual(1, f.Discoveries);
         Assert.AreEqual(1, f.Walks);
         Assert.AreEqual(0, f.Service.Diagnostics!.Snapshot.Count(o =>
-            o.Phase == TransitRequestPhase.Started && o.Endpoint != TransitEndpoint.Predictions));
+            o.Phase == TransitRequestPhase.Started && o.Endpoint != TransitEndpoint.Departures));
     }
 
     [TestMethod]
-    public async Task RefreshTimetableAsync_StaleSnapshot_RepublishesWithoutHttpOrDiscovery()
+    public async Task RefreshAsync_ContextChangedToNewStops_PublishesOnlyTheNewStops()
     {
-        Fixture f = new();
+        Fixture f = new(suggestion: true);
         await f.Monitor.RefreshAsync();
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
-
-        PredictionSnapshot? snapshot = f.Monitor.Snapshot;
-        int publications = 0;
-        f.Monitor.Updated += (_, _) => ++publications;
-        await f.Monitor.RefreshTimetableAsync();
-
-        Assert.AreEqual(1, f.Locations);
-        Assert.AreEqual(1, f.Discoveries);
-        Assert.AreEqual(1, f.Handler.Attempts);
-        Assert.AreSame(snapshot, f.Monitor.Snapshot);
-        Assert.AreEqual(1, publications);
-    }
-
-    [TestMethod]
-    [DataRow(FlyoutMode.Nearby, false)]
-    [DataRow(FlyoutMode.Nearby, true)]
-    [DataRow(FlyoutMode.Commute, false)]
-    [DataRow(FlyoutMode.Commute, true)]
-    public async Task RefreshTimetableAsync_FirstFeedAndReload_EnrichesRawRowsAndDestinationEtasImmediately(FlyoutMode mode, bool empty)
-    {
-        Fixture f = new(mode);
-        if (empty)
-        {
-            f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
-        }
-        await f.Monitor.RefreshAsync();
-        PredictionSnapshot? snapshot = f.Monitor.Snapshot;
-        f.Clock.Advance(TimeSpan.FromSeconds(35));
-        IReadOnlyList<Arrival> displayed = [];
-        IReadOnlyList<DateTimeOffset?> etas = [];
-        f.Monitor.Updated += (_, _) =>
-        {
-            if (f.Monitor.Discovery is { } found && f.Monitor.Snapshot is { } raw)
-            {
-                // Replay the view's schedule/ETA boundary using the real timetable and planner.
-                displayed = f.Schedule.AddScheduled(raw.Arrivals, [.. found.Stops.Select(n => n.Stop.Id)]);
-                etas = found.DestinationWalks is { } walks && f.Schedule.Timetable is { } timetable
-                    ? [.. displayed.Select(a => CommutePlanner.ArrivalAtDestination(
-                        timetable.GetDownstreamArrivals(a, [.. walks.Keys]), walks))]
-                    : [];
-            }
-        };
-
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
-
-        Assert.AreSame(snapshot, f.Monitor.Snapshot);
-        Assert.AreEqual(1, f.Handler.Attempts);
-        Assert.AreEqual(1, f.Locations);
-        Assert.AreEqual(1, f.Discoveries);
-        Assert.HasCount(2, displayed);
-        Assert.AreEqual(empty ? 2 : 1, displayed.Count(a => !a.IsRealTime));
-        if (mode == FlyoutMode.Commute)
-        {
-            CollectionAssert.AreEqual(new DateTimeOffset?[]
-            {
-                new(2026, 10, 6, 20, empty ? 41 : 45, 0, TimeSpan.Zero),
-                new(2026, 10, 6, 21, 21, 0, TimeSpan.Zero),
-            }, etas.ToArray());
-        }
-        else
-        {
-            Assert.IsEmpty(etas);
-        }
-
-        f.Schedule.Timetable = null;
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
-        Assert.HasCount(2, displayed);
-        Assert.AreSame(snapshot, f.Monitor.Snapshot);
-        Assert.AreEqual(1, f.Handler.Attempts);
-        await f.Monitor.RefreshAsync();
-        Assert.AreEqual(2, f.Handler.Attempts);
-        await f.Monitor.RefreshAsync(force: true);
-        Assert.AreEqual(3, f.Handler.Attempts);
-    }
-
-    [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task RefreshTimetableAsync_FailedFetchWithLastGoodData_PreservesSnapshotIdentityAndTimestamp(bool empty)
-    {
-        Fixture f = new();
-        if (empty)
-        {
-            f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
-        }
-        await f.Monitor.RefreshAsync();
-        PredictionSnapshot? snapshot = f.Monitor.Snapshot;
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("unavailable", HttpStatusCode.ServiceUnavailable));
-        await Assert.ThrowsExactlyAsync<HttpRequestException>(() => f.Monitor.RefreshAsync());
-        int enrichedRows = 0;
-        f.Monitor.Updated += (_, _) =>
-        {
-            if (f.Monitor.Snapshot is { } raw)
-            {
-                enrichedRows = f.Schedule.AddScheduled(raw.Arrivals, ["1"]).Count;
-            }
-        };
-
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
-
-        Assert.AreSame(snapshot, f.Monitor.Snapshot); // View clears errors only when raw identity changes.
-        Assert.HasCount(empty ? 0 : 1, f.Monitor.Snapshot!.Arrivals);
-        Assert.AreEqual(2, enrichedRows);
-        Assert.AreEqual(2, f.Handler.Attempts);
-        Assert.IsFalse(f.Monitor.IsLoading);
-    }
-
-    [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task RefreshTimetableAsync_PendingLiveFetch_UsesItsCompletionWithoutAddingAWaiter(bool hasSnapshot)
-    {
-        Fixture f = new();
-        PredictionSnapshot? old = null;
-        if (hasSnapshot)
-        {
-            await f.Monitor.RefreshAsync();
-            old = f.Monitor.Snapshot;
-            f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
-        }
-        TaskCompletionSource<HttpResponseMessage> pending = new();
-        f.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
-        Task refresh = f.Monitor.RefreshAsync();
-
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
-
-        Assert.IsTrue(f.Monitor.IsLoading);
-        Assert.AreSame(old, f.Monitor.Snapshot);
-        Assert.AreEqual(hasSnapshot ? 2 : 1, f.Handler.Attempts);
-        Assert.AreEqual(0, f.Service.Diagnostics!.Snapshot.Count(o => o.Phase == TransitRequestPhase.InFlightReuse));
-        pending.SetResult(RequestTestHandler.Response(RequestTestHandler.LiveBody));
-        await refresh;
-        Assert.IsFalse(f.Monitor.IsLoading);
-        Assert.AreEqual(f.Clock.GetLocalNow(), f.Monitor.Snapshot!.FetchedAt);
-        Assert.HasCount(2, f.Schedule.AddScheduled(f.Monitor.Snapshot.Arrivals, ["1"]));
-    }
-
-    [TestMethod]
-    [DataRow(FlyoutMode.Nearby)]
-    [DataRow(FlyoutMode.Commute)]
-    public async Task RefreshTimetableAsync_NoDiscoveryOrSnapshot_UsesNormalRefresh(FlyoutMode mode)
-    {
-        Fixture f = new(mode);
-
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
-
-        Assert.AreEqual(1, f.Handler.Attempts);
-        Assert.AreEqual(1, f.Discoveries);
-        Assert.IsNotNull(f.Monitor.Snapshot);
-        Assert.HasCount(2, f.Schedule.AddScheduled(f.Monitor.Snapshot.Arrivals, ["1"]));
-    }
-
-    [TestMethod]
-    [DataRow(false)]
-    [DataRow(true)]
-    public async Task RefreshTimetableAsync_ContextChangedDuringFeedLoad_DoesNotPublishOldTrip(bool changedTab)
-    {
-        Fixture f = new(FlyoutMode.Commute);
-        await f.Monitor.RefreshAsync();
-        f.Context = changedTab
-            ? f.Context with { Mode = FlyoutMode.Nearby }
-            : f.Context with { DestinationId = "Home" };
+        f.Context = f.Context with { DestinationId = "Home" };
         f.Ids = ["2"];
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
-            RequestTestHandler.LiveBody.Replace("\"stpid\":\"1\"", "\"stpid\":\"2\"", StringComparison.Ordinal)));
+        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveFor(["2"])));
         f.Configure();
         Assert.IsNull(f.Monitor.Snapshot);
         List<string> publishedStops = [];
@@ -691,53 +513,139 @@ public sealed class PlaceArrivalsMonitorTests
             }
         };
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
+        await f.Monitor.RefreshAsync();
 
-        Assert.IsTrue(publishedStops.Count > 0);
+        Assert.IsGreaterThan(0, publishedStops.Count);
         Assert.IsTrue(publishedStops.All(id => id == "2"));
-        Assert.AreEqual(changedTab ? null : "Home", f.Monitor.Discovery!.Leg?.To.Id);
+        Assert.AreEqual("Home", f.Monitor.Discovery!.Leg?.To.Id);
         Assert.AreEqual(2, f.Handler.Attempts);
-        Assert.IsTrue(f.Schedule.AddScheduled(f.Monitor.Snapshot!.Arrivals, ["2"]).All(a => a.StopId == "2"));
     }
 
     [TestMethod]
-    public async Task RefreshTimetableAsync_HiddenOrFavoritesTab_DoesNotStartWorkOrPublish()
+    public async Task RefreshAsync_OutdatedTrip_FindsItAgainWhileStillShowingTheOldOne()
     {
-        Fixture f = new();
+        // Arrange: the trip's plan expired, and the new one is slow to come.
+        Fixture f = new(suggestion: true);
         await f.Monitor.RefreshAsync();
-        PredictionSnapshot? snapshot = f.Monitor.Snapshot;
-        f.Monitor.IsForeground = false;
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
-        int updates = 0;
-        f.Monitor.Updated += (_, _) => ++updates;
+        PlaceStops? old = f.Monitor.Discovery;
+        f.Outdated = true;
+        TaskCompletionSource<PlaceStops> planning = new();
+        f.Discover = (_, _, _) => planning.Task;
 
-        f.Schedule.Timetable = ScheduleTestSupport.Load();
-        f.Schedule.RaiseLoaded();
-        await f.TimetableRefresh;
-
-        Assert.AreEqual(0, updates);
-        Assert.AreSame(snapshot, f.Monitor.Snapshot);
-        Assert.AreEqual(1, f.Handler.Attempts);
-        f.Monitor.IsForeground = true;
-        await f.Monitor.RefreshTimetableAsync();
-        Assert.AreEqual(1, updates);
-        Assert.AreEqual(1, f.Handler.Attempts);
-    }
-
-    [TestMethod]
-    public async Task RefreshAsync_InvalidDiscoveryAndManualRefresh_BypassesFreshSharedSnapshot()
-    {
-        Fixture f = new();
-        await f.Monitor.RefreshAsync();
-        f.DirectoryAt = f.DirectoryAt.AddDays(1);
+        // Act
         f.Configure();
+        Task refresh = f.Monitor.RefreshAsync();
 
-        await f.Monitor.RefreshAsync(force: true);
-
-        Assert.AreEqual(2, f.Handler.Attempts);
+        // Assert: kept through Configure and while the new trip is on its way.
+        Assert.AreSame(old, f.Monitor.Discovery);
+        Assert.IsNotNull(f.Monitor.Snapshot);
         Assert.AreEqual(2, f.Discoveries);
+        f.Outdated = false;
+        planning.SetResult(f.Found(f.Context, new PlaceLocation(f.Point)));
+        await refresh;
+        Assert.AreNotSame(old, f.Monitor.Discovery);
+        Assert.AreEqual(1, f.Handler.Attempts); // The same stops keep their departures.
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_SuggestionWithATransfer_FetchesEveryRidesBoardingStop()
+    {
+        // Arrange: the trip boards the 14 at "1" or the 30 at "alt", then changes at "transfer".
+        Fixture f = new(suggestion: true);
+        f.Discover = (context, location, _) => Task.FromResult(f.Found(context, location) with { Plan = TransferPlan(f.Clock.GetUtcNow()) });
+
+        // Act
+        await f.Monitor.RefreshAsync();
+
+        // Assert
+        CollectionAssert.AreEquivalent(new[] { "1", "alt", "transfer" }, RequestTestHandler.StopIds(f.Handler.Requests.Single()));
+        CollectionAssert.AreEquivalent(new[] { "1", "alt", "transfer" }, f.Monitor.Discovery!.StopIds.ToArray());
+    }
+
+    [TestMethod]
+    public async Task IsForeground_BoardAndSuggestionTogether_KeepBothConsumersStopsInTheBatch()
+    {
+        // Arrange
+        Fixture f = new();
+        await f.ShowBothAsync();
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
+
+        // Act: another consumer's request fills its batch with every due browsing stop.
+        await f.Predictions.GetAsync(["tracked"], TimeSpan.FromSeconds(10), combineBrowsing: true);
+
+        // Assert
+        CollectionAssert.AreEquivalent(new[] { "tracked", "near", "trip" }, RequestTestHandler.StopIds(f.Handler.Requests[^1]));
+    }
+
+    [TestMethod]
+    public async Task IsForeground_HidingTheBoard_KeepsTheSuggestionsStopsRegistered()
+    {
+        // Arrange
+        Fixture f = new();
+        await f.ShowBothAsync();
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
+
+        // Act
+        f.Board.IsForeground = false;
+        await f.Predictions.GetAsync(["tracked"], TimeSpan.FromSeconds(10), combineBrowsing: true);
+
+        // Assert
+        CollectionAssert.AreEquivalent(new[] { "tracked", "trip" }, RequestTestHandler.StopIds(f.Handler.Requests[^1]));
+    }
+
+    [TestMethod]
+    public async Task RefreshAsync_BoardAndSuggestionInOneRefresh_ShareOneLocationLookupAndItsRefinement()
+    {
+        // Arrange
+        Fixture f = new();
+        TaskCompletionSource<GeoPoint?> precise = new();
+        int lookups = 0;
+        SharedLocation location = new(_ =>
+        {
+            ++lookups;
+            return Task.FromResult(new PlaceLocation(f.Point, precise.Task));
+        });
+        int boardFinds = 0;
+        int tripFinds = 0;
+        PredictionCoordinator predictions = new(f.Service, f.Clock);
+        PlaceArrivalsMonitor<BoardCenter> board = new(predictions, TransitConsumer.Nearby, location.LocateAsync, (context, at, _) =>
+        {
+            ++boardFinds;
+            return Task.FromResult(f.Found(context, at, ["near"]));
+        });
+        PlaceArrivalsMonitor<SuggestionContext> suggestion = new(predictions, TransitConsumer.Commute, location.LocateAsync, (context, at, _) =>
+        {
+            ++tripFinds;
+            return Task.FromResult(f.Found(context, at, ["trip"]));
+        });
+        board.Configure(new NearYou());
+        suggestion.Configure(f.Context);
+        board.IsForeground = true;
+        suggestion.IsForeground = true;
+        GeoPoint refined = new(f.Point.Lat + 0.001, f.Point.Lon);
+
+        // Act
+        location.BeginRefresh();
+        Task refreshes = Task.WhenAll(board.RefreshAsync(), suggestion.RefreshAsync());
+        precise.SetResult(refined);
+        await refreshes;
+
+        // Assert: one lookup; both found stops from the rough fix, then again from the precise one.
+        Assert.AreEqual(1, lookups);
+        Assert.AreEqual(2, boardFinds);
+        Assert.AreEqual(2, tripFinds);
+        Assert.AreEqual(refined, board.Discovery!.Origin);
+    }
+
+    [TestMethod]
+    public void Constructor_ConsumerThatIsNotAPlace_Throws()
+    {
+        // Arrange
+        Fixture f = new();
+
+        // Act & Assert
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => _ = new PlaceArrivalsMonitor<BoardCenter>(
+            f.Predictions, TransitConsumer.Favorites, f.Locate, (context, location, _) => Task.FromResult(f.Found(context, location))));
     }
 
     [TestMethod]
@@ -747,10 +655,10 @@ public sealed class PlaceArrivalsMonitorTests
         TaskCompletionSource<HttpResponseMessage> pending = new();
         f.Handler.RespondAsync = (_, token) => pending.Task.WaitAsync(token);
         PredictionCoordinator predictions = new(f.Service, f.Clock);
-        PlaceArrivalsMonitor place = new(predictions,
+        PlaceArrivalsMonitor<BoardCenter> place = new(predictions, TransitConsumer.Nearby,
             _ => Task.FromResult(new PlaceLocation(f.Point)),
-            (context, location, _) => Task.FromResult(f.Found(context, location)), f.Clock);
-        place.Configure(f.Context, f.DirectoryAt);
+            (context, location, _) => Task.FromResult(f.Found(context, location)));
+        place.Configure(new NearYou());
         place.IsForeground = true;
         Task browsing = place.RefreshAsync();
         Task<PredictionSnapshot> tracking = predictions.GetAsync(["1"], TimeSpan.FromSeconds(10));
@@ -770,7 +678,7 @@ public sealed class PlaceArrivalsMonitorTests
     [TestMethod]
     public async Task RefreshAsync_RequiredDiscoveryFailure_DoesNotPublishUnvalidatedRoutesAndCanRetry()
     {
-        Fixture f = new(FlyoutMode.Commute);
+        Fixture f = new(suggestion: true);
         f.Discover = (_, _, _) => throw new TransitApiException("Fixture required pattern failed");
 
         await Assert.ThrowsExactlyAsync<TransitApiException>(() => f.Monitor.RefreshAsync());
@@ -782,7 +690,7 @@ public sealed class PlaceArrivalsMonitorTests
         f.Discover = (context, location, _) => Task.FromResult(f.Found(context, location));
         await f.Monitor.RefreshAsync();
         Assert.IsNotNull(f.Monitor.Snapshot);
-        Assert.HasCount(1, f.Monitor.Discovery!.DirectRoutes!);
+        Assert.HasCount(1, f.Monitor.Discovery!.Lines!);
     }
 
     [TestMethod]
@@ -790,7 +698,7 @@ public sealed class PlaceArrivalsMonitorTests
     {
         Fixture f = new();
         await f.Monitor.RefreshAsync();
-        f.Clock.Advance(PredictionCoordinator.BrowsingInterval);
+        f.Clock.Advance(PredictionCoordinator.DefaultBrowsingInterval);
         DateTimeOffset start = f.Clock.GetLocalNow();
         TaskCompletionSource<PlaceLocation> location = new();
         f.Locate = _ => location.Task;
@@ -807,8 +715,8 @@ public sealed class PlaceArrivalsMonitorTests
             // The audited pre-04 boundary: location, walking, then the actual provider.
             await location.Task;
             f.Clock.Advance(TimeSpan.FromSeconds(5));
-            await f.Discover(f.Context, new PlaceLocation(f.Point), CancellationToken.None);
-            await f.Service.GetArrivalsAsync(["1"]);
+            await f.Discover(f.Center, new PlaceLocation(f.Point), CancellationToken.None);
+            await f.Service.GetDeparturesAsync(["1"]);
             return f.Clock.GetLocalNow();
         }
         Task<DateTimeOffset> baseline = SerialBoundaryReplayAsync();
@@ -825,32 +733,41 @@ public sealed class PlaceArrivalsMonitorTests
         Assert.AreEqual(1, f.Discoveries); // Only initial discovery; baseline is an explicit boundary replay.
     }
 
+    /// <summary>One trip: the 14 from "1" or the 30 from "alt", then the 30 again from "transfer".</summary>
+    private static TripPlan TransferPlan(DateTimeOffset now)
+    {
+        TransitRoute fourteen = new("14", "14", "Route 14", null);
+        TransitRoute thirty = new("30", "30", "Route 30", null);
+        TransitDirection north = new("0", "North");
+        RideLine Line(TransitRoute route, string stopId, DateTimeOffset departs) =>
+            new(route, north, new TransitStop(stopId, stopId, new GeoPoint(43, -88)), null, 4, [], [new PlannedDeparture(departs, departs.AddMinutes(10), true, null)]);
+        RideLeg first = new(now.AddMinutes(5), now.AddMinutes(15), [Line(fourteen, "1", now.AddMinutes(5)), Line(thirty, "alt", now.AddMinutes(6))]);
+        RideLeg second = new(now.AddMinutes(20), now.AddMinutes(30), [Line(thirty, "transfer", now.AddMinutes(20))]);
+        return new TripPlan([new TripItinerary([first, second], now.AddMinutes(5), now.AddMinutes(30))], []);
+    }
+
+    /// <summary>
+    /// A board (Nearby) and a trip suggestion (Commute) monitor sharing one coordinator; <see cref="Monitor"/>
+    /// is the one under test, already shown.
+    /// </summary>
     private sealed class Fixture
     {
-        public Fixture(FlyoutMode mode = FlyoutMode.Nearby)
+        private readonly bool _suggestion;
+
+        public Fixture(bool suggestion = false)
         {
+            _suggestion = suggestion;
             Service = Handler.CreateService(new TransitRequestDiagnostics(Clock));
-            Context = new PlaceContext(mode,
+            Predictions = new PredictionCoordinator(Service, Clock);
+            Context = new SuggestionContext(
                 [FavoritePlace.ForKind(PlaceKind.Home, new Place("Fixture home", 43, -88)),
                  FavoritePlace.ForKind(PlaceKind.Work, new Place("Fixture work", 43.08, -88))], null);
             Locate = _ => Task.FromResult(new PlaceLocation(Point));
             Discover = (context, location, _) => Task.FromResult(Found(context, location));
-            Monitor = new PlaceArrivalsMonitor(new PredictionCoordinator(Service, Clock), quick =>
-            {
-                ++Locations;
-                return Locate(quick);
-            }, (context, location, token) =>
-            {
-                ++Discoveries;
-                ++Walks;
-                return Discover(context, location, token);
-            }, Clock);
-            Schedule = new ScheduleService(Clock);
-            Schedule.Loaded += (_, _) =>
-            {
-                Configure(); // Same context validation as the production view's Loaded path.
-                TimetableRefresh = Monitor.RefreshTimetableAsync();
-            };
+            Board = new PlaceArrivalsMonitor<BoardCenter>(Predictions, TransitConsumer.Nearby, CountedLocate, CountedDiscover);
+            Suggestion = new PlaceArrivalsMonitor<SuggestionContext>(Predictions, TransitConsumer.Commute, CountedLocate, CountedDiscover,
+                holds: (context, found, here) => found.Leg == context.Leg(here, Clock.GetLocalNow()),
+                isOutdated: _ => Outdated);
             Configure();
             Monitor.IsForeground = true;
         }
@@ -860,36 +777,71 @@ public sealed class PlaceArrivalsMonitorTests
         {
             RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.LiveBody)),
         };
-        public BusTimeTransitService Service { get; }
-        public PlaceArrivalsMonitor Monitor { get; }
-        public ScheduleService Schedule { get; }
-        public Task TimetableRefresh { get; private set; } = Task.CompletedTask;
-        public PlaceContext Context { get; set; }
-        public DateTimeOffset DirectoryAt { get; set; } = new(2026, 10, 4, 0, 0, 0, TimeSpan.Zero);
+        public TransitAppService Service { get; }
+        public PredictionCoordinator Predictions { get; }
+        public PlaceArrivalsMonitor<BoardCenter> Board { get; }
+        public PlaceArrivalsMonitor<SuggestionContext> Suggestion { get; }
+        public IPlaceArrivalsMonitor Monitor => _suggestion ? Suggestion : Board;
+        public BoardCenter Center { get; set; } = new NearYou();
+        public SuggestionContext Context { get; set; }
         public GeoPoint Point { get; set; } = new(43, -88);
         public string[] Ids { get; set; } = ["1"];
+        public bool Outdated { get; set; }
         public int Locations { get; private set; }
         public int Discoveries { get; private set; }
         public int Walks { get; private set; }
         public Func<bool, Task<PlaceLocation>> Locate { get; set; }
-        public Func<PlaceContext, PlaceLocation, CancellationToken, Task<PlaceStops>> Discover { get; set; }
+        public Func<object, PlaceLocation, CancellationToken, Task<PlaceStops>> Discover { get; set; }
 
-        public void Configure() => Monitor.Configure(Context, DirectoryAt);
-
-        public PlaceStops Found(PlaceContext context, PlaceLocation location)
+        public void Configure()
         {
-            CommuteLeg? leg = context.Mode == FlyoutMode.Commute
-                ? CommutePlanner.Plan(context.Places, location.Point, Clock.GetLocalNow(),
-                    context.Places.FirstOrDefault(p => p.Id == context.DestinationId))
-                : null;
-            GeoPoint origin = leg?.Origin ?? location.Point ?? Point;
-            return new PlaceStops(origin, [.. Ids.Select(id => new NearbyStop(
-                new IndexedStop(id, "Fixture stop", 43, -88, [new StopRouteInfo("14", "14", null, "N", "North")]),
+            if (_suggestion)
+            {
+                Suggestion.Configure(Context);
+            }
+            else
+            {
+                Board.Configure(Center);
+            }
+        }
+
+        /// <summary>Shows both monitors, the board at stop "near" and the trip at stop "trip", and refreshes them.</summary>
+        public async Task ShowBothAsync()
+        {
+            Discover = (context, location, _) => Task.FromResult(Found(context, location, context is SuggestionContext ? ["trip"] : ["near"]));
+            Board.Configure(Center);
+            Suggestion.Configure(Context);
+            Board.IsForeground = true;
+            Suggestion.IsForeground = true;
+            await Board.RefreshAsync();
+            await Suggestion.RefreshAsync();
+        }
+
+        /// <summary>What discovery finds: for a trip suggestion, the leg from here; for a board, stops at its center.</summary>
+        public PlaceStops Found(object context, PlaceLocation location, string[]? ids = null)
+        {
+            ids ??= Ids;
+            CommuteLeg? leg = (context as SuggestionContext)?.Leg(location.Point, Clock.GetLocalNow());
+            GeoPoint origin = leg?.Origin ?? (context as BoardCenter)?.PointFrom(location.Point) ?? Point;
+            return new PlaceStops(origin, [.. ids.Select(id => new NearbyStop(
+                new IndexedStop(id, "Fixture stop", 43, -88, [new StopRouteInfo("14", "14", null, "0", "North")]),
                 100, WalkSeconds: 60 + GeoMath.DistanceMeters(new GeoPoint(43, -88), location.Point ?? origin)))],
                 new PlaceNotice("Fixture empty", string.Empty), leg,
-                leg is null ? null : new HashSet<RouteDirection> { new("14", "N") },
-                leg is null ? null : new Dictionary<string, double> { ["destination"] = 60 },
-                DirectoryAt);
+                leg is null ? null : ids.Select(id => new StopLine(id, "14", "0")).ToHashSet(),
+                leg is null ? null : ids.ToDictionary(id => new StopLine(id, "14", "0"), _ => new TripTiming(TimeSpan.FromMinutes(20), 0)));
+        }
+
+        private Task<PlaceLocation> CountedLocate(bool quick)
+        {
+            ++Locations;
+            return Locate(quick);
+        }
+
+        private Task<PlaceStops> CountedDiscover(object context, PlaceLocation location, CancellationToken cancellationToken)
+        {
+            ++Discoveries;
+            ++Walks;
+            return Discover(context, location, cancellationToken);
         }
     }
 }

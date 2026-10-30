@@ -15,10 +15,13 @@ using MapIcon = WinUIEx.Maps.MapIcon;
 
 namespace TrayTimes.Views;
 
-/// <summary>Map and route-color helpers shared by the flyout and the settings window.</summary>
+/// <summary>Map, route-color, and place-glyph helpers shared by the flyout and the settings window.</summary>
 internal static class MapHelpers
 {
-    public const string BusEmoji = "🚍"; // Oncoming bus, in color so it stands out on the basemap
+    public const string WalkGlyph = ""; // Walk
+    public const string BusGlyph = ""; // Bus
+    public const string BusEmoji ="🚍"; // Oncoming bus, in color so it stands out on the basemap
+    public const string SavedStopGlyph = ""; // FavoriteStarFill
     public const string StopGlyph = ""; // CircleFill
 
     private static readonly Color FallbackRouteColor = Color.FromArgb(255, 0, 90, 158);
@@ -57,6 +60,16 @@ internal static class MapHelpers
         return luminance > 0.179 ? Color.FromArgb(255, 0, 0, 0) : Color.FromArgb(255, 255, 255, 255);
     }
 
+    /// <summary>A favorite place's glyph, by its kind; with no place, wherever the rider is.</summary>
+    public static string PlaceGlyph(PlaceKind? kind) => kind switch
+    {
+        PlaceKind.Home => "", // HomeSolid
+        PlaceKind.Work => "", // Solid briefcase
+        PlaceKind.School => "", // Education
+        PlaceKind.Custom => "", // Pin
+        _ => "", // Location
+    };
+
     public static FontIcon CreateGlyph(string glyph, Color color, double size) => new()
     {
         Glyph = glyph,
@@ -71,6 +84,15 @@ internal static class MapHelpers
         FontSize = size,
         FontFamily = new FontFamily("Segoe UI Emoji"),
     };
+
+    public static FontIcon CreatePlaceIcon(PlaceKind? kind, double size) => CreateEmoji(kind switch
+    {
+        PlaceKind.Home => "🏠",
+        PlaceKind.Work => "💼",
+        PlaceKind.School => "🎓",
+        PlaceKind.Custom => "📌",
+        _ => "📍",
+    }, size);
 
     public static void UpdateVehicleArrow(MapIcon arrow, int heading, double mapHeading, bool selected, bool darkMap)
     {

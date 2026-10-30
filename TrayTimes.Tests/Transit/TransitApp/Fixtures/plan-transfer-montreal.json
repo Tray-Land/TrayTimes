@@ -1,0 +1,755 @@
+{
+  "results": [
+    {
+      "start_time": 1792377474,
+      "end_time": 1792380294,
+      "duration": 2820,
+      "legs": [
+        {
+          "leg_mode": "walk",
+          "start_time": 1792377474,
+          "end_time": 1792377600,
+          "duration": 126,
+          "distance": 42.784603713708115,
+          "polyline": "koxtGdev`MDD??LT??CF???{@"
+        },
+        {
+          "leg_mode": "transit",
+          "start_time": 1792377600,
+          "end_time": 1792378560,
+          "duration": 960,
+          "departures": [
+            {
+              "departure_time": 1792377600,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299981452",
+              "plan_details": {
+                "global_route_id": "STM:863",
+                "internal_itinerary_id": "3:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792378560,"departure_time":1792378560},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:104428","arrival_time":1792377600,"departure_time":1792377600},
+                  {"global_stop_id":"STM:116459","arrival_time":1792377660,"departure_time":1792377660},
+                  {"global_stop_id":"STM:104426","arrival_time":1792377780,"departure_time":1792377780},
+                  {"global_stop_id":"STM:116460","arrival_time":1792377840,"departure_time":1792377840},
+                  {"global_stop_id":"STM:104424","arrival_time":1792377960,"departure_time":1792377960},
+                  {"global_stop_id":"STM:116461","arrival_time":1792378020,"departure_time":1792378020},
+                  {"global_stop_id":"STM:116462","arrival_time":1792378140,"departure_time":1792378140},
+                  {"global_stop_id":"STM:116463","arrival_time":1792378200,"departure_time":1792378200},
+                  {"global_stop_id":"STM:116464","arrival_time":1792378320,"departure_time":1792378320},
+                  {"global_stop_id":"STM:104419","arrival_time":1792378440,"departure_time":1792378440},
+                  {"global_stop_id":"STM:104418","arrival_time":1792378560,"departure_time":1792378560}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792378200,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299981480",
+              "plan_details": {
+                "global_route_id": "STM:863",
+                "internal_itinerary_id": "3:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792379160,"departure_time":1792379160},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:104428","arrival_time":1792378200,"departure_time":1792378200},
+                  {"global_stop_id":"STM:116459","arrival_time":1792378260,"departure_time":1792378260},
+                  {"global_stop_id":"STM:104426","arrival_time":1792378380,"departure_time":1792378380},
+                  {"global_stop_id":"STM:116460","arrival_time":1792378440,"departure_time":1792378440},
+                  {"global_stop_id":"STM:104424","arrival_time":1792378560,"departure_time":1792378560},
+                  {"global_stop_id":"STM:116461","arrival_time":1792378620,"departure_time":1792378620},
+                  {"global_stop_id":"STM:116462","arrival_time":1792378740,"departure_time":1792378740},
+                  {"global_stop_id":"STM:116463","arrival_time":1792378800,"departure_time":1792378800},
+                  {"global_stop_id":"STM:116464","arrival_time":1792378920,"departure_time":1792378920},
+                  {"global_stop_id":"STM:104419","arrival_time":1792379040,"departure_time":1792379040},
+                  {"global_stop_id":"STM:104418","arrival_time":1792379160,"departure_time":1792379160}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792378800,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299981548",
+              "plan_details": {
+                "global_route_id": "STM:863",
+                "internal_itinerary_id": "3:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792379760,"departure_time":1792379760},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:104428","arrival_time":1792378800,"departure_time":1792378800},
+                  {"global_stop_id":"STM:116459","arrival_time":1792378860,"departure_time":1792378860},
+                  {"global_stop_id":"STM:104426","arrival_time":1792378980,"departure_time":1792378980},
+                  {"global_stop_id":"STM:116460","arrival_time":1792379040,"departure_time":1792379040},
+                  {"global_stop_id":"STM:104424","arrival_time":1792379160,"departure_time":1792379160},
+                  {"global_stop_id":"STM:116461","arrival_time":1792379220,"departure_time":1792379220},
+                  {"global_stop_id":"STM:116462","arrival_time":1792379340,"departure_time":1792379340},
+                  {"global_stop_id":"STM:116463","arrival_time":1792379400,"departure_time":1792379400},
+                  {"global_stop_id":"STM:116464","arrival_time":1792379520,"departure_time":1792379520},
+                  {"global_stop_id":"STM:104419","arrival_time":1792379640,"departure_time":1792379640},
+                  {"global_stop_id":"STM:104418","arrival_time":1792379760,"departure_time":1792379760}
+                ]
+              }
+            }
+          ],
+          "routes": [
+            {
+              "global_route_id": "STM:863",
+              "route_short_name": "2",
+              "route_long_name": "Ligne Orange",
+              "route_color": "f37d00",
+              "mode_name": "Métro",
+              "route_display_short_name": {
+                "elements": [
+                  "stm-metro",
+                  "",
+                  "stm-metro-2"
+                ]
+              },
+              "itineraries": [
+                {
+                  "direction_id": 1,
+                  "direction_headsign": "Montmorency",
+                  "headsign": "Montmorency",
+                  "shape": "{nxtGldv`Mze@u~@hCcGdEmIrRy[vDyEdC}BbCwC|BwDz`@ku@fD_It@gBl@yBToATyB?aCQkAYgB[uAu@gBeGkJgAuBg@oAUyAWeFLoBVqBPy@pd@ssA^u@`@Yb@IfADl\\pIt@?l@SXg@n|@_mCPyA?UQmB_DoMiA_D{DmHkJqL_AkBy@}B[eBMcBBuCL}BZaCj@gBbDqHf@kBP}ATmF?cDGg@kEgRuA}Cg@y@qAiAeEaC{CsBqB_C}AoBiEuH}CcH_AmAgAcAaBu@oCg@cBKqGJgBC_AQcAUmCcAqIiE_B{@}CwCoe@kl@yVaXuz@}p@k@[w@Ck@P_@b@Yb@WbAyd@drAkCzFyj@~}Ac@z@}@`Ac@z@wQfh@c@dBo@rD_@nCuAdGgA|Doj@l~AU|@yt@d|Duw@deEi@fC_Yfo@i@~Aa@|BQzBIjDMnuBHzF^hGrChYF~ACt_@XzEVdBj@jBrGvP",
+                  "plan_details": {
+                    "internal_itinerary_id": "3:65535:false",
+                    "start_stop_offset": 0,
+                    "end_stop_offset": 10,
+                    "plan_shape": "{nxtGldv`Mze@u~@hCcGdEmIrRy[vDyEdC}BbCwC|BwDz`@ku@fD_It@gBl@yBToATyB?aCQkAYgB[uAu@gBeGkJgAuBg@oAUyAWeFLoBVqBPy@pd@ssA^u@`@Yb@IfADl\\pIt@?l@SXg@n|@_mCPyA?UQmB_DoMiA_D{DmHkJqL_AkBy@}B[eBMcBBuCL}BZaCj@gBbDqHf@kBP}ATmF?cDGg@kEgRuA}Cg@y@qAiAeEaC{CsBqB_C}AoBoC}E"
+                  },
+                  "stops": [
+                    {"global_stop_id":"STM:104428","stop_name":"Côte-Vertu","stop_lat":45.514251444364405,"stop_lon":-73.6827539994694},
+                    {"global_stop_id":"STM:116459","stop_name":"Du Collège","stop_lat":45.509170284468865,"stop_lon":-73.67470508246674},
+                    {"global_stop_id":"STM:104426","stop_name":"De la Savane","stop_lat":45.50008714908039,"stop_lon":-73.6615839987719},
+                    {"global_stop_id":"STM:116460","stop_name":"Namur","stop_lat":45.494691227067435,"stop_lon":-73.65277965268743},
+                    {"global_stop_id":"STM:104424","stop_name":"Plamondon","stop_lat":45.49465525425401,"stop_lon":-73.63826462247256},
+                    {"global_stop_id":"STM:116461","stop_name":"Côte-Sainte-Catherine","stop_lat":45.4923440009918,"stop_lon":-73.63310252374684},
+                    {"global_stop_id":"STM:116462","stop_name":"Snowdon","stop_lat":45.48563507128902,"stop_lon":-73.6281023026815},
+                    {"global_stop_id":"STM:116463","stop_name":"Villa-Maria","stop_lat":45.4797535162949,"stop_lon":-73.61975660996812},
+                    {"global_stop_id":"STM:116464","stop_name":"Vendôme","stop_lat":45.473907934114195,"stop_lon":-73.6037577011997},
+                    {"global_stop_id":"STM:104419","stop_name":"Place-Saint-Henri","stop_lat":45.47731635818571,"stop_lon":-73.58662564880856},
+                    {"global_stop_id":"STM:104418","stop_name":"Lionel-Groulx","stop_lat":45.48250543652151,"stop_lon":-73.58017752200308}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "leg_mode": "walk",
+          "start_time": 1792378560,
+          "end_time": 1792378620,
+          "duration": 60,
+          "distance": 19.338986552682858,
+          "polyline": "chrtGrbb`M[^"
+        },
+        {
+          "leg_mode": "transit",
+          "start_time": 1792379100,
+          "end_time": 1792380180,
+          "duration": 1080,
+          "departures": [
+            {
+              "departure_time": 1792379100,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299980973",
+              "plan_details": {
+                "global_route_id": "STM:862",
+                "internal_itinerary_id": "0:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792380180,"departure_time":1792380180},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:104363","arrival_time":1792379100,"departure_time":1792379100},
+                  {"global_stop_id":"STM:116417","arrival_time":1792379220,"departure_time":1792379220},
+                  {"global_stop_id":"STM:104361","arrival_time":1792379340,"departure_time":1792379340},
+                  {"global_stop_id":"STM:104360","arrival_time":1792379400,"departure_time":1792379400},
+                  {"global_stop_id":"STM:116418","arrival_time":1792379460,"departure_time":1792379460},
+                  {"global_stop_id":"STM:104358","arrival_time":1792379520,"departure_time":1792379520},
+                  {"global_stop_id":"STM:116419","arrival_time":1792379580,"departure_time":1792379580},
+                  {"global_stop_id":"STM:106205","arrival_time":1792379700,"departure_time":1792379700},
+                  {"global_stop_id":"STM:116420","arrival_time":1792379760,"departure_time":1792379760},
+                  {"global_stop_id":"STM:116421","arrival_time":1792379820,"departure_time":1792379820},
+                  {"global_stop_id":"STM:116422","arrival_time":1792379940,"departure_time":1792379940},
+                  {"global_stop_id":"STM:104352","arrival_time":1792380000,"departure_time":1792380000},
+                  {"global_stop_id":"STM:116423","arrival_time":1792380060,"departure_time":1792380060},
+                  {"global_stop_id":"STM:116424","arrival_time":1792380180,"departure_time":1792380180}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792379700,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299981029",
+              "plan_details": {
+                "global_route_id": "STM:862",
+                "internal_itinerary_id": "0:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792380720,"departure_time":1792380720},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:104363","arrival_time":1792379700,"departure_time":1792379700},
+                  {"global_stop_id":"STM:116417","arrival_time":1792379820,"departure_time":1792379820},
+                  {"global_stop_id":"STM:104361","arrival_time":1792379880,"departure_time":1792379880},
+                  {"global_stop_id":"STM:104360","arrival_time":1792380000,"departure_time":1792380000},
+                  {"global_stop_id":"STM:116418","arrival_time":1792380060,"departure_time":1792380060},
+                  {"global_stop_id":"STM:104358","arrival_time":1792380120,"departure_time":1792380120},
+                  {"global_stop_id":"STM:116419","arrival_time":1792380180,"departure_time":1792380180},
+                  {"global_stop_id":"STM:106205","arrival_time":1792380240,"departure_time":1792380240},
+                  {"global_stop_id":"STM:116420","arrival_time":1792380300,"departure_time":1792380300},
+                  {"global_stop_id":"STM:116421","arrival_time":1792380360,"departure_time":1792380360},
+                  {"global_stop_id":"STM:116422","arrival_time":1792380480,"departure_time":1792380480},
+                  {"global_stop_id":"STM:104352","arrival_time":1792380600,"departure_time":1792380600},
+                  {"global_stop_id":"STM:116423","arrival_time":1792380660,"departure_time":1792380660},
+                  {"global_stop_id":"STM:116424","arrival_time":1792380720,"departure_time":1792380720}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792380300,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299980277",
+              "plan_details": {
+                "global_route_id": "STM:862",
+                "internal_itinerary_id": "0:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792381320,"departure_time":1792381320},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:104363","arrival_time":1792380300,"departure_time":1792380300},
+                  {"global_stop_id":"STM:116417","arrival_time":1792380420,"departure_time":1792380420},
+                  {"global_stop_id":"STM:104361","arrival_time":1792380480,"departure_time":1792380480},
+                  {"global_stop_id":"STM:104360","arrival_time":1792380600,"departure_time":1792380600},
+                  {"global_stop_id":"STM:116418","arrival_time":1792380660,"departure_time":1792380660},
+                  {"global_stop_id":"STM:104358","arrival_time":1792380720,"departure_time":1792380720},
+                  {"global_stop_id":"STM:116419","arrival_time":1792380780,"departure_time":1792380780},
+                  {"global_stop_id":"STM:106205","arrival_time":1792380840,"departure_time":1792380840},
+                  {"global_stop_id":"STM:116420","arrival_time":1792380900,"departure_time":1792380900},
+                  {"global_stop_id":"STM:116421","arrival_time":1792380960,"departure_time":1792380960},
+                  {"global_stop_id":"STM:116422","arrival_time":1792381080,"departure_time":1792381080},
+                  {"global_stop_id":"STM:104352","arrival_time":1792381200,"departure_time":1792381200},
+                  {"global_stop_id":"STM:116423","arrival_time":1792381260,"departure_time":1792381260},
+                  {"global_stop_id":"STM:116424","arrival_time":1792381320,"departure_time":1792381320}
+                ]
+              }
+            }
+          ],
+          "routes": [
+            {
+              "global_route_id": "STM:862",
+              "route_short_name": "1",
+              "route_long_name": "Ligne Verte",
+              "route_color": "00983b",
+              "mode_name": "Métro",
+              "route_display_short_name": {
+                "elements": [
+                  "stm-metro",
+                  "",
+                  "stm-metro-1"
+                ]
+              },
+              "itineraries": [
+                {
+                  "direction_id": 1,
+                  "direction_headsign": "Honoré-Beaugrand",
+                  "headsign": "Honoré-Beaugrand",
+                  "shape": "sgktG|rf`MaEkJaAyAiAkAkA{@wCgBe@o@g@{@aAoCgAmEQkA}CsYmAiIgHg[eDoLqAgDcAyAkByB_Ay@gA[gJa@{C_@w@Wy@s@c@q@_@gA]aCM_Cx@u_AQyC_@gB]m@i@g@aA]u@MgqA{FwBBcBL_BXmCbA_BnAu@p@oBbCsEtH_G`MkAnB}QzTg@|@q@jB]bBInA?lAHvAb@lA`A|B`IrNn@bBZjBPrBFtBKvBWlBYfAyDpN}@jBcA~AoArAyA~@yAj@_BVaBF_BM}Ac@yAu@uAgA}r@az@oDoCgaAo}@oFuCiEsBcBqBsAaCkBoEuAiCaXuT_Am@koA{iAkCaA}ASsBCkBLiA^_DrCcC|EqItX}@jB[h@uAnAwAp@gDz@{DTaFWm@UaBo@yDqBgFwEqCcAk_@kRiDgAuBSoBPsEzAoErB_Ef@mBGyAJ}AO{CuAw@QoAc@sDkB{GeEq[wPqCsC{BgB{FqCgCQuBVeEtAkCnAiDtBgK|IoD~BsC`AkDTaBOgBe@iZgQwsA{p@y@YkDq@o@MqUwL",
+                  "plan_details": {
+                    "internal_itinerary_id": "0:65535:false",
+                    "start_stop_offset": 7,
+                    "end_stop_offset": 20,
+                    "plan_shape": "_irtGpcb`MfEtHn@bBZjBPrBFtBKvBWlBYfAyDpN}@jBcA~AoArAyA~@yAj@_BVaBF_BM}Ac@yAu@uAgA}r@az@oDoCgaAo}@oFuCiEsBcBqBsAaCkBoEuAiCaXuT_Am@koA{iAkCaA}ASsBCkBLiA^_DrCcC|EqItX}@jB[h@uAnAwAp@gDz@{DTaFWm@UaBo@yDqBgFwEqCcAk_@kRiDgAuBSoBPsEzAoErB_Ef@mBGyAJ}AO{@_@"
+                  },
+                  "stops": [
+                    {"global_stop_id":"STM:104370","stop_name":"Angrignon","stop_lat":45.446469670678304,"stop_lon":-73.6031191837615},
+                    {"global_stop_id":"STM:104369","stop_name":"Monk","stop_lat":45.45115512962622,"stop_lon":-73.59324464647779},
+                    {"global_stop_id":"STM:116415","stop_name":"Jolicoeur","stop_lat":45.45702769141699,"stop_lon":-73.581949183064},
+                    {"global_stop_id":"STM:116416","stop_name":"Verdun","stop_lat":45.459419883509405,"stop_lon":-73.5722724962541},
+                    {"global_stop_id":"STM:104366","stop_name":"De l'Église","stop_lat":45.46189301443201,"stop_lon":-73.56707442471495},
+                    {"global_stop_id":"STM:104365","stop_name":"LaSalle","stop_lat":45.47106608185403,"stop_lon":-73.566265036413},
+                    {"global_stop_id":"STM:104364","stop_name":"Charlevoix","stop_lat":45.47846748821514,"stop_lon":-73.56933171875704},
+                    {"global_stop_id":"STM:104363","stop_name":"Lionel-Groulx","stop_lat":45.48250543652151,"stop_lon":-73.58017752200308},
+                    {"global_stop_id":"STM:116417","stop_name":"Atwater","stop_lat":45.489798924442354,"stop_lon":-73.58607706340392},
+                    {"global_stop_id":"STM:104361","stop_name":"Guy-Concordia","stop_lat":45.495572560996216,"stop_lon":-73.57931417448101},
+                    {"global_stop_id":"STM:104360","stop_name":"Peel","stop_lat":45.50087855097562,"stop_lon":-73.57471864756664},
+                    {"global_stop_id":"STM:116418","stop_name":"McGill","stop_lat":45.504098117776685,"stop_lon":-73.57166095842597},
+                    {"global_stop_id":"STM:104358","stop_name":"Place-des-Arts","stop_lat":45.50821700491325,"stop_lon":-73.56843239842155},
+                    {"global_stop_id":"STM:116419","stop_name":"Saint-Laurent","stop_lat":45.51107684358011,"stop_lon":-73.56496102192654},
+                    {"global_stop_id":"STM:106205","stop_name":"Berri-UQAM","stop_lat":45.515465526817316,"stop_lon":-73.56103998526379},
+                    {"global_stop_id":"STM:116420","stop_name":"Beaudry","stop_lat":45.519485488716974,"stop_lon":-73.5573078058715},
+                    {"global_stop_id":"STM:116421","stop_name":"Papineau","stop_lat":45.52411698844476,"stop_lon":-73.55296408865107},
+                    {"global_stop_id":"STM:116422","stop_name":"Frontenac","stop_lat":45.53352387915402,"stop_lon":-73.55221765277261},
+                    {"global_stop_id":"STM:104352","stop_name":"Préfontaine","stop_lat":45.54171668741036,"stop_lon":-73.55419615751069},
+                    {"global_stop_id":"STM:116423","stop_name":"Joliette","stop_lat":45.54684281332266,"stop_lon":-73.55141725767402},
+                    {"global_stop_id":"STM:116424","stop_name":"Pie-IX","stop_lat":45.55371362068583,"stop_lon":-73.55170504018137}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "leg_mode": "walk",
+          "start_time": 1792380180,
+          "end_time": 1792380294,
+          "duration": 114,
+          "distance": 63.256325018392204,
+          "polyline": "ue`uGrq|_Mi@J?A@A??@D??LG??LF??BK??D_@??@E"
+        }
+      ]
+    },
+    {
+      "start_time": 1792378660,
+      "end_time": 1792381434,
+      "duration": 2774,
+      "legs": [
+        {
+          "leg_mode": "walk",
+          "start_time": 1792378660,
+          "end_time": 1792378790,
+          "duration": 130,
+          "distance": 154.13428236841875,
+          "polyline": "koxtGdev`MII??KM??FM??NW??DE??i@w@??CE??GK??EE??EI??S[??IK??GK??m@{@"
+        },
+        {
+          "leg_mode": "transit",
+          "start_time": 1792378790,
+          "end_time": 1792378910,
+          "duration": 120,
+          "departures": [
+            {
+              "departure_time": 1792378790,
+              "is_cancelled": false,
+              "is_real_time": true,
+              "rt_trip_id": "300234918",
+              "plan_details": {
+                "global_route_id": "STM:980",
+                "internal_itinerary_id": "287:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792378910,"departure_time":1792378910},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:88345","arrival_time":1792378790,"departure_time":1792378790},
+                  {"global_stop_id":"STM:88346","arrival_time":1792378790,"departure_time":1792378790},
+                  {"global_stop_id":"STM:88347","arrival_time":1792378850,"departure_time":1792378850},
+                  {"global_stop_id":"STM:88348","arrival_time":1792378850,"departure_time":1792378850},
+                  {"global_stop_id":"STM:88349","arrival_time":1792378910,"departure_time":1792378910}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792380589,
+              "is_cancelled": false,
+              "is_real_time": true,
+              "rt_trip_id": "300234882",
+              "plan_details": {
+                "global_route_id": "STM:980",
+                "internal_itinerary_id": "287:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792380709,"departure_time":1792380709},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:88345","arrival_time":1792380589,"departure_time":1792380589},
+                  {"global_stop_id":"STM:88346","arrival_time":1792380589,"departure_time":1792380589},
+                  {"global_stop_id":"STM:88347","arrival_time":1792380649,"departure_time":1792380649},
+                  {"global_stop_id":"STM:88348","arrival_time":1792380649,"departure_time":1792380649},
+                  {"global_stop_id":"STM:88349","arrival_time":1792380709,"departure_time":1792380709}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792380508,
+              "is_cancelled": false,
+              "is_real_time": true,
+              "rt_trip_id": "299919866",
+              "plan_details": {
+                "global_route_id": "STM:952",
+                "internal_itinerary_id": "222:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792380748,"departure_time":1792380748},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:99332","arrival_time":1792380508,"departure_time":1792380508},
+                  {"global_stop_id":"STM:99333","arrival_time":1792380568,"departure_time":1792380568},
+                  {"global_stop_id":"STM:99334","arrival_time":1792380628,"departure_time":1792380628},
+                  {"global_stop_id":"STM:99335","arrival_time":1792380688,"departure_time":1792380688},
+                  {"global_stop_id":"STM:99336","arrival_time":1792380748,"departure_time":1792380748}
+                ]
+              }
+            }
+          ],
+          "routes": [
+            {
+              "global_route_id": "STM:952",
+              "route_short_name": "121",
+              "route_long_name": "Sauvé / Côte-Vertu",
+              "route_color": "781b7d",
+              "mode_name": "Bus",
+              "route_display_short_name": {
+                "elements": [
+                  null,
+                  "121",
+                  null
+                ]
+              },
+              "itineraries": [
+                {
+                  "direction_id": 0,
+                  "direction_headsign": "Est",
+                  "headsign": "Est",
+                  "shape": "ciutGpm{`MkCvEoLuP{EsHdG}KfIqO?EkBkCwEgGmI_LoDwEgHaKuMsQ_H}IYEyAkBmAkBK]kBkCiJkMgB}By@oAwD}EkAeBu@_AoDaFuAeCsCkEySqY{GmJyByAoL{G{]gRgAg@_FcCcLiGeEwBgBc@qIuAa@CQA}Ca@yNmBgAYkBm@g@]kB{@k@UyFwCoB{@eBaCmBkAgA[aAk@aEgBcCqAmDyBMUUYeH}DwC}DkCcEqBkCc@Ss@k@_@QuAg@k@Eq@D_@M}BkAoMmGgCiAuKmFeCoAoCyAsGcDyPcIoGwCkCqAmEkBkA}@yEwDwE}D}@y@cBiAwBaBgNcLuGgF}FuEkBwA}AmAt@eC",
+                  "plan_details": {
+                    "internal_itinerary_id": "222:65535:false",
+                    "start_stop_offset": 14,
+                    "end_stop_offset": 18,
+                    "plan_shape": "}sxtG`}u`MuAeCsCkEySqY{GmJyByAyIcF"
+                  },
+                  "stops": [
+                    {"global_stop_id":"STM:99318","stop_name":"Beaulac / Thimens","stop_lat":45.497982739495335,"stop_lon":-73.70980555516103},
+                    {"global_stop_id":"STM:99319","stop_name":"Beaulac / Thimens","stop_lat":45.498540318103345,"stop_lon":-73.71068688908981},
+                    {"global_stop_id":"STM:99320","stop_name":"Thimens / Place Vertu","stop_lat":45.50059976167162,"stop_lon":-73.70823174457391},
+                    {"global_stop_id":"STM:99321","stop_name":"Thimens / Cavendish","stop_lat":45.50175089170105,"stop_lon":-73.7066579339868},
+                    {"global_stop_id":"STM:99322","stop_name":"Cavendish / Place Vertu","stop_lat":45.50033895877433,"stop_lon":-73.7040858778273},
+                    {"global_stop_id":"STM:99323","stop_name":"Côte-Vertu / Hocquart","stop_lat":45.50053680924814,"stop_lon":-73.69973316740351},
+                    {"global_stop_id":"STM:99324","stop_name":"Côte-Vertu / Hills","stop_lat":45.50207464702183,"stop_lon":-73.69781761508891},
+                    {"global_stop_id":"STM:99325","stop_name":"Côte-Vertu / No 2308","stop_lat":45.505006431315536,"stop_lon":-73.69412140851003},
+                    {"global_stop_id":"STM:99326","stop_name":"Côte-Vertu / Alexis-Nihon","stop_lat":45.50618454095503,"stop_lon":-73.6926285367531},
+                    {"global_stop_id":"STM:99327","stop_name":"Côte-Vertu / Marlatt","stop_lat":45.50826197093002,"stop_lon":-73.69009245340702},
+                    {"global_stop_id":"STM:99328","stop_name":"Côte-Vertu / Marcel-Laurin","stop_lat":45.50963793104332,"stop_lon":-73.68837475156623},
+                    {"global_stop_id":"STM:99329","stop_name":"Côte-Vertu / Leduc","stop_lat":45.510950938733146,"stop_lon":-73.68670201574221},
+                    {"global_stop_id":"STM:99330","stop_name":"Côte-Vertu / Cardinal","stop_lat":45.51265964737058,"stop_lon":-73.68455264014038},
+                    {"global_stop_id":"STM:99331","stop_name":"Station Côte-Vertu (Côte-Vertu / Décarie)","stop_lat":45.51401762107717,"stop_lon":-73.68283493829959},
+                    {"global_stop_id":"STM:99332","stop_name":"Côte-Vertu / Saint-Germain","stop_lat":45.51502485985293,"stop_lon":-73.6815758898299},
+                    {"global_stop_id":"STM:99333","stop_name":"Côte-Vertu / Sainte-Croix","stop_lat":45.51608605784881,"stop_lon":-73.67995711322601},
+                    {"global_stop_id":"STM:99334","stop_name":"Côte-Vertu / Dutrisac","stop_lat":45.51881999166871,"stop_lon":-73.67649472993438},
+                    {"global_stop_id":"STM:99335","stop_name":"Côte-Vertu / Montpellier","stop_lat":45.52076252359337,"stop_lon":-73.67400361260505},
+                    {"global_stop_id":"STM:99336","stop_name":"Côte-Vertu / Muir","stop_lat":45.523289613736104,"stop_lon":-73.67218698552736}
+                  ]
+                }
+              ]
+            },
+            {
+              "global_route_id": "STM:980",
+              "route_short_name": "171",
+              "route_long_name": "Henri-Bourassa",
+              "route_color": "009ee0",
+              "mode_name": "Bus",
+              "route_display_short_name": {
+                "elements": [
+                  null,
+                  "171",
+                  null
+                ]
+              },
+              "itineraries": [
+                {
+                  "direction_id": 0,
+                  "direction_headsign": "Est",
+                  "headsign": "Est",
+                  "shape": "_nxtGhlv`M\\QZ_@BIGMQYEGG?EFa@LiA^YN[c@bAsAZg@^m@BM?CaE{FcAkBsCkEySqY{GmJyByAoL{G{JiFC?CBuB~KsB`LoB~JqJdh@[z@MLY?YSgAoAc@U_@EeS}KmFsCgRcK{TyLoBeAmGyCqImFsB_AwNuH}FqCsAu@iG{CUMcAg@mAq@mN{FqC}AkGqCNs@bAb@",
+                  "plan_details": {
+                    "internal_itinerary_id": "287:65535:false",
+                    "start_stop_offset": 1,
+                    "end_stop_offset": 5,
+                    "plan_shape": "}sxtG~|u`MQWcAkBsCkEySqY{GmJyByAyIcF"
+                  },
+                  "stops": [
+                    {"global_stop_id":"STM:116986","stop_name":"Station Côte-Vertu","stop_lat":45.51408057350066,"stop_lon":-73.68408499356593},
+                    {"global_stop_id":"STM:88345","stop_name":"Côte-Vertu / Saint-Germain","stop_lat":45.51502485985293,"stop_lon":-73.6815758898299},
+                    {"global_stop_id":"STM:88346","stop_name":"Côte-Vertu / Sainte-Croix","stop_lat":45.51608605784881,"stop_lon":-73.67995711322601},
+                    {"global_stop_id":"STM:88347","stop_name":"Côte-Vertu / Dutrisac","stop_lat":45.51881999166871,"stop_lon":-73.67649472993438},
+                    {"global_stop_id":"STM:88348","stop_name":"Côte-Vertu / Montpellier","stop_lat":45.52076252359337,"stop_lon":-73.67400361260505},
+                    {"global_stop_id":"STM:88349","stop_name":"Côte-Vertu / Muir","stop_lat":45.523289613736104,"stop_lon":-73.67218698552736}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "leg_mode": "walk",
+          "start_time": 1792378910,
+          "end_time": 1792379170,
+          "duration": 260,
+          "distance": 232.80880048405876,
+          "polyline": "ogztGdbt`M_Ac@GG??CL??GV??EL??MC??MG??iAu@e@Y??CH??IG??ADC?w@pC"
+        },
+        {
+          "leg_mode": "transit",
+          "start_time": 1792379280,
+          "end_time": 1792379940,
+          "duration": 660,
+          "departures": [
+            {
+              "departure_time": 1792379280,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "ES-ChamplainV2-RDS-14A075.xml_1062",
+              "plan_details": {
+                "global_route_id": "REMQC:243136",
+                "internal_itinerary_id": "7:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792379940,"departure_time":1792379940},
+                "stop_schedule_items": [
+                  {"global_stop_id":"REMQC:591","arrival_time":1792379220,"departure_time":1792379280},
+                  {"global_stop_id":"REMQC:592","arrival_time":1792379340,"departure_time":1792379340},
+                  {"global_stop_id":"REMQC:593","arrival_time":1792379460,"departure_time":1792379520},
+                  {"global_stop_id":"REMQC:594","arrival_time":1792379580,"departure_time":1792379580},
+                  {"global_stop_id":"REMQC:595","arrival_time":1792379700,"departure_time":1792379760},
+                  {"global_stop_id":"REMQC:596","arrival_time":1792379940,"departure_time":1792379940}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792379700,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "ES-ChamplainV2-RDS-14A075.xml_3062",
+              "plan_details": {
+                "global_route_id": "REMQC:243136",
+                "internal_itinerary_id": "10:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792380360,"departure_time":1792380420},
+                "stop_schedule_items": [
+                  {"global_stop_id":"REMQC:591","arrival_time":1792379700,"departure_time":1792379700},
+                  {"global_stop_id":"REMQC:592","arrival_time":1792379820,"departure_time":1792379820},
+                  {"global_stop_id":"REMQC:593","arrival_time":1792379940,"departure_time":1792379940},
+                  {"global_stop_id":"REMQC:594","arrival_time":1792380000,"departure_time":1792380060},
+                  {"global_stop_id":"REMQC:595","arrival_time":1792380180,"departure_time":1792380180},
+                  {"global_stop_id":"REMQC:596","arrival_time":1792380360,"departure_time":1792380420}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792380180,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "ES-ChamplainV2-RDS-14A075.xml_1063",
+              "plan_details": {
+                "global_route_id": "REMQC:243136",
+                "internal_itinerary_id": "7:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792380840,"departure_time":1792380840},
+                "stop_schedule_items": [
+                  {"global_stop_id":"REMQC:591","arrival_time":1792380120,"departure_time":1792380180},
+                  {"global_stop_id":"REMQC:592","arrival_time":1792380240,"departure_time":1792380240},
+                  {"global_stop_id":"REMQC:593","arrival_time":1792380360,"departure_time":1792380420},
+                  {"global_stop_id":"REMQC:594","arrival_time":1792380480,"departure_time":1792380480},
+                  {"global_stop_id":"REMQC:595","arrival_time":1792380600,"departure_time":1792380660},
+                  {"global_stop_id":"REMQC:596","arrival_time":1792380840,"departure_time":1792380840}
+                ]
+              }
+            }
+          ],
+          "routes": [
+            {
+              "global_route_id": "REMQC:243136",
+              "route_short_name": "REM",
+              "route_long_name": "Brossard – Anse à l'Orme / Deux-Montagnes",
+              "route_color": "73a400",
+              "mode_name": "REM",
+              "route_display_short_name": {
+                "elements": [
+                  "rem-v4",
+                  "",
+                  null
+                ]
+              },
+              "itineraries": [
+                {
+                  "direction_id": 1,
+                  "direction_headsign": "Brossard",
+                  "headsign": "Gare Centrale",
+                  "shape": "gs~tGx_cbM|AkJfAsEhA_E|BiGpN{[hAgDfAcEp@oDvNibAb@}A`E}J`@u@p@cA~dAaiAbAaBhBgEfAwDd@yC\\}CH}AFoBKor@XiIPkBf@kCv@iD`@_A^cA|AsCnQqYzEyJdNqTx@_Bl@wBb@}BZ_CjKqrBr}@_{GToEHeGEcE{GqmAaBaN}AmIepCysK}A}J_@yDQiCUsQDeDf@_Ib@}D`|AgcIb@cD|{@ihJ^gBnKmY`BaG`EwK",
+                  "plan_details": {
+                    "internal_itinerary_id": "7:65535:false",
+                    "start_stop_offset": 8,
+                    "end_stop_offset": 13,
+                    "plan_shape": "aqztGjdt`MzdAorFb@cD|{@ihJ^gBxDgK"
+                  },
+                  "stops": [
+                    {"global_stop_id":"REMQC:583","stop_name":"Deux-Montagnes","stop_lat":45.545655710479814,"stop_lon":-73.91243141995093},
+                    {"global_stop_id":"REMQC:584","stop_name":"Grand-Moulin","stop_lat":45.53722907893625,"stop_lon":-73.88795192041881},
+                    {"global_stop_id":"REMQC:585","stop_name":"Sainte-Dorothée","stop_lat":45.52342451178643,"stop_lon":-73.8626540393814},
+                    {"global_stop_id":"REMQC:586","stop_name":"Île-Bigras","stop_lat":45.51980924403775,"stop_lon":-73.8529773525715},
+                    {"global_stop_id":"REMQC:587","stop_name":"Pierrefonds-Roxboro","stop_lat":45.50979081550036,"stop_lon":-73.81223814137367},
+                    {"global_stop_id":"REMQC:588","stop_name":"Sunnybrooke","stop_lat":45.50382832167604,"stop_lon":-73.78597798757727},
+                    {"global_stop_id":"REMQC:589","stop_name":"Bois-Franc","stop_lat":45.52198559924964,"stop_lon":-73.71249452296415},
+                    {"global_stop_id":"REMQC:590","stop_name":"Du Ruisseau","stop_lat":45.52890137262958,"stop_lon":-73.69027231747413},
+                    {"global_stop_id":"REMQC:591","stop_name":"Montpellier","stop_lat":45.52486342432322,"stop_lon":-73.67251074084814},
+                    {"global_stop_id":"REMQC:592","stop_name":"Côte-de-Liesse","stop_lat":45.52179674197919,"stop_lon":-73.66188976768596},
+                    {"global_stop_id":"REMQC:593","stop_name":"Ville-de-Mont-Royal","stop_lat":45.51650873840649,"stop_lon":-73.64356161924862},
+                    {"global_stop_id":"REMQC:594","stop_name":"Canora","stop_lat":45.51394567545034,"stop_lon":-73.63465834792724},
+                    {"global_stop_id":"REMQC:595","stop_name":"Édouard-Montpetit","stop_lat":45.510078598007716,"stop_lon":-73.61271493174121},
+                    {"global_stop_id":"REMQC:596","stop_name":"McGill","stop_lat":45.50265021203654,"stop_lon":-73.57241638750777}
+                  ]
+                },
+                {
+                  "direction_id": 1,
+                  "direction_headsign": "Brossard",
+                  "headsign": "Gare Centrale",
+                  "shape": "ujhtGfpbbM}GoQu@oC{FqPiE_QaEkTeFmTiG}]wAoFcNcd@}bAyhCkAsDuAeFu@}D_SwzAcB{IsAcEec@}fAu@_CgD_Ou@aCwCaHmAoDa@iBWgBGgB?oBFkBbBoPJsCCcBQkBYgBc@iBg@yAyeA{qCw@iB_DsEiA}Bgw@uuBgBkDoB}CmBaCqu@es@gAg@m@MqA?g@Fk@Tm@Vk@j@c@p@{HrNcAfAk@Xi@Rs@Fc@Cq@Ii@QaAq@e@o@a@q@wpCusK}A}J_@yDQiCUsQDeDf@_Ib@}D`|AgcIb@cD|{@ihJ^gBnKmY`BaG`EwK",
+                  "plan_details": {
+                    "internal_itinerary_id": "10:65535:false",
+                    "start_stop_offset": 6,
+                    "end_stop_offset": 11,
+                    "plan_shape": "aqztGjdt`MzdAorFb@cD|{@ihJ^gBxDgK"
+                  },
+                  "stops": [
+                    {"global_stop_id":"REMQC:654","stop_name":"Anse-À-l'Orme","stop_lat":45.43159491232925,"stop_lon":-73.9099043298082},
+                    {"global_stop_id":"REMQC:644","stop_name":"Kirkland","stop_lat":45.44025536716005,"stop_lon":-73.88556872152975},
+                    {"global_stop_id":"REMQC:645","stop_name":"Fairview-Pointe-Claire","stop_lat":45.459905516490565,"stop_lon":-73.83531470118241},
+                    {"global_stop_id":"REMQC:678","stop_name":"Des Sources","stop_lat":45.47708253489848,"stop_lon":-73.79108612708288},
+                    {"global_stop_id":"REMQC:589","stop_name":"Bois-Franc","stop_lat":45.52198559924964,"stop_lon":-73.71249452296415},
+                    {"global_stop_id":"REMQC:590","stop_name":"Du Ruisseau","stop_lat":45.52890137262958,"stop_lon":-73.69027231747413},
+                    {"global_stop_id":"REMQC:591","stop_name":"Montpellier","stop_lat":45.52486342432322,"stop_lon":-73.67251074084814},
+                    {"global_stop_id":"REMQC:592","stop_name":"Côte-de-Liesse","stop_lat":45.52179674197919,"stop_lon":-73.66188976768596},
+                    {"global_stop_id":"REMQC:593","stop_name":"Ville-de-Mont-Royal","stop_lat":45.51650873840649,"stop_lon":-73.64356161924862},
+                    {"global_stop_id":"REMQC:594","stop_name":"Canora","stop_lat":45.51394567545034,"stop_lon":-73.63465834792724},
+                    {"global_stop_id":"REMQC:595","stop_name":"Édouard-Montpetit","stop_lat":45.510078598007716,"stop_lon":-73.61271493174121},
+                    {"global_stop_id":"REMQC:596","stop_name":"McGill","stop_lat":45.50265021203654,"stop_lon":-73.57241638750777}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "leg_mode": "walk",
+          "start_time": 1792379940,
+          "end_time": 1792380265,
+          "duration": 325,
+          "distance": 268.1542675728781,
+          "polyline": "ifvtG|r``MZs@?AIG??s@lBCFEJEJ??GE??IA??kBqBA@wBuB"
+        },
+        {
+          "leg_mode": "transit",
+          "start_time": 1792380660,
+          "end_time": 1792381320,
+          "duration": 660,
+          "departures": [
+            {
+              "departure_time": 1792380660,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299980277",
+              "plan_details": {
+                "global_route_id": "STM:862",
+                "internal_itinerary_id": "0:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792381320,"departure_time":1792381320},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:116418","arrival_time":1792380660,"departure_time":1792380660},
+                  {"global_stop_id":"STM:104358","arrival_time":1792380720,"departure_time":1792380720},
+                  {"global_stop_id":"STM:116419","arrival_time":1792380780,"departure_time":1792380780},
+                  {"global_stop_id":"STM:106205","arrival_time":1792380840,"departure_time":1792380840},
+                  {"global_stop_id":"STM:116420","arrival_time":1792380900,"departure_time":1792380900},
+                  {"global_stop_id":"STM:116421","arrival_time":1792380960,"departure_time":1792380960},
+                  {"global_stop_id":"STM:116422","arrival_time":1792381080,"departure_time":1792381080},
+                  {"global_stop_id":"STM:104352","arrival_time":1792381200,"departure_time":1792381200},
+                  {"global_stop_id":"STM:116423","arrival_time":1792381260,"departure_time":1792381260},
+                  {"global_stop_id":"STM:116424","arrival_time":1792381320,"departure_time":1792381320}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792381260,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299980375",
+              "plan_details": {
+                "global_route_id": "STM:862",
+                "internal_itinerary_id": "0:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792381920,"departure_time":1792381920},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:116418","arrival_time":1792381260,"departure_time":1792381260},
+                  {"global_stop_id":"STM:104358","arrival_time":1792381320,"departure_time":1792381320},
+                  {"global_stop_id":"STM:116419","arrival_time":1792381380,"departure_time":1792381380},
+                  {"global_stop_id":"STM:106205","arrival_time":1792381440,"departure_time":1792381440},
+                  {"global_stop_id":"STM:116420","arrival_time":1792381500,"departure_time":1792381500},
+                  {"global_stop_id":"STM:116421","arrival_time":1792381560,"departure_time":1792381560},
+                  {"global_stop_id":"STM:116422","arrival_time":1792381680,"departure_time":1792381680},
+                  {"global_stop_id":"STM:104352","arrival_time":1792381800,"departure_time":1792381800},
+                  {"global_stop_id":"STM:116423","arrival_time":1792381860,"departure_time":1792381860},
+                  {"global_stop_id":"STM:116424","arrival_time":1792381920,"departure_time":1792381920}
+                ]
+              }
+            },
+            {
+              "departure_time": 1792381860,
+              "is_cancelled": false,
+              "is_real_time": false,
+              "rt_trip_id": "299980415",
+              "plan_details": {
+                "global_route_id": "STM:862",
+                "internal_itinerary_id": "0:65535:false",
+                "arrival_schedule_item": {"arrival_time":1792382520,"departure_time":1792382520},
+                "stop_schedule_items": [
+                  {"global_stop_id":"STM:116418","arrival_time":1792381860,"departure_time":1792381860},
+                  {"global_stop_id":"STM:104358","arrival_time":1792381920,"departure_time":1792381920},
+                  {"global_stop_id":"STM:116419","arrival_time":1792381980,"departure_time":1792381980},
+                  {"global_stop_id":"STM:106205","arrival_time":1792382040,"departure_time":1792382040},
+                  {"global_stop_id":"STM:116420","arrival_time":1792382100,"departure_time":1792382100},
+                  {"global_stop_id":"STM:116421","arrival_time":1792382160,"departure_time":1792382160},
+                  {"global_stop_id":"STM:116422","arrival_time":1792382280,"departure_time":1792382280},
+                  {"global_stop_id":"STM:104352","arrival_time":1792382400,"departure_time":1792382400},
+                  {"global_stop_id":"STM:116423","arrival_time":1792382460,"departure_time":1792382460},
+                  {"global_stop_id":"STM:116424","arrival_time":1792382520,"departure_time":1792382520}
+                ]
+              }
+            }
+          ],
+          "routes": [
+            {
+              "global_route_id": "STM:862",
+              "route_short_name": "1",
+              "route_long_name": "Ligne Verte",
+              "route_color": "00983b",
+              "mode_name": "Métro",
+              "route_display_short_name": {
+                "elements": [
+                  "stm-metro",
+                  "",
+                  "stm-metro-1"
+                ]
+              },
+              "itineraries": [
+                {
+                  "direction_id": 1,
+                  "direction_headsign": "Honoré-Beaugrand",
+                  "headsign": "Honoré-Beaugrand",
+                  "shape": "sgktG|rf`MaEkJaAyAiAkAkA{@wCgBe@o@g@{@aAoCgAmEQkA}CsYmAiIgHg[eDoLqAgDcAyAkByB_Ay@gA[gJa@{C_@w@Wy@s@c@q@_@gA]aCM_Cx@u_AQyC_@gB]m@i@g@aA]u@MgqA{FwBBcBL_BXmCbA_BnAu@p@oBbCsEtH_G`MkAnB}QzTg@|@q@jB]bBInA?lAHvAb@lA`A|B`IrNn@bBZjBPrBFtBKvBWlBYfAyDpN}@jBcA~AoArAyA~@yAj@_BVaBF_BM}Ac@yAu@uAgA}r@az@oDoCgaAo}@oFuCiEsBcBqBsAaCkBoEuAiCaXuT_Am@koA{iAkCaA}ASsBCkBLiA^_DrCcC|EqItX}@jB[h@uAnAwAp@gDz@{DTaFWm@UaBo@yDqBgFwEqCcAk_@kRiDgAuBSoBPsEzAoErB_Ef@mBGyAJ}AO{CuAw@QoAc@sDkB{GeEq[wPqCsC{BgB{FqCgCQuBVeEtAkCnAiDtBgK|IoD~BsC`AkDTaBOgBe@iZgQwsA{p@y@YkDq@o@MqUwL",
+                  "plan_details": {
+                    "internal_itinerary_id": "0:65535:false",
+                    "start_stop_offset": 11,
+                    "end_stop_offset": 20,
+                    "plan_shape": "qovtG~m``McPcOoFuCiEsBcBqBsAaCkBoEuAiCaXuT_Am@koA{iAkCaA}ASsBCkBLiA^_DrCcC|EqItX}@jB[h@uAnAwAp@gDz@{DTaFWm@UaBo@yDqBgFwEqCcAk_@kRiDgAuBSoBPsEzAoErB_Ef@mBGyAJ}AO{@_@"
+                  },
+                  "stops": [
+                    {"global_stop_id":"STM:104370","stop_name":"Angrignon","stop_lat":45.446469670678304,"stop_lon":-73.6031191837615},
+                    {"global_stop_id":"STM:104369","stop_name":"Monk","stop_lat":45.45115512962622,"stop_lon":-73.59324464647779},
+                    {"global_stop_id":"STM:116415","stop_name":"Jolicoeur","stop_lat":45.45702769141699,"stop_lon":-73.581949183064},
+                    {"global_stop_id":"STM:116416","stop_name":"Verdun","stop_lat":45.459419883509405,"stop_lon":-73.5722724962541},
+                    {"global_stop_id":"STM:104366","stop_name":"De l'Église","stop_lat":45.46189301443201,"stop_lon":-73.56707442471495},
+                    {"global_stop_id":"STM:104365","stop_name":"LaSalle","stop_lat":45.47106608185403,"stop_lon":-73.566265036413},
+                    {"global_stop_id":"STM:104364","stop_name":"Charlevoix","stop_lat":45.47846748821514,"stop_lon":-73.56933171875704},
+                    {"global_stop_id":"STM:104363","stop_name":"Lionel-Groulx","stop_lat":45.48250543652151,"stop_lon":-73.58017752200308},
+                    {"global_stop_id":"STM:116417","stop_name":"Atwater","stop_lat":45.489798924442354,"stop_lon":-73.58607706340392},
+                    {"global_stop_id":"STM:104361","stop_name":"Guy-Concordia","stop_lat":45.495572560996216,"stop_lon":-73.57931417448101},
+                    {"global_stop_id":"STM:104360","stop_name":"Peel","stop_lat":45.50087855097562,"stop_lon":-73.57471864756664},
+                    {"global_stop_id":"STM:116418","stop_name":"McGill","stop_lat":45.504098117776685,"stop_lon":-73.57166095842597},
+                    {"global_stop_id":"STM:104358","stop_name":"Place-des-Arts","stop_lat":45.50821700491325,"stop_lon":-73.56843239842155},
+                    {"global_stop_id":"STM:116419","stop_name":"Saint-Laurent","stop_lat":45.51107684358011,"stop_lon":-73.56496102192654},
+                    {"global_stop_id":"STM:106205","stop_name":"Berri-UQAM","stop_lat":45.515465526817316,"stop_lon":-73.56103998526379},
+                    {"global_stop_id":"STM:116420","stop_name":"Beaudry","stop_lat":45.519485488716974,"stop_lon":-73.5573078058715},
+                    {"global_stop_id":"STM:116421","stop_name":"Papineau","stop_lat":45.52411698844476,"stop_lon":-73.55296408865107},
+                    {"global_stop_id":"STM:116422","stop_name":"Frontenac","stop_lat":45.53352387915402,"stop_lon":-73.55221765277261},
+                    {"global_stop_id":"STM:104352","stop_name":"Préfontaine","stop_lat":45.54171668741036,"stop_lon":-73.55419615751069},
+                    {"global_stop_id":"STM:116423","stop_name":"Joliette","stop_lat":45.54684281332266,"stop_lon":-73.55141725767402},
+                    {"global_stop_id":"STM:116424","stop_name":"Pie-IX","stop_lat":45.55371362068583,"stop_lon":-73.55170504018137}
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "leg_mode": "walk",
+          "start_time": 1792381320,
+          "end_time": 1792381434,
+          "duration": 114,
+          "distance": 63.256325018392204,
+          "polyline": "ue`uGrq|_Mi@J?A@A??@D??LG??LF??BK??D_@??@E"
+        }
+      ]
+    }
+  ]
+}

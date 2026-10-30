@@ -2,15 +2,15 @@ using System.Globalization;
 
 namespace TrayTimes.Transit;
 
-public enum TransitEndpoint { Routes, Directions, Stops, Predictions, Vehicles, Patterns }
+public enum TransitEndpoint { Departures, NearbyRoutes, Plan, SearchStops, Networks, Routes, RouteDetails, Vehicles }
 
-public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings, StopDirectory }
+public enum TransitConsumer { Unspecified, Favorites, Commute, Nearby, Tracking, Settings, Trip, ActiveTrip }
 
 public enum TransitTrigger
 {
-    Unspecified, Timer, FlyoutOpened, ModeChanged, ManualRefresh, StopsChanged, PlacesChanged,
-    DestinationChanged, TimetableLoaded, RefinedLocation, Retry, FavoritesLoading, FavoritesResult,
-    PlaceResult, PlaceCompleted, Metadata, PickerSelection, DirectoryBuild,
+    Unspecified, Timer, FlyoutOpened, CenterChanged, ManualRefresh, StopsChanged, PlacesChanged,
+    DestinationChanged, RefinedLocation, Retry, FavoritesLoading, FavoritesResult,
+    PlaceResult, PlaceCompleted, Metadata, PickerSelection, VehicleSelected, TripTimeChanged,
 }
 
 public enum TransitRequestPhase { Started, Completed, CacheReuse, InFlightReuse, Suppressed }
@@ -36,7 +36,7 @@ public sealed record TransitRequestObservation(
 }
 
 /// <summary>
-/// Bounded, in-memory BusTime diagnostics. Scope labels flow across awaits without changing request
+/// Bounded, in-memory transit request diagnostics. Scope labels flow across awaits without changing request
 /// lifetime or scheduling. Physical attempts remain counted exclusively by EndpointCalled.
 /// </summary>
 public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
@@ -69,6 +69,20 @@ public sealed class TransitRequestDiagnostics(TimeProvider? timeProvider = null)
 
     /// <summary>The consumer and trigger labelling requests made from the current async flow.</summary>
     public static (TransitConsumer Consumer, TransitTrigger Trigger) CurrentScope => Context.Value;
+
+    /// <summary>Tracking and an active trip are urgent; anything the rider just did is manual; timers and the rest are automatic.</summary>
+    public static TransitPriority CurrentPriority => PriorityOf(Context.Value);
+
+    /// <summary>The priority of requests made under <paramref name="scope"/> (see <see cref="CurrentPriority"/>).</summary>
+    public static TransitPriority PriorityOf((TransitConsumer Consumer, TransitTrigger Trigger) scope) => scope switch
+    {
+        (TransitConsumer.Tracking or TransitConsumer.ActiveTrip, _) => TransitPriority.Urgent,
+        (_, TransitTrigger.ManualRefresh or TransitTrigger.Retry or TransitTrigger.FlyoutOpened
+            or TransitTrigger.CenterChanged or TransitTrigger.DestinationChanged or TransitTrigger.StopsChanged
+            or TransitTrigger.PlacesChanged or TransitTrigger.PickerSelection or TransitTrigger.VehicleSelected
+            or TransitTrigger.TripTimeChanged) => TransitPriority.Manual,
+        _ => TransitPriority.Automatic,
+    };
 
     /// <summary>Observe a request that was held back by a failure cooldown; this never raises EndpointCalled.</summary>
     public void RecordSuppressed(TransitEndpoint endpoint, int batchSize = 0)

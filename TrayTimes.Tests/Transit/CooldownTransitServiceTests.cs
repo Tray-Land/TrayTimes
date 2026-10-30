@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using TrayTimes.Transit;
-using TrayTimes.Transit.BusTime;
+using TrayTimes.Transit.TransitApp;
 
 namespace TrayTimes.Tests.Transit;
 
@@ -9,12 +9,12 @@ namespace TrayTimes.Tests.Transit;
 public sealed class CooldownTransitServiceTests
 {
     [TestMethod]
-    public async Task GetRoutesAsync_AutomaticRequestAfterFailure_IsSuppressedWithoutAnHttpAttempt()
+    public async Task GetDeparturesAsync_AutomaticRequestAfterFailure_IsSuppressedWithoutAnHttpAttempt()
     {
         // Arrange
         Fixture f = new();
         f.Fail();
-        await Assert.ThrowsExactlyAsync<HttpRequestException>(() => f.Service.GetRoutesAsync());
+        await Assert.ThrowsExactlyAsync<HttpRequestException>(() => f.Service.GetDeparturesAsync(["1"]));
 
         // Act
         Exception? refusal = await f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.Timer);
@@ -29,7 +29,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_ConsecutiveFailures_DoubleTheHoldOffUpToTheCap()
+    public async Task GetDeparturesAsync_ConsecutiveFailures_DoubleTheHoldOffUpToTheCap()
     {
         // Arrange
         Fixture f = new(new CooldownPolicy { FailureInitialDelay = TimeSpan.FromSeconds(15), FailureMaximumDelay = TimeSpan.FromSeconds(40) });
@@ -50,7 +50,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_SuccessAfterFailure_ClearsTheHoldOff()
+    public async Task GetDeparturesAsync_SuccessAfterFailure_ClearsTheHoldOff()
     {
         // Arrange
         Fixture f = new();
@@ -72,7 +72,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_ParallelRequestsFailingTogether_CountAsOneOutage()
+    public async Task GetDeparturesAsync_ParallelRequestsFailingTogether_CountAsOneOutage()
     {
         // Arrange
         Fixture f = new();
@@ -93,7 +93,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_FailureStartedBeforeALaterSuccess_IsIgnored()
+    public async Task GetDeparturesAsync_FailureStartedBeforeALaterSuccess_IsIgnored()
     {
         // Arrange
         Fixture f = new();
@@ -101,7 +101,7 @@ public sealed class CooldownTransitServiceTests
         f.Handler.RespondAsync = (_, _) => slow.Task;
         Task<Exception?> slowCall = f.TryCallAsync();
         f.Clock.Advance(TimeSpan.FromSeconds(1));
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.EmptyBody));
+        f.Succeed();
         Assert.IsNull(await f.TryCallAsync());
         f.Clock.Advance(TimeSpan.FromSeconds(1));
 
@@ -114,7 +114,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_ManualRetryAfterFailure_WaitsForMinimumSpacingThenBypassesHoldOff()
+    public async Task GetDeparturesAsync_ManualRetryAfterFailure_WaitsForMinimumSpacingThenBypassesHoldOff()
     {
         // Arrange
         Fixture f = new();
@@ -133,7 +133,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_TrackingRequestDuringOrdinaryHoldOff_IsStillSent()
+    public async Task GetDeparturesAsync_TrackingRequestDuringOrdinaryHoldOff_IsStillSent()
     {
         // Arrange
         Fixture f = new();
@@ -150,7 +150,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_TooManyRequestsWithRetryAfter_HoldsEveryoneUntilTheWindowEnds()
+    public async Task GetDeparturesAsync_TooManyRequestsWithRetryAfter_HoldsEveryoneUntilTheWindowEnds()
     {
         // Arrange
         Fixture f = new();
@@ -170,7 +170,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_TooManyRequestsWithoutRetryAfter_UsesTheDefaultWait()
+    public async Task GetDeparturesAsync_TooManyRequestsWithoutRetryAfter_UsesTheDefaultWait()
     {
         // Arrange
         Fixture f = new();
@@ -186,7 +186,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_ExcessiveRetryAfter_IsBounded()
+    public async Task GetDeparturesAsync_ExcessiveRetryAfter_IsBounded()
     {
         // Arrange
         Fixture f = new();
@@ -202,31 +202,14 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_QuotaExhaustedMessage_HoldsRequestsForTheQuotaWait()
+    [DataRow(HttpStatusCode.Unauthorized)]
+    [DataRow(HttpStatusCode.Forbidden)]
+    public async Task GetDeparturesAsync_RejectedKey_PausesAutomaticAndTrackingRequestsButAllowsOneManualRetry(HttpStatusCode status)
     {
         // Arrange
         Fixture f = new();
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
-            """{"bustime-response":{"error":[{"msg":"Maximum number of requests exceeded"}]}}"""));
-        TransitApiException exhausted = await Assert.ThrowsExactlyAsync<TransitApiException>(() => f.Service.GetRoutesAsync());
-        f.Succeed();
-
-        // Act & Assert
-        Assert.AreEqual(TransitApiFailureKind.RateLimit, exhausted.Kind);
-        f.Clock.Advance(TimeSpan.FromMinutes(4));
-        Assert.IsInstanceOfType<TransitCooldownException>(await f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.ManualRefresh));
-        f.Clock.Advance(TimeSpan.FromMinutes(1));
-        Assert.IsNull(await f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.ManualRefresh));
-    }
-
-    [TestMethod]
-    public async Task GetRoutesAsync_RejectedKey_PausesAutomaticAndTrackingRequestsButAllowsOneManualRetry()
-    {
-        // Arrange
-        Fixture f = new();
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
-            """{"bustime-response":{"error":[{"msg":"Invalid API access key supplied"}]}}"""));
-        TransitApiException rejected = await Assert.ThrowsExactlyAsync<TransitApiException>(() => f.Service.GetRoutesAsync());
+        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("denied", status));
+        TransitApiException rejected = await Assert.ThrowsExactlyAsync<TransitApiException>(() => f.Service.GetDeparturesAsync(["1"]));
         Assert.AreEqual(TransitApiFailureKind.Authentication, rejected.Kind);
 
         // Act
@@ -243,7 +226,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_RejectedKeyThenSuccessfulManualRetry_ResumesAutomaticRequests()
+    public async Task GetDeparturesAsync_RejectedKeyThenSuccessfulManualRetry_ResumesAutomaticRequests()
     {
         // Arrange
         Fixture f = new();
@@ -263,13 +246,14 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_QueryLevelApiError_DoesNotStartAHoldOff()
+    [DataRow(HttpStatusCode.BadRequest)]
+    [DataRow(HttpStatusCode.NotFound)]
+    public async Task GetDeparturesAsync_QueryLevelError_DoesNotStartAHoldOff(HttpStatusCode status)
     {
         // Arrange
         Fixture f = new();
-        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(
-            """{"bustime-response":{"error":[{"msg":"Unknown route"}]}}"""));
-        await Assert.ThrowsExactlyAsync<TransitApiException>(() => f.Service.GetRoutesAsync());
+        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("""{"error":"Unknown stop"}""", status));
+        await Assert.ThrowsExactlyAsync<TransitApiException>(() => f.Service.GetDeparturesAsync(["1"]));
         f.Succeed();
 
         // Act
@@ -281,7 +265,7 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_CallerCancellation_IsNotAFailure()
+    public async Task GetDeparturesAsync_CallerCancellation_IsNotAFailure()
     {
         // Arrange
         Fixture f = new();
@@ -291,7 +275,7 @@ public sealed class CooldownTransitServiceTests
             await Task.Delay(Timeout.Infinite, token);
             return RequestTestHandler.Response(RequestTestHandler.EmptyBody);
         };
-        Task<IReadOnlyList<TransitRoute>> pending = f.Service.GetRoutesAsync(cancellation.Token);
+        Task<DepartureBoard> pending = f.Service.GetDeparturesAsync(["1"], cancellationToken: cancellation.Token);
 
         // Act
         await cancellation.CancelAsync();
@@ -303,12 +287,12 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_Timeout_CountsAsAFailure()
+    public async Task GetDeparturesAsync_Timeout_CountsAsAFailure()
     {
         // Arrange
         Fixture f = new();
         f.Handler.RespondAsync = (_, _) => throw new TaskCanceledException("timeout");
-        await Assert.ThrowsAsync<TaskCanceledException>(() => f.Service.GetRoutesAsync());
+        await Assert.ThrowsAsync<TaskCanceledException>(() => f.Service.GetDeparturesAsync(["1"]));
 
         // Act
         Exception? next = await f.TryCallAsync();
@@ -319,21 +303,80 @@ public sealed class CooldownTransitServiceTests
     }
 
     [TestMethod]
-    public async Task GetRoutesAsync_Suppressed_NeverReturnsEmptyData()
+    public async Task EveryEndpoint_Suppressed_NeverReturnsEmptyData()
     {
         // Arrange
         Fixture f = new();
         f.Fail();
         await f.TryCallAsync();
+        GeoPoint here = new(43, -88);
 
         // Act & Assert
-        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetArrivalsAsync(["1"]));
-        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetVehiclesAsync(["5501"]));
-        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetPatternsAsync("14"));
-        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetDirectionsAsync("14"));
-        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetStopsAsync("14", "N"));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetDeparturesAsync(["1"]));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetNearbyLinesAsync(here, 500));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.PlanTripAsync(here, here));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.SearchStopsAsync(here, "main"));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetRoutesNearAsync(here));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetRouteDetailsAsync("14"));
+        await Assert.ThrowsExactlyAsync<TransitCooldownException>(() => f.Service.GetVehiclesAsync("14"));
         Assert.AreEqual(1, f.Handler.Attempts);
         Assert.AreEqual(1, f.EndpointCalls);
+    }
+
+    [TestMethod]
+    public async Task GetDeparturesAsync_BudgetRefusesAutomaticRequest_SendsNothingAndStartsNoHoldOff()
+    {
+        // Arrange: today's share of the month is used.
+        Fixture f = new(usage: new TransitUsage(60, 60));
+        f.Succeed();
+
+        // Act
+        Exception? automatic = await f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.Timer);
+        Exception? manual = await f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.ManualRefresh);
+
+        // Assert
+        Assert.AreEqual(TransitApiFailureKind.Budget, ((TransitApiException)automatic!).Kind);
+        Assert.IsNull(manual);
+        Assert.AreEqual(1, f.Handler.Attempts);
+        Assert.AreEqual(1, f.Inner.Diagnostics.Snapshot.Count(o => o.Phase == TransitRequestPhase.Suppressed));
+    }
+
+    [TestMethod]
+    public async Task GetRoutesNearAsync_TwoPhysicalRequests_TakeTwoBudgetSlots()
+    {
+        // Arrange: three of five minute slots are left after this.
+        Fixture f = new(usage: new TransitUsage(0, 0));
+        f.Handler.RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response("""{"networks":[]}"""));
+        using (TransitRequestDiagnostics.BeginScope(TransitConsumer.Settings, TransitTrigger.PickerSelection))
+        {
+            await f.Service.GetRoutesNearAsync(new GeoPoint(43, -88));
+        }
+
+        // Act: automatic requests may use only three of the five slots.
+        f.Succeed();
+        Exception? first = await f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.Timer);
+        Task<Exception?> second = f.TryCallAsync(TransitConsumer.Favorites, TransitTrigger.Timer);
+
+        // Assert
+        Assert.IsNull(first);
+        Assert.IsFalse(second.IsCompleted);
+        f.Clock.Advance(TransitBudget.Window);
+        Assert.IsNull(await second.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [TestMethod]
+    public async Task GetDeparturesAsync_NoKeyConfigured_TakesNoBudgetSlot()
+    {
+        // Arrange
+        RequestTestHandler handler = new();
+        TransitBudget budget = new(() => new TransitUsage(0, 1500));
+        CooldownTransitService service = new(new TransitAppService(null, http: new HttpClient(handler)), budget: budget);
+
+        // Act
+        TransitApiException failure = await Assert.ThrowsExactlyAsync<TransitApiException>(() => service.GetDeparturesAsync(["1"]));
+
+        // Assert: the missing key is reported, not an exhausted budget.
+        Assert.AreEqual(TransitApiFailureKind.Authentication, failure.Kind);
     }
 
     [TestMethod]
@@ -343,7 +386,7 @@ public sealed class CooldownTransitServiceTests
         Fixture f = new();
 
         // Assert
-        Assert.AreEqual(f.Inner.AgencyName, f.Service.AgencyName);
+        Assert.AreEqual(f.Inner.ProviderName, f.Service.ProviderName);
         Assert.AreEqual(f.Inner.IsConfigured, f.Service.IsConfigured);
         Assert.AreEqual(f.Inner.MaxStopsPerRequest, f.Service.MaxStopsPerRequest);
         Assert.AreSame(f.Inner.Diagnostics, f.Service.Diagnostics);
@@ -351,18 +394,19 @@ public sealed class CooldownTransitServiceTests
 
     private sealed class Fixture
     {
-        public Fixture(CooldownPolicy? policy = null)
+        public Fixture(CooldownPolicy? policy = null, TransitUsage? usage = null)
         {
             Inner = Handler.CreateService(new TransitRequestDiagnostics(Clock));
             Inner.EndpointCalled += (_, _) => ++EndpointCalls;
-            Service = new CooldownTransitService(Inner, Clock, policy);
+            TransitBudget? budget = usage is { } fixedUsage ? new TransitBudget(() => fixedUsage, timeProvider: Clock) : null;
+            Service = new CooldownTransitService(Inner, Clock, policy, budget);
         }
 
         public RequestTestClock Clock { get; } = new();
 
         public RequestTestHandler Handler { get; } = new();
 
-        public BusTimeTransitService Inner { get; }
+        public TransitAppService Inner { get; }
 
         public CooldownTransitService Service { get; }
 
@@ -391,7 +435,7 @@ public sealed class CooldownTransitServiceTests
             using IDisposable scope = TransitRequestDiagnostics.BeginScope(consumer, trigger);
             try
             {
-                await Service.GetRoutesAsync();
+                await Service.GetDeparturesAsync(["1"]);
                 return null;
             }
             catch (Exception ex)

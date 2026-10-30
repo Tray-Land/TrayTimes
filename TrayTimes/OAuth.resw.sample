@@ -37,12 +37,12 @@
   <resheader name="writer">
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
-  <data name="MctsApiKey" xml:space="preserve">
+  <data name="TransitApiKey" xml:space="preserve">
     <value></value>
-    <comment>MCTS BusTime Developer API key (realtime.ridemcts.com > My Account > Developer API).</comment>
+    <comment>Transit API key (request one at transitapp.com/partners/apis). It's sent in the apiKey request header, never in URLs.</comment>
   </data>
   <data name="AzureMapsKey" xml:space="preserve">
     <value></value>
-    <comment>Azure Maps subscription key for the basemap (Azure portal > Azure Maps account > Authentication > Primary Key). Optional; without it the map has no basemap.</comment>
+    <comment>Azure Maps subscription key for the basemap, address search, and walking times (Azure portal > Azure Maps account > Authentication > Primary Key). Optional; without it the map has no basemap.</comment>
   </data>
 </root>
