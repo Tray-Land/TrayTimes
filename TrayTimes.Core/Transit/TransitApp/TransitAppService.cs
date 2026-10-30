@@ -343,7 +343,8 @@ public sealed class TransitAppService : ITransitService
                 item.ScheduledDepartureTime is { } scheduled && double.IsFinite(scheduled) ? FromUnix(scheduled) : null,
                 route.Color,
                 route.Mode,
-                NonEmpty(item.TripSearchKey)));
+                NonEmpty(item.TripSearchKey),
+                route.VehicleKind));
         }
     }
 
@@ -504,7 +505,8 @@ public sealed class TransitAppService : ITransitService
         string? display = NonEmpty(dto!.RouteDisplayShortName?.Elements is { Count: 3 } elements ? elements[1] : null)
             ?? NonEmpty(dto.RouteShortName);
         string? name = NonEmpty(dto.RouteLongName);
-        return new TransitRoute(id, display ?? name ?? id, name ?? display ?? id, NormalizeColor(dto.RouteColor), NonEmpty(dto.ModeName));
+        VehicleKind vehicle = VehicleKinds.FromRouteType(dto.RouteType is { } type && double.IsFinite(type) ? (int)type : null);
+        return new TransitRoute(id, display ?? name ?? id, name ?? display ?? id, NormalizeColor(dto.RouteColor), NonEmpty(dto.ModeName), vehicle);
     }
 
     private static TransitStop? MapStop(StopDto? dto)

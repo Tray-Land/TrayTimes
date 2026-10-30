@@ -7,8 +7,11 @@ namespace TrayTimes.Transit;
 
 public readonly record struct GeoPoint(double Lat, double Lon);
 
-/// <summary>A line, such as a bus route or a metro line. <see cref="Mode"/> is what riders there call it ("Bus", "Métro").</summary>
-public sealed record TransitRoute(string Id, string DisplayId, string Name, string? Color, string? Mode = null)
+/// <summary>
+/// A line, such as a bus route or a metro line. <see cref="Mode"/> is what riders there call it ("Bus", "Métro");
+/// <see cref="VehicleKind"/> is what kind of vehicle that is.
+/// </summary>
+public sealed record TransitRoute(string Id, string DisplayId, string Name, string? Color, string? Mode = null, VehicleKind VehicleKind = VehicleKind.Bus)
 {
     public override string ToString() => string.Equals(DisplayId, Name, StringComparison.OrdinalIgnoreCase)
         ? Name
@@ -40,6 +43,7 @@ public enum ArrivalStatus
 /// <param name="ScheduledTime">The timetable time, for working out how late a real-time departure is running.</param>
 /// <param name="Mode">What riders call this kind of vehicle, e.g. "Bus".</param>
 /// <param name="ScheduleTripId">The timetable's trip ID, which stays the same as a scheduled trip gains a real-time <paramref name="TripId"/>.</param>
+/// <param name="VehicleKind">What kind of vehicle runs the route, for drawing it on the map.</param>
 public sealed record Arrival(
     string StopId,
     string RouteId,
@@ -53,7 +57,8 @@ public sealed record Arrival(
     DateTimeOffset? ScheduledTime = null,
     string? RouteColor = null,
     string? Mode = null,
-    string? ScheduleTripId = null)
+    string? ScheduleTripId = null,
+    VehicleKind VehicleKind = VehicleKind.Bus)
 {
     /// <summary>How far behind its timetable a real-time departure must be to count as delayed.</summary>
     public static readonly TimeSpan DelayThreshold = TimeSpan.FromMinutes(2);

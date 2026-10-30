@@ -74,8 +74,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly DispatcherQueueTimer _captionTimer;
     private readonly DispatcherQueueTimer _clockTimer;
 
-    // Draw order: route lines, then stops, then the place markers, then buses on top
-    // (each bus is a white disc with the bus emoji over it, or a larger yellow disc when selected).
+    // Draw order: route lines, then stops, then the place markers, then vehicles on top (each is a
+    // white disc with its bus or train emoji over it, or a larger yellow disc when selected).
     private const double SelectedRouteThickness = 8;
     private const double UnselectedRouteThickness = 4;
 
@@ -92,7 +92,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private readonly Dictionary<MapIcon, string> _stopPins = [];
     private readonly Dictionary<string, Vehicle> _vehicles = [];
     private readonly FontIcon _stopGlyph;
-    private readonly FontIcon _busGlyph;
+    private readonly Dictionary<VehicleKind, FontIcon> _vehicleGlyphs = []; // Shared so every vehicle reuses one emoji raster.
     private readonly FontIcon _busBackdropGlyph;
     private readonly FontIcon _selectedBusBackdropGlyph;
     private readonly long _mapHeadingCallbackToken;
@@ -101,6 +101,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     // The row picked to show vehicles for: positions are fetched for this route direction only.
     private RouteDirection? _selectedLine;
     private string _selectedLineLabel = string.Empty;
+    private VehicleKind _selectedLineVehicle;
     private string? _selectedTripId;
     private string? _onlyTripId; // When set (tracking), only this trip's vehicle is drawn, not the whole line's.
     private GeoPoint? _frameWithVehicle; // The picked row's stop, to frame with its vehicle once positions arrive.
@@ -209,8 +210,6 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
         _tripMap = new TripMapRenderer(_routeLayer, _stopLayer, _placeLayer, _stopGlyph, _stopPins);
-        // Shared so every bus reuses one emoji raster.
-        _busGlyph = MapHelpers.CreateEmoji(MapHelpers.BusEmoji, 19.5);
         _busBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.White, 28);
         _selectedBusBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.Yellow, 38);
         _mapHeadingCallbackToken = Map.RegisterPropertyChangedCallback(WinUIEx.Maps.MapControl.HeadingProperty, (_, _) => UpdateVehicleArrows());
@@ -1534,7 +1533,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
                 arrowGlyph.RenderTransformOrigin = new Point(0.5, 0.5);
                 icons = (
                     // The emoji draws right of center in its box; anchor right of center to recenter it on the disc.
-                    new MapIcon(_busGlyph, location) { NormalizedAnchorPoint = new Point(0.53, 0.53) },
+                    new MapIcon(VehicleGlyph(_selectedLineVehicle), location) { NormalizedAnchorPoint = new Point(0.53, 0.53) },
                     new MapIcon(_busBackdropGlyph, location) { NormalizedAnchorPoint = new Point(0.5, 0.5) },
                     new MapIcon(arrowGlyph, location) { IsVisible = false });
                 _vehicleIcons[vehicle.Id] = icons;
@@ -1636,6 +1635,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         _selectedLineLabel = LineLabel(arrival);
+        _selectedLineVehicle = arrival.VehicleKind;
         _selectedTripId = arrival.TripId;
         _onlyTripId = onlyThisTrip ? arrival.TripId : null;
         Vehicle? known = arrival.TripId is null ? null : _vehicles.Values.FirstOrDefault(v => v.TripId == arrival.TripId);
@@ -1674,6 +1674,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         ClearVehicles();
         _selectedLine = line;
         _selectedLineLabel = LineLabel(ride.Route.Mode, ride.Route.DisplayId);
+        _selectedLineVehicle = ride.Route.VehicleKind;
         _selectedTripId = tripId;
         _onlyTripId = tripId;
         _ = RefreshVehiclesAsync(TransitTrigger.VehicleSelected);
@@ -1684,6 +1685,17 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         mode is { Length: > 0 } ? $"{mode} {displayId}" : $"Route {displayId}";
 
     private static string LineLabel(Arrival arrival) => LineLabel(arrival.Mode, arrival.RouteDisplayId);
+
+    private FontIcon VehicleGlyph(VehicleKind kind)
+    {
+        if (!_vehicleGlyphs.TryGetValue(kind, out FontIcon? glyph))
+        {
+            glyph = MapHelpers.CreateEmoji(MapHelpers.VehicleEmoji(kind), 19.5);
+            _vehicleGlyphs[kind] = glyph;
+        }
+
+        return glyph;
+    }
 
     private void VehicleLayer_Tapped(object? sender, MapElementTappedEventArgs args)
     {

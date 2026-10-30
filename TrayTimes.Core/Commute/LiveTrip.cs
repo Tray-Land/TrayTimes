@@ -131,7 +131,7 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
         RideLine line = ride.Line;
         Arrival[] known = [.. arrivals.Where(a => StopLine.Of(a) == new StopLine(line.BoardAt.Id, line.Route.Id, line.Direction.Id))];
         Arrival Scheduled(PlannedDeparture d) => new(line.BoardAt.Id, line.Route.Id, line.Route.DisplayId, line.Direction.Id,
-            line.Direction.Name, d.Departs, IsRealTime: false, TripId: d.TripId, ScheduledTime: d.Departs, RouteColor: line.Route.Color, Mode: line.Route.Mode);
+            line.Direction.Name, d.Departs, IsRealTime: false, TripId: d.TripId, ScheduledTime: d.Departs, RouteColor: line.Route.Color, Mode: line.Route.Mode, VehicleKind: line.Route.VehicleKind);
         Arrival first = ride.Departure ?? Scheduled(new PlannedDeparture(ride.Starts, ride.Ends, false,
             line.Departures.FirstOrDefault(d => d.Departs == ride.Starts)?.TripId));
         IEnumerable<Arrival> planned = line.Departures.Where(d => !known.Any(a =>

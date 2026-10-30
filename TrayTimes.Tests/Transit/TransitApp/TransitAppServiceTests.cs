@@ -154,6 +154,26 @@ public sealed class TransitAppServiceTests
     }
 
     [TestMethod]
+    public async Task GetDeparturesAsync_TrainRoute_GivesEachDepartureTheRoutesVehicleKind()
+    {
+        // Arrange
+        long t0 = Now.ToUnixTimeSeconds();
+        string body = $$"""
+            {"route_departures":[{"global_route_id":"CTA:5673","route_short_name":"Brown","route_long_name":"Brown Line","mode_name":"'L'","route_type":1,"global_stop_id":"CTA:1",
+              "merged_itineraries":[{"direction_id":0,"itineraries":[{"direction_id":0,"headsign":"Kimball","internal_itinerary_id":"i0"}],
+                "schedule_items":[{"departure_time":{{t0 + 300}},"is_real_time":true,"rt_trip_id":"t1","internal_itinerary_id":"i0"}]}]}]}
+            """;
+        RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(body)) };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        DepartureBoard board = await service.GetDeparturesAsync(["CTA:1"]);
+
+        // Assert
+        Assert.AreEqual(VehicleKind.Subway, board.Arrivals.Single().VehicleKind);
+    }
+
+    [TestMethod]
     public async Task GetNearbyLinesAsync_Routes_ListsEachDirectionWithItsClosestStopAndShape()
     {
         // Arrange
@@ -288,6 +308,7 @@ public sealed class TransitAppServiceTests
         RideLine first = ((RideLeg)trip.Legs[1]).Lines.Single();
         Assert.AreEqual("STM:2", first.Route.Id);
         Assert.AreEqual("Métro", first.Route.Mode);
+        Assert.AreEqual(VehicleKind.Subway, first.Route.VehicleKind);
         Assert.AreEqual(new TransitDirection("0", "Côte-Vertu"), first.Direction);
         Assert.AreEqual("Berri-UQAM", first.BoardAt.Name);
         Assert.AreEqual("Lionel-Groulx", first.AlightAt!.Name);
@@ -304,6 +325,7 @@ public sealed class TransitAppServiceTests
         Assert.AreEqual("STM:end", fiftyOne.AlightAt!.Id);
         Assert.AreEqual(3, fiftyOne.Stops);
         Assert.AreEqual("t-51", fiftyOne.Departures.Single().TripId, "The canceled departure is left out.");
+        Assert.AreEqual(VehicleKind.Bus, fiftyOne.Route.VehicleKind, "A route without a route_type is a bus.");
         CollectionAssert.AreEquivalent(new[] { "STM:2", "STM:51" }, plan.Shapes.Select(s => s.RouteId).ToArray());
     }
 
@@ -670,7 +692,7 @@ public sealed class TransitAppServiceTests
                  {"departure_time":{{t0 + 600}},"is_real_time":false,"trip_search_key":"key-2b","plan_details":{"global_route_id":"STM:2","internal_itinerary_id":"i2",
                    "arrival_schedule_item":{"arrival_time":{{t0 + 1500}} },
                    "stop_schedule_items":[{"global_stop_id":"STM:board"},{"global_stop_id":"STM:mid"},{"global_stop_id":"STM:change"}]} }],
-               "routes":[{"global_route_id":"STM:2","route_short_name":"2","route_long_name":"Orange","route_color":"f37d00","mode_name":"Métro",
+               "routes":[{"global_route_id":"STM:2","route_short_name":"2","route_long_name":"Orange","route_color":"f37d00","mode_name":"Métro","route_type":1,
                  "itineraries":[{"direction_id":0,"headsign":"Côte-Vertu",
                    "plan_details":{"internal_itinerary_id":"i2","start_stop_offset":0,"end_stop_offset":2,"plan_shape":"{{GeoMath.EncodePolyline([new GeoPoint(43.002, -88), new GeoPoint(43.05, -88)])}}"},
                    "shape":"{{GeoMath.EncodePolyline([new GeoPoint(43.002, -88), new GeoPoint(43.05, -88), new GeoPoint(43.07, -88)])}}",

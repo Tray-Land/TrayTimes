@@ -332,6 +332,24 @@ public sealed class LiveTripTests
     }
 
     [TestMethod]
+    public void FirstRideDepartures_NoBatchOnATrainLine_ScheduledDeparturesAreTrains()
+    {
+        // Arrange
+        TransitRoute brown = new("CTA:5673", "Brown", "Brown Line", "#62361b", "'L'", VehicleKind.Subway);
+        TripItinerary itinerary = new(
+            [Walk(0, 5), new RideLeg(At(5), At(20), [Line("a", brown, Planned(5, 20, "brn-1"))])],
+            At(0),
+            At(20));
+        LiveTrip trip = LiveTrip.Compute(itinerary, [], Now)!;
+
+        // Act
+        IReadOnlyList<Arrival> departures = trip.FirstRideDepartures([], 1);
+
+        // Assert
+        Assert.AreEqual(VehicleKind.Subway, departures.Single().VehicleKind);
+    }
+
+    [TestMethod]
     public void FirstRideDepartures_WalkOnly_ReturnsNoChips()
     {
         // Arrange

@@ -20,7 +20,6 @@ internal static class MapHelpers
 {
     public const string WalkGlyph = ""; // Walk
     public const string BusGlyph = ""; // Bus
-    public const string BusEmoji ="🚍"; // Oncoming bus, in color so it stands out on the basemap
     public const string SavedStopGlyph = ""; // FavoriteStarFill
     public const string StopGlyph = ""; // CircleFill
 
@@ -83,6 +82,18 @@ internal static class MapHelpers
         Glyph = emoji,
         FontSize = size,
         FontFamily = new FontFamily("Segoe UI Emoji"),
+    };
+
+    /// <summary>A line's vehicle, in color so it stands out on the basemap; head-on where the emoji has that view.</summary>
+    public static string VehicleEmoji(VehicleKind kind) => kind switch
+    {
+        VehicleKind.Tram => "🚊",
+        VehicleKind.Subway => "🚇",
+        VehicleKind.Rail => "🚆",
+        VehicleKind.Ferry => "⛴️",
+        VehicleKind.AerialLift => "🚡",
+        VehicleKind.Funicular => "🚞",
+        _ => "🚍", // Oncoming bus
     };
 
     public static FontIcon CreatePlaceIcon(PlaceKind? kind, double size) => CreateEmoji(kind switch

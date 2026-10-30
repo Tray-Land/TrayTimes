@@ -63,6 +63,9 @@ internal sealed class RouteDto
 
     public string? ModeName { get; set; }
 
+    /// <summary>The GTFS route_type: 1 for subway or metro, 3 for bus, and so on.</summary>
+    public double? RouteType { get; set; }
+
     public DisplayShortNameDto? RouteDisplayShortName { get; set; }
 
     public string? GlobalStopId { get; set; }
