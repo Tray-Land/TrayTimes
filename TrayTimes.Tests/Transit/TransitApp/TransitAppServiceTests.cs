@@ -159,11 +159,11 @@ public sealed class TransitAppServiceTests
         // Arrange
         string shape = GeoMath.EncodePolyline([new GeoPoint(43, -88), new GeoPoint(43.01, -88)]);
         string body = $$"""
-            {"nearby_routes":[{"global_route_id":"MCTS:14","route_short_name":"14","route_long_name":"Forest Home","route_color":"FF0000","mode_name":"Bus",
+            {"nearby_routes":[{"global_route_id":"Metro:14","route_short_name":"14","route_long_name":"Forest Home","route_color":"FF0000","mode_name":"Bus",
               "merged_itineraries":[
-                {"direction_id":0,"closest_stop":{"global_stop_id":"MCTS:a","stop_name":"Oak & 1st","stop_lat":43.001,"stop_lon":-88.0,"distance":111},
+                {"direction_id":0,"closest_stop":{"global_stop_id":"Metro:a","stop_name":"Oak & 1st","stop_lat":43.001,"stop_lon":-88.0,"distance":111},
                  "itineraries":[{"direction_id":0,"headsign":"Downtown","direction_headsign":"Northbound","shape":"{{shape}}","internal_itinerary_id":"i0"}]},
-                {"direction_id":1,"closest_stop":{"global_stop_id":"MCTS:b","stop_name":"Oak & 1st","stop_lat":43.0011,"stop_lon":-87.9999,"distance":120},
+                {"direction_id":1,"closest_stop":{"global_stop_id":"Metro:b","stop_name":"Oak & 1st","stop_lat":43.0011,"stop_lon":-87.9999,"distance":120},
                  "itineraries":[{"direction_id":1,"headsign":"Airport"}]}]}]}
             """;
         RequestTestHandler handler = new() { RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(body)) };
@@ -179,7 +179,7 @@ public sealed class TransitAppServiceTests
         Assert.AreEqual("true", RequestTestHandler.Query(request, "include_stops_and_shapes"));
         Assert.HasCount(2, nearby.Lines);
         NearbyLine north = nearby.Lines[0];
-        Assert.AreEqual("MCTS:a", north.Stop.Id);
+        Assert.AreEqual("Metro:a", north.Stop.Id);
         Assert.AreEqual("Northbound", north.Direction.Name);
         Assert.AreEqual("0", north.Direction.Id);
         Assert.AreEqual(111, north.Meters);
@@ -479,8 +479,8 @@ public sealed class TransitAppServiceTests
         RequestTestHandler handler = new()
         {
             RespondAsync = (request, _) => Task.FromResult(RequestTestHandler.Response(request.RequestUri!.AbsolutePath.EndsWith("available_networks", StringComparison.Ordinal)
-                ? """{"networks":[{"network_id":"MCTS|Milwaukee"},{"network_id":"Preview|Milwaukee","network_in_beta":true}]}"""
-                : """{"routes":[{"global_route_id":"MCTS:14","route_short_name":"14","route_long_name":"Forest Home"},{"global_route_id":"MCTS:GRE","route_long_name":"Green Line"}]}""")),
+                ? """{"networks":[{"network_id":"Metro|Milwaukee"},{"network_id":"Preview|Milwaukee","network_in_beta":true}]}"""
+                : """{"routes":[{"global_route_id":"Metro:14","route_short_name":"14","route_long_name":"Forest Home"},{"global_route_id":"Metro:GRE","route_long_name":"Green Line"}]}""")),
         };
         TransitAppService service = handler.CreateService();
 
@@ -490,7 +490,7 @@ public sealed class TransitAppServiceTests
         // Assert
         Assert.AreEqual(2, handler.Attempts);
         Assert.AreEqual("false", RequestTestHandler.Query(handler.Requests[0], "include_network_geometry"));
-        Assert.AreEqual("MCTS|Milwaukee", RequestTestHandler.Query(handler.Requests[1], "network_ids"));
+        Assert.AreEqual("Metro|Milwaukee",RequestTestHandler.Query(handler.Requests[1], "network_ids"));
         Assert.AreEqual("14", routes[0].DisplayId);
         Assert.AreEqual("Green Line", routes[1].DisplayId);
     }

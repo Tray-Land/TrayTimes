@@ -84,7 +84,7 @@ public sealed class SavedStopTests
     public void Description_AllRoutesFromStopSearch_SaysAllRoutesOnly()
     {
         // Arrange
-        SavedStop stop = new("MCTS:100", "Stop 100", 43.04, -87.91, string.Empty, string.Empty, null, string.Empty, string.Empty, AllRoutes: true);
+        SavedStop stop = new("Metro:100", "Stop 100", 43.04, -87.91, string.Empty, string.Empty, null, string.Empty, string.Empty, AllRoutes: true);
 
         // Act
         string description = stop.Description;
