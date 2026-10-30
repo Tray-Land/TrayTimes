@@ -8,6 +8,7 @@
     xmlns:local="using:TrayTimes.Views"
     xmlns:map="using:WinUIEx.Maps"
     xmlns:models="using:TrayTimes.Models"
+    xmlns:transit="using:TrayTimes.Transit"
     MinHeight="480"
     MinWidth="520"
     IsMaximizable="False"
@@ -178,7 +179,7 @@
                             DragItemsCompleted="SavedStopsList_DragItemsCompleted"
                             SelectionMode="None">
                             <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="models:SavedStop" x:DefaultBindMode="OneTime">
+                                <DataTemplate x:DataType="local:SavedStopRow" x:DefaultBindMode="OneTime">
                                     <Grid Padding="0,8" ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -196,6 +197,12 @@
                                             Spacing="4">
                                             <TextBlock Text="{x:Bind StopName}" TextWrapping="Wrap" />
                                             <TextBlock Style="{StaticResource SettingsDescriptionStyle}" Text="{x:Bind Description}" />
+                                            <TextBox
+                                                x:Uid="SettingsStopNicknameBox"
+                                                KeyDown="StopNicknameBox_KeyDown"
+                                                LostFocus="StopNicknameBox_LostFocus"
+                                                MaxLength="40"
+                                                Text="{x:Bind Nickname, Mode=OneWay}" />
                                         </StackPanel>
                                         <Button
                                             x:Uid="SettingsRemoveStopButton"
@@ -244,51 +251,6 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox
-                                x:Name="StopSearchBox"
-                                x:Uid="SettingsStopSearchBox"
-                                AutomationProperties.AutomationId="StopSearchBox"
-                                KeyDown="StopSearchBox_KeyDown" />
-                            <Button
-                                x:Name="StopSearchButton"
-                                x:Uid="SettingsStopSearchButton"
-                                Grid.Column="1"
-                                AutomationProperties.AutomationId="StopSearchButton"
-                                VerticalAlignment="Bottom"
-                                Click="StopSearchButton_Click" />
-                        </Grid>
-                        <Button
-                            x:Name="LoadRoutesButton"
-                            x:Uid="SettingsLoadRoutesButton"
-                            AutomationProperties.AutomationId="LoadRoutesButton"
-                            HorizontalAlignment="Left"
-                            Click="LoadRoutesButton_Click" />
-                        <ComboBox
-                            x:Name="RouteBox"
-                            x:Uid="SettingsRouteBox"
-                            AutomationProperties.AutomationId="RouteBox"
-                            HorizontalAlignment="Stretch"
-                            IsEnabled="False"
-                            SelectionChanged="RouteBox_SelectionChanged" />
-                        <ComboBox
-                            x:Name="DirectionBox"
-                            x:Uid="SettingsDirectionBox"
-                            AutomationProperties.AutomationId="DirectionBox"
-                            HorizontalAlignment="Stretch"
-                            IsEnabled="False"
-                            SelectionChanged="DirectionBox_SelectionChanged" />
-                        <ComboBox
-                            x:Name="StopBox"
-                            x:Uid="SettingsStopBox"
-                            AutomationProperties.AutomationId="StopBox"
-                            HorizontalAlignment="Stretch"
-                            IsEnabled="False"
-                            SelectionChanged="StopBox_SelectionChanged" />
-                        <Grid ColumnSpacing="8">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBox
                                 x:Name="AreaSearchBox"
                                 x:Uid="SettingsAreaBox"
                                 AutomationProperties.AutomationId="AreaSearchBox"
@@ -322,6 +284,57 @@
                                 VerticalAlignment="Center"
                                 IsActive="False" />
                         </Grid>
+                        <Grid ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox
+                                x:Name="StopSearchBox"
+                                x:Uid="SettingsStopSearchBox"
+                                AutomationProperties.AutomationId="StopSearchBox"
+                                KeyDown="StopSearchBox_KeyDown" />
+                            <Button
+                                x:Name="StopSearchButton"
+                                x:Uid="SettingsStopSearchButton"
+                                Grid.Column="1"
+                                AutomationProperties.AutomationId="StopSearchButton"
+                                VerticalAlignment="Bottom"
+                                Click="StopSearchButton_Click" />
+                        </Grid>
+                        <Button
+                            x:Name="LoadRoutesButton"
+                            x:Uid="SettingsLoadRoutesButton"
+                            AutomationProperties.AutomationId="LoadRoutesButton"
+                            HorizontalAlignment="Left"
+                            Click="LoadRoutesButton_Click" />
+                        <ComboBox
+                            x:Name="RouteBox"
+                            x:Uid="SettingsRouteBox"
+                            AutomationProperties.AutomationId="RouteBox"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="False"
+                            SelectionChanged="RouteBox_SelectionChanged">
+                            <ComboBox.ItemTemplate>
+                                <DataTemplate x:DataType="transit:TransitRoute" x:DefaultBindMode="OneTime">
+                                    <TextBlock Text="{x:Bind local:AppStrings.RouteName(DisplayId, Name)}" />
+                                </DataTemplate>
+                            </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <ComboBox
+                            x:Name="DirectionBox"
+                            x:Uid="SettingsDirectionBox"
+                            AutomationProperties.AutomationId="DirectionBox"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="False"
+                            SelectionChanged="DirectionBox_SelectionChanged" />
+                        <ComboBox
+                            x:Name="StopBox"
+                            x:Uid="SettingsStopBox"
+                            AutomationProperties.AutomationId="StopBox"
+                            HorizontalAlignment="Stretch"
+                            IsEnabled="False"
+                            SelectionChanged="StopBox_SelectionChanged" />
                         <CheckBox
                             x:Name="AllRoutesCheck"
                             x:Uid="SettingsAllRoutesCheck"

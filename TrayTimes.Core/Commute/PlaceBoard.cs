@@ -210,7 +210,7 @@ public static class PlaceBoard
         {
             SavedStop first = saved.First();
             NearbyLine[] here = [.. nearbyHere[saved.Key]];
-            stops.Add(new NearbyStop(new IndexedStop(first.StopId, first.StopName, first.Lat, first.Lon, [.. saved
+            stops.Add(new NearbyStop(new IndexedStop(first.StopId, first.DisplayName, first.Lat, first.Lon, [.. saved
                 .Where(s => s.RouteId.Length > 0)
                 .Select(s => new StopRouteInfo(s.RouteId, s.RouteDisplayId, s.RouteColor, s.DirectionId, s.DirectionName))
                 .Concat(here.Select(l => RouteInfo(l.Route, l.Direction)))

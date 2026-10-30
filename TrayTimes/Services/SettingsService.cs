@@ -206,10 +206,15 @@ internal static class SettingsService
     /// <summary>Adds (or replaces, if the same stop/route/direction is already saved) a stop.</summary>
     public static void AddStop(SavedStop stop)
     {
-        List<SavedStop> stops = [.. Stops.Where(s => s.Key != stop.Key)];
-        stops.Add(stop);
+        IReadOnlyList<SavedStop> current = Stops;
+        string? nickname = stop.Nickname ?? current.FirstOrDefault(s => s.StopId == stop.StopId && s.Nickname is not null)?.Nickname;
+        List<SavedStop> stops = [.. current.Where(s => s.Key != stop.Key)];
+        stops.Add(stop with { Nickname = nickname });
         SetStops(stops);
     }
+
+    /// <summary>Names (or, when blank, un-names) a saved stop; the nickname covers every route saved there.</summary>
+    public static void SetStopNickname(string stopId, string? nickname) => SetStops(SavedStop.WithNickname(Stops, stopId, nickname));
 
     public static void RemoveStop(SavedStop stop) => SetStops(Stops.Where(s => s.Key != stop.Key));
 

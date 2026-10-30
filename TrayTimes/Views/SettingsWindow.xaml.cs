@@ -39,7 +39,7 @@ public sealed partial class SettingsWindow : WindowEx
     private readonly TransitBudget _budget;
     private readonly ITransitService _service;
     private readonly CancellationTokenSource _windowCancellation = new();
-    private readonly ObservableCollection<SavedStop> _savedStops = [];
+    private readonly ObservableCollection<SavedStopRow> _savedStops = [];
     private readonly Dictionary<PlacePicker, PlaceKind> _fixedPickers;
     private readonly MapElementsLayer _routeLayer = new();
     private readonly MapElementsLayer _stopLayer = new();
@@ -427,7 +427,7 @@ public sealed partial class SettingsWindow : WindowEx
         _savedStops.Clear();
         foreach (SavedStop stop in SettingsService.Stops)
         {
-            _savedStops.Add(stop);
+            _savedStops.Add(new SavedStopRow(stop));
         }
 
         NoStopsText.Visibility = _savedStops.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -436,15 +436,52 @@ public sealed partial class SettingsWindow : WindowEx
     private void SavedStopsList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
         _savingOrder = true;
-        SettingsService.SetStops(_savedStops);
+        SettingsService.SetStops(_savedStops.Select(r => r.Stop));
         _savingOrder = false;
+    }
+
+    private void StopNicknameBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            SaveNickname((TextBox)sender);
+        }
+    }
+
+    private void StopNicknameBox_LostFocus(object sender, RoutedEventArgs e) => SaveNickname((TextBox)sender);
+
+    /// <summary>Saves the nickname for the box's stop, if it changed. Sibling rows for the same stop show it too.</summary>
+    private void SaveNickname(TextBox box)
+    {
+        if (box.DataContext is not SavedStopRow row)
+        {
+            return;
+        }
+
+        string? nickname = string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim();
+        if (nickname == row.Stop.Nickname)
+        {
+            return;
+        }
+
+        string stopId = row.Stop.StopId;
+        _savingOrder = true;
+        SettingsService.SetStopNickname(stopId, nickname);
+        _savingOrder = false;
+
+        // Renamed in place, so a later reorder doesn't save the old nicknames back and no row is rebuilt.
+        foreach (SavedStopRow sibling in _savedStops.Where(r => r.Stop.StopId == stopId))
+        {
+            sibling.Rename(nickname);
+        }
     }
 
     private void RemoveStopButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: SavedStop stop })
+        if (sender is FrameworkElement { DataContext: SavedStopRow row })
         {
-            SettingsService.RemoveStop(stop);
+            SettingsService.RemoveStop(row.Stop);
         }
     }
 
@@ -574,10 +611,6 @@ public sealed partial class SettingsWindow : WindowEx
             DirectionBox.ItemsSource = directions;
             DirectionBox.PlaceholderText = _resources.GetString(directions.Length == 0 ? "SettingsNoDirections" : "SettingsChooseDirection");
             DirectionBox.IsEnabled = directions.Length > 0;
-            if (directions.Length > 0)
-            {
-                DirectionBox.SelectedIndex = 0;
-            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -737,7 +770,7 @@ public sealed partial class SettingsWindow : WindowEx
         _stopLayer.MapElements.AddRange(_stopPins.Keys);
         if (stops.Count > 0)
         {
-            _ = MapHelpers.FrameAsync(PickerMap, [.. stops.Select(s => s.Location)], MapAnimationKind.Default);
+            _ = MapHelpers.FrameAsync(PickerMap, stops.Select(s => s.Location).ToList(), MapAnimationKind.Default);
         }
     }
 

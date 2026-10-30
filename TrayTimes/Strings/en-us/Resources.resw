@@ -106,6 +106,12 @@
   <data name="SettingsSavedStopsList.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Favorite stops</value>
   </data>
+  <data name="SettingsStopNicknameBox.PlaceholderText" xml:space="preserve">
+    <value>Nickname (optional)</value>
+  </data>
+  <data name="SettingsStopNicknameBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Nickname</value>
+  </data>
   <data name="SettingsRemoveStopButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Remove stop</value>
   </data>
@@ -479,6 +485,14 @@
   <data name="JumpNextDueFormat" xml:space="preserve">
     <value>{0} due</value>
     <comment>{0} is a route that's leaving now.</comment>
+  </data>
+  <data name="RouteNumberFormat" xml:space="preserve">
+    <value>Route {0}</value>
+    <comment>A route that goes by a number alone, such as 15. Routes named otherwise ("30X", "Green") are shown as they are. Keep it short: it goes in the tray tooltip.</comment>
+  </data>
+  <data name="RouteNameFormat" xml:space="preserve">
+    <value>{0} · {1}</value>
+    <comment>The Settings route picker. {0} is a route, such as "Route 15"; {1} its name, such as "Oak".</comment>
   </data>
   <data name="ManageFavorites" xml:space="preserve">
     <value>Manage favorites…</value>

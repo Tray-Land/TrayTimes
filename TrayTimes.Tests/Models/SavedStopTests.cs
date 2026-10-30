@@ -17,6 +17,44 @@ public sealed class SavedStopTests
     }
 
     [TestMethod]
+    public void DisplayName_WithoutNickname_IsStopName()
+    {
+        // Arrange
+        SavedStop stop = CreateStop("100") with { Nickname = "  " };
+
+        // Act & Assert
+        Assert.AreEqual(stop.StopName, stop.DisplayName);
+    }
+
+    [TestMethod]
+    public void WithNickname_SetsEveryEntryForTheStopOnly()
+    {
+        // Arrange
+        SavedStop[] stops = [CreateStop("100", directionId: "NORTH"), CreateStop("100", directionId: "SOUTH"), CreateStop("200")];
+
+        // Act
+        SavedStop[] named = [.. SavedStop.WithNickname(stops, "100", "  Work stop ")];
+
+        // Assert
+        Assert.AreEqual("Work stop", named[0].DisplayName);
+        Assert.AreEqual("Work stop", named[1].DisplayName);
+        Assert.AreEqual(stops[2].StopName, named[2].DisplayName);
+    }
+
+    [TestMethod]
+    public void WithNickname_BlankNickname_ClearsIt()
+    {
+        // Arrange
+        SavedStop[] stops = [CreateStop("100") with { Nickname = "Home stop" }];
+
+        // Act
+        SavedStop[] cleared = [.. SavedStop.WithNickname(stops, "100", " ")];
+
+        // Assert
+        Assert.IsNull(cleared[0].Nickname);
+    }
+
+    [TestMethod]
     public void Description_SingleRoute_ShowsRouteAndDirection()
     {
         // Arrange

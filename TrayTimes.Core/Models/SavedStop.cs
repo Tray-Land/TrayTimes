@@ -16,10 +16,22 @@ public sealed record SavedStop(
     string? RouteColor,
     string DirectionId,
     string DirectionName,
-    bool AllRoutes)
+    bool AllRoutes,
+    string? Nickname = null)
 {
     [JsonIgnore]
     public string Key => $"{StopId}|{RouteId}|{DirectionId}";
+
+    /// <summary>The user's nickname for the stop, else its name.</summary>
+    [JsonIgnore]
+    public string DisplayName => string.IsNullOrWhiteSpace(Nickname) ? StopName : Nickname;
+
+    /// <summary>Returns the stops with <paramref name="nickname"/> (cleared when blank) set on every entry for <paramref name="stopId"/>.</summary>
+    public static IEnumerable<SavedStop> WithNickname(IEnumerable<SavedStop> stops, string stopId, string? nickname)
+    {
+        string? trimmed = string.IsNullOrWhiteSpace(nickname) ? null : nickname.Trim();
+        return stops.Select(s => s.StopId == stopId ? s with { Nickname = trimmed } : s);
+    }
 
     [JsonIgnore]
     public string Description => !AllRoutes ? $"Route {RouteDisplayId} · {DirectionName}"
