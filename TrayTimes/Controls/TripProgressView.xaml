@@ -114,7 +114,7 @@
             x:Name="StepsList"
             x:Uid="TripSteps"
             Grid.Row="2"
-            Padding="6,0,6,6"
+            Padding="6,0,6,36"
             AutomationProperties.AutomationId="TripProgress"
             IsItemClickEnabled="True"
             ItemClick="StepsList_ItemClick"

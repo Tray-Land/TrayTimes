@@ -27,7 +27,6 @@
             <RowDefinition x:Name="MapRow" Height="230" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <Grid.Resources>
@@ -475,7 +474,11 @@
                 x:Name="ListScroller"
                 Grid.Row="2"
                 Padding="6,8,6,4">
-                <ItemsControl x:Name="StopsList" ItemTemplate="{StaticResource StopGroupTemplate}" />
+                <!--  The bottom margin scrolls with the list, so the last stop can clear the floating footer  -->
+                <ItemsControl
+                    x:Name="StopsList"
+                    Margin="0,0,0,32"
+                    ItemTemplate="{StaticResource StopGroupTemplate}" />
             </ScrollViewer>
 
             <StackPanel
@@ -535,14 +538,16 @@
             VerticalContentAlignment="Stretch"
             Visibility="Collapsed" />
 
-        <!--  Required by the Transit API terms: "Powered by Transit" stays visible in the main interface  -->
+        <!--  Required by the Transit API terms: "Powered by Transit" stays visible in the main interface. It floats over the bottom of the content, so each list below keeps bottom padding to scroll clear of it  -->
         <HyperlinkButton
             x:Name="PoweredByTransit"
             x:Uid="PoweredByTransit"
-            Grid.Row="4"
+            Grid.Row="3"
             Margin="0,0,8,4"
             Padding="6,2"
             HorizontalAlignment="Right"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
             AutomationProperties.AutomationId="PoweredByTransit"
             NavigateUri="https://transitapp.com">
             <StackPanel Orientation="Horizontal" Spacing="6">

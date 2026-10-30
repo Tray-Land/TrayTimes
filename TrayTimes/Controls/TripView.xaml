@@ -156,7 +156,7 @@
             x:Name="LegsList"
             x:Uid="TripLegs"
             Grid.Row="3"
-            Padding="6,0,6,6"
+            Padding="6,0,6,36"
             AutomationProperties.AutomationId="TripLegs"
             IsItemClickEnabled="False"
             ItemTemplateSelector="{StaticResource LegTemplates}"

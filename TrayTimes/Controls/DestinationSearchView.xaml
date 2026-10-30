@@ -35,6 +35,7 @@
             x:Name="ResultsList"
             x:Uid="DestinationSearchResults"
             Grid.Row="3"
+            Padding="0,0,0,28"
             AutomationProperties.AutomationId="DestinationSearchResults"
             HorizontalContentAlignment="Stretch"
             IsItemClickEnabled="True"
