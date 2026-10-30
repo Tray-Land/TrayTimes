@@ -130,7 +130,7 @@ internal static class SettingsService
         set => Set(nameof(KeepAwakeWhileTracking), value);
     }
 
-    /// <summary>The version of the saved data; 1 (or missing) holds MCTS BusTime stop IDs.</summary>
+    /// <summary>The version of the saved data; 1 (or missing) holds the earlier BusTime stop IDs.</summary>
     public static int DataVersion
     {
         get => Get(nameof(DataVersion), 1);

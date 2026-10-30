@@ -35,7 +35,7 @@
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
         DisplayName="Tray Times"
-        Description="Quick-glance Milwaukee County Transit bus arrivals from the system tray."
+        Description="Quick-glance Transit app arrivals and trips from the system tray."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

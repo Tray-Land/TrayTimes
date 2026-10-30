@@ -39,7 +39,7 @@ public partial class App : Application
     private static readonly TimeSpan DeparturesCoalesceWindow = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan ExitSaveTimeout = TimeSpan.FromSeconds(2);
 
-    // Files the MCTS BusTime build kept in LocalState.
+    // Files the earlier BusTime build kept in LocalState.
     private static readonly string[] LegacyFiles = ["stop-index.json", "schedule.zip", "schedule.json", "schedule.zip.download"];
 
     private readonly EtaTrayIcon _etaIcon = new();
@@ -188,7 +188,7 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Clears what the MCTS BusTime build saved: its stop IDs and call tally mean nothing to Transit.
+    /// Clears what the earlier BusTime build saved: its stop IDs and call tally mean nothing to Transit.
     /// Favorite places are plain coordinates and carry over.
     /// </summary>
     private static void MigrateSavedData()

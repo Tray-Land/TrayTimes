@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    UI-free code shared by the app and its tests: provider-neutral transit models, the BusTime
-    client, and the app's saved data. Nothing here may depend on WinUI or Windows APIs.
+    UI-free code shared by the app and its tests: provider-neutral transit models, the Transit
+    API client, and the app's saved data. Nothing here may depend on WinUI or Windows APIs.
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
