@@ -745,16 +745,20 @@
     <comment>Destination name and arrival time.</comment>
   </data>
   <data name="TripWalkOptionFormat" xml:space="preserve">
-    <value>{0} · walk</value>
-    <comment>Arrival time of the walk-only option.</comment>
+    <value>{0} · walk {1}</value>
+    <comment>The walk-only option. {0} is its arrival time; {1} how long the walk takes, such as "20 min" (TripDurationFormat).</comment>
+  </data>
+  <data name="TripRideOptionFormat" xml:space="preserve">
+    <value>{0} · {1}</value>
+    <comment>An option without transfers, e.g. "8:42 · 35 min". {0} is its arrival time; {1} how long the trip takes (TripDurationFormat).</comment>
   </data>
   <data name="TripTransferOptionFormat" xml:space="preserve">
-    <value>{0} · {1}</value>
-    <comment>Arrival time and transfers, e.g. "8:42 · 1 transfer".</comment>
+    <value>{0} · {1} · {2}</value>
+    <comment>An option with transfers, e.g. "8:42 · 35 min · 1 transfer". {0} is its arrival time; {1} how long the trip takes, waits for transfers included (TripDurationFormat); {2} the transfers.</comment>
   </data>
   <data name="TripOptionNameFormat" xml:space="preserve">
     <value>Arrive {0}</value>
-    <comment>Arrival time, optionally followed by transfers or "walk".</comment>
+    <comment>Read by screen readers. {0} is the option's label with its units spelled out, such as "8:42 · 35 minutes · 1 transfer".</comment>
   </data>
   <data name="TripFindingRoute" xml:space="preserve">
     <value>Finding a new route…</value>

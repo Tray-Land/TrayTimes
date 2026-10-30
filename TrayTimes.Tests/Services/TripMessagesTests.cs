@@ -319,6 +319,56 @@ public sealed class TripMessagesTests
     }
 
     [TestMethod]
+    public void Option_TripWithATransfer_GivesTheArrivalTheTimeWithTheWaitAndTheTransfer()
+    {
+        // Arrange: 8:00 to 8:38, with 3 minutes' wait for the 30.
+        using IDisposable english = ResourceLoader.UseEnglish();
+        LiveTrip trip = Trip().Progress.Trip;
+
+        // Act
+        string label = TripMessages.Option(trip, spoken: false);
+        string spoken = TripMessages.Option(trip, spoken: true);
+
+        // Assert
+        Assert.AreEqual($"{Clock(At(38))} · 38 min · 1 transfer", label);
+        Assert.AreEqual($"{Clock(At(38))} · 38 minutes · 1 transfer", spoken);
+    }
+
+    [TestMethod]
+    public void Option_OneRide_GivesTheArrivalAndTheTime()
+    {
+        // Arrange: walk 5 min and ride the 14 to 8:20.
+        using IDisposable english = ResourceLoader.UseEnglish();
+        TripItinerary itinerary = new([Walk(0, 5), new RideLeg(At(5), At(20), [Line(Fourteen, "Oak & 5th", "State St", 5, 20, "14-1")])], At(0), At(20));
+
+        // Act
+        string label = TripMessages.Option(LiveTrip.Scheduled(itinerary), spoken: false);
+
+        // Assert
+        Assert.AreEqual($"{Clock(At(20))} · 20 min", label);
+    }
+
+    [TestMethod]
+    [DataRow(1, "1 min", "1 minute")]
+    [DataRow(60, "1 hr", "1 hour")]
+    [DataRow(61, "1 hr 1 min", "1 hour 1 minute")]
+    [DataRow(125, "2 hr 5 min", "2 hours 5 minutes")]
+    public void Option_Walk_GivesTheArrivalAndTheWalkInHoursFromAnHour(int minutes, string length, string spokenLength)
+    {
+        // Arrange
+        using IDisposable english = ResourceLoader.UseEnglish();
+        LiveTrip walk = LiveTrip.Scheduled(new TripItinerary([Walk(0, minutes)], At(0), At(minutes)));
+
+        // Act
+        string label = TripMessages.Option(walk, spoken: false);
+        string spoken = TripMessages.Option(walk, spoken: true);
+
+        // Assert
+        Assert.AreEqual($"{Clock(At(minutes))} · walk {length}", label);
+        Assert.AreEqual($"{Clock(At(minutes))} · walk {spokenLength}", spoken);
+    }
+
+    [TestMethod]
     [DataRow(false, "arrive {0}")]
     [DataRow(true, "from Home · arrive {0}")]
     public void Arrival_StartGuessedOrNot_NamesTheStartOnlyWhenGuessed(bool isGuess, string expected)

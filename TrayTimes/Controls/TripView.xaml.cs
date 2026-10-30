@@ -91,13 +91,8 @@ public sealed partial class TripView : UserControl
             {
                 LiveTrip trip = selection.Options[i];
                 SelectorBarItem option = OptionsBar.Items[i];
-                string arrival = Clock(trip.Arrives);
-                string label = !trip.Legs.OfType<LiveRide>().Any() ? AppStrings.Format("TripWalkOptionFormat", arrival)
-                    : trip.Itinerary.Transfers == 0 ? arrival
-                    : AppStrings.Format("TripTransferOptionFormat", arrival, trip.Itinerary.Transfers == 1
-                        ? AppStrings.Get("SuggestionOneTransfer") : AppStrings.Format("SuggestionTransfersFormat", trip.Itinerary.Transfers));
-                option.Text = label;
-                AutomationProperties.SetName(option, AppStrings.Format("TripOptionNameFormat", label));
+                option.Text = TripMessages.Option(trip, spoken: false);
+                AutomationProperties.SetName(option, AppStrings.Format("TripOptionNameFormat", TripMessages.Option(trip, spoken: true)));
                 if (ReferenceEquals(trip, selection.Selected))
                 {
                     OptionsBar.SelectedItem = option;

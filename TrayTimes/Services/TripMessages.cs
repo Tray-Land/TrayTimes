@@ -55,6 +55,22 @@ internal static class TripMessages
         return leg.IsGuess && leg.From is { } from ? AppStrings.Format("TripFromArrivalFormat", from.Name, arrive) : arrive;
     }
 
+    /// <summary>
+    /// A trip option's label: when it arrives, how long it takes (waits for transfers included), and its transfers:
+    /// "8:42 AM · 35 min · 1 transfer", or "8:42 AM · walk 20 min" for the walk.
+    /// </summary>
+    public static string Option(LiveTrip trip, bool spoken)
+    {
+        ArgumentNullException.ThrowIfNull(trip);
+        string arrival = Clock(trip.Arrives);
+        string length = Duration(trip.Duration, spoken);
+        int transfers = trip.Itinerary.Transfers;
+        return !trip.Legs.OfType<LiveRide>().Any() ? AppStrings.Format("TripWalkOptionFormat", arrival, length)
+            : transfers == 0 ? AppStrings.Format("TripRideOptionFormat", arrival, length)
+            : AppStrings.Format("TripTransferOptionFormat", arrival, length,
+                transfers == 1 ? AppStrings.Get("SuggestionOneTransfer") : AppStrings.Format("SuggestionTransfersFormat", transfers));
+    }
+
     /// <summary>What Go starts, for its name and tooltip: "Start trip to Work, leaving 5:29 PM" (from where, when that was guessed).</summary>
     public static string GoName(LiveTrip trip, CommuteLeg leg, DateTimeOffset now)
     {
