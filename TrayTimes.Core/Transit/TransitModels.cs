@@ -36,9 +36,10 @@ public enum ArrivalStatus
 /// One trip's departure from one stop. When <see cref="IsRealTime"/> is false the time comes from
 /// the published timetable, with no live vehicle behind it yet.
 /// </summary>
-/// <param name="TripId">The provider's trip ID, which stays the same as a scheduled trip gains real-time data.</param>
+/// <param name="TripId">The provider's trip ID: its real-time one when it has one (vehicles carry the same), else the timetable's.</param>
 /// <param name="ScheduledTime">The timetable time, for working out how late a real-time departure is running.</param>
 /// <param name="Mode">What riders call this kind of vehicle, e.g. "Bus".</param>
+/// <param name="ScheduleTripId">The timetable's trip ID, which stays the same as a scheduled trip gains a real-time <paramref name="TripId"/>.</param>
 public sealed record Arrival(
     string StopId,
     string RouteId,
@@ -51,7 +52,8 @@ public sealed record Arrival(
     string? TripId = null,
     DateTimeOffset? ScheduledTime = null,
     string? RouteColor = null,
-    string? Mode = null)
+    string? Mode = null,
+    string? ScheduleTripId = null)
 {
     /// <summary>How far behind its timetable a real-time departure must be to count as delayed.</summary>
     public static readonly TimeSpan DelayThreshold = TimeSpan.FromMinutes(2);
@@ -60,6 +62,9 @@ public sealed record Arrival(
     public TimeSpan? Delay => IsRealTime && ScheduledTime is { } scheduled ? PredictedTime - scheduled : null;
 
     public bool IsDelayed => Delay >= DelayThreshold;
+
+    /// <summary>True when <paramref name="tripId"/> names this departure's trip, by its real-time or its timetable ID.</summary>
+    public bool IsTrip(string tripId) => TripId == tripId || ScheduleTripId == tripId;
 
     /// <summary>Whole minutes until departure, never negative.</summary>
     public int MinutesAway(DateTimeOffset now) => Math.Max(0, (int)Math.Floor((PredictedTime - now).TotalMinutes));

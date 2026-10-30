@@ -135,7 +135,7 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
         Arrival first = ride.Departure ?? Scheduled(new PlannedDeparture(ride.Starts, ride.Ends, false,
             line.Departures.FirstOrDefault(d => d.Departs == ride.Starts)?.TripId));
         IEnumerable<Arrival> planned = line.Departures.Where(d => !known.Any(a =>
-            d.TripId is not null && a.TripId is not null ? d.TripId == a.TripId : d.Departs == (a.ScheduledTime ?? a.PredictedTime))).Select(Scheduled);
+            d.TripId is not null && a.TripId is not null ? a.IsTrip(d.TripId) : d.Departs == (a.ScheduledTime ?? a.PredictedTime))).Select(Scheduled);
         return [.. known.Concat(planned).Prepend(first)
             .Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ride.Starts)
             .DistinctBy(a => TripKey(a.TripId, a.PredictedTime))
@@ -146,6 +146,18 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
     /// <summary>Names one departure: its trip ID, else its time, for a feed without trip IDs.</summary>
     internal static string TripKey(string? tripId, DateTimeOffset departs) =>
         tripId ?? $"@{departs.ToUnixTimeSeconds()}";
+
+    /// <summary>
+    /// Names <paramref name="arrival"/> by what doesn't change from one check to the next: the timetable's trip ID,
+    /// which stays when the trip gains a real-time one, else its trip ID, else its timetable time, which (unlike
+    /// its prediction) doesn't move.
+    /// </summary>
+    internal static string TripKey(Arrival arrival) =>
+        arrival.ScheduleTripId ?? TripKey(arrival.TripId, arrival.ScheduledTime ?? arrival.PredictedTime);
+
+    /// <summary>True when <paramref name="skipped"/> names <paramref name="arrival"/> (by <see cref="TripKey(Arrival)"/>, or its trip ID or prediction).</summary>
+    internal static bool IsSkipped(IReadOnlySet<string>? skipped, Arrival arrival) =>
+        skipped is not null && (skipped.Contains(TripKey(arrival)) || skipped.Contains(TripKey(arrival.TripId, arrival.PredictedTime)));
 
     /// <summary>
     /// The departure of any of the ride's lines, at or after <paramref name="ready"/>, that gets off soonest,
@@ -162,8 +174,7 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
     private static LiveRide? Next(RideLeg ride, RideLine line, IEnumerable<Arrival> batch, DateTimeOffset ready, IReadOnlySet<string>? skipped)
     {
         Arrival[] known = [.. batch];
-        bool Skipped(string? tripId, DateTimeOffset departs) => skipped?.Contains(TripKey(tripId, departs)) ?? false;
-        if (known.Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ready && !Skipped(a.TripId, a.PredictedTime))
+        if (known.Where(a => a.Status != ArrivalStatus.Canceled && a.PredictedTime >= ready && !IsSkipped(skipped, a))
             .MinBy(a => a.PredictedTime) is { } departure)
         {
             return new LiveRide(ride, line, departure.PredictedTime, departure.PredictedTime + RideTime(ride, line, departure), departure);
@@ -171,9 +182,10 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
 
         // The batch may not reach this far ahead or cover this stop. A trip it does know (canceled,
         // or already gone) isn't taken from the plan.
-        HashSet<string> knownTrips = [.. known.Select(a => a.TripId).OfType<string>()];
+        HashSet<string> knownTrips = [.. known.SelectMany(a => new[] { a.TripId, a.ScheduleTripId }).OfType<string>()];
         return line.Departures
-            .Where(d => d.Departs >= ready && (d.TripId is null || !knownTrips.Contains(d.TripId)) && !Skipped(d.TripId, d.Departs))
+            .Where(d => d.Departs >= ready && (d.TripId is null || !knownTrips.Contains(d.TripId))
+                && !(skipped?.Contains(TripKey(d.TripId, d.Departs)) ?? false))
             .MinBy(d => d.Departs) is { } planned
             ? new LiveRide(ride, line, planned.Departs, planned.Alights, null)
             : null;
@@ -182,7 +194,7 @@ public sealed record LiveTrip(TripItinerary Itinerary, IReadOnlyList<LiveLeg> Le
     /// <summary>How long the plan rides <paramref name="departure"/>'s trip, else the line's planned trip nearest in time, else the leg.</summary>
     internal static TimeSpan RideTime(RideLeg ride, RideLine line, Arrival departure)
     {
-        PlannedDeparture? planned = line.Departures.FirstOrDefault(d => d.TripId is not null && d.TripId == departure.TripId)
+        PlannedDeparture? planned = line.Departures.FirstOrDefault(d => d.TripId is not null && departure.IsTrip(d.TripId))
             ?? line.Departures.MinBy(d => (d.Departs - departure.PredictedTime).Duration());
         return planned is null ? ride.Duration : planned.Alights - planned.Departs;
     }

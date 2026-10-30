@@ -356,6 +356,45 @@ public sealed class TripProgressTests
     }
 
     [TestMethod]
+    public void Missed_WithoutTripIds_StaysMissedAfterItsPredictionMoves()
+    {
+        // Arrange: a feed without trip IDs. The 8:05 14 runs at 8:07, and the rider misses it.
+        TripItinerary trip = new(
+        [
+            Walk(0, 5),
+            new RideLeg(At(5), At(20), [Line("a", Fourteen, new PlannedDeparture(At(5), At(20), false, null), new PlannedDeparture(At(20), At(35), false, null))]),
+            Walk(20, 23),
+        ], At(0), At(23));
+        TripProgress missed = TripProgress.Start(LiveTrip.Compute(trip, [], At(-10))!, default, null, Lead, At(-10))
+            .Advance(Snapshot(4, NoTripId(7, scheduled: 5), NoTripId(20, scheduled: 20)), Lead, At(4)).Progress
+            .Missed(At(6));
+
+        // Act: the missed 14 is now due at 8:09, and the 8:20 is canceled.
+        TripProgress next = missed.Advance(
+            Snapshot(8, NoTripId(9, scheduled: 5), NoTripId(20, scheduled: 20, ArrivalStatus.Canceled), NoTripId(30, scheduled: 30)), Lead, At(8)).Progress;
+
+        // Assert: it takes the 8:30, not the 14 the rider just missed.
+        Assert.AreEqual(At(20), missed.Rides[0].Departs);
+        Assert.AreEqual(At(30), next.Rides[0].Departs);
+    }
+
+    [TestMethod]
+    public void ReplanTime_LeaveAtStillAhead_KeepsItUntilTheRiderLeaves()
+    {
+        // Arrange: a trip to leave at 8:30, started at 7:50.
+        TripProgress progress = TripProgress.Start(LiveTrip.Compute(TransferTrip(30), [], At(-10))!,
+            new TripTime(TripTimeMode.LeaveAt, At(30)), null, Lead, At(-10));
+
+        // Act
+        TripTime before = progress.ReplanTime(At(-10));
+        TripTime after = progress.ReplanTime(At(31));
+
+        // Assert
+        Assert.AreEqual(new TripTime(TripTimeMode.LeaveAt, At(30)), before);
+        Assert.AreEqual(default, after);
+    }
+
+    [TestMethod]
     public void Missed_BeforeLeaving_ChangesNothing()
     {
         // Arrange
@@ -690,4 +729,8 @@ public sealed class TripProgressTests
 
     private static Arrival Live(string stopId, TransitRoute route, int minutes, string? tripId, ArrivalStatus status = ArrivalStatus.Scheduled) =>
         new(stopId, route.Id, route.DisplayId, North.Id, "Downtown", At(minutes), status, IsRealTime: true, tripId);
+
+    /// <summary>A real-time 14 at "a" from a feed without trip IDs, due at <paramref name="minutes"/> and timetabled at <paramref name="scheduled"/>.</summary>
+    private static Arrival NoTripId(int minutes, int scheduled, ArrivalStatus status = ArrivalStatus.Scheduled) =>
+        Live("a", Fourteen, minutes, null, status) with { ScheduledTime = At(scheduled) };
 }

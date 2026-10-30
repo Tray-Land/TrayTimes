@@ -24,6 +24,19 @@ public sealed class TripMatchTests
     }
 
     [TestMethod]
+    public void Find_ScheduledTripGainedARealTimeId_StillMatchesByItsTimetableId()
+    {
+        // Arrange: tracked while scheduled-only, by its timetable ID; now it has a real-time one too.
+        Arrival trip = Departure(25, "rt-2") with { ScheduleTripId = "key-2" };
+
+        // Act
+        Arrival? match = TripMatch.Find([Departure(5, "rt-1") with { ScheduleTripId = "key-1" }, trip], Line, "key-2", Now.AddMinutes(24));
+
+        // Assert
+        Assert.AreSame(trip, match);
+    }
+
+    [TestMethod]
     public void Find_NoTripId_TakesTheNearestRealTimeDepartureWithinTheTolerance()
     {
         // Arrange

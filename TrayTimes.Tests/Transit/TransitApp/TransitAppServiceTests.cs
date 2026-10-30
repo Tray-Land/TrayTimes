@@ -46,6 +46,27 @@ public sealed class TransitAppServiceTests
     }
 
     [TestMethod]
+    public async Task GetDeparturesAsync_TripSearchKey_IsTheTripIdUntilARealTimeOneAndAlwaysTheScheduleTripId()
+    {
+        // Arrange
+        RequestTestHandler handler = new()
+        {
+            RespondAsync = (_, _) => Task.FromResult(RequestTestHandler.Response(RequestTestHandler.Departures(
+                new TestDeparture("STM:1", "STM:14", Now.AddMinutes(5), RealTime: false, SearchKey: "key-1"),
+                new TestDeparture("STM:1", "STM:14", Now.AddMinutes(9), TripId: "rt-2", SearchKey: "key-2")))),
+        };
+        TransitAppService service = handler.CreateService();
+
+        // Act
+        DepartureBoard board = await service.GetDeparturesAsync(["STM:1"]);
+
+        // Assert
+        CollectionAssert.AreEqual(new[] { "key-1", "rt-2" }, board.Arrivals.Select(a => a.TripId).ToArray());
+        CollectionAssert.AreEqual(new[] { "key-1", "key-2" }, board.Arrivals.Select(a => a.ScheduleTripId).ToArray());
+        Assert.IsTrue(board.Arrivals[1].IsTrip("key-2"));
+    }
+
+    [TestMethod]
     public async Task GetDeparturesAsync_RealTimeScheduledAndCanceled_MapsEachDepartureSoonestFirst()
     {
         // Arrange

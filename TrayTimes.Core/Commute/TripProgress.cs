@@ -260,9 +260,15 @@ public sealed record TripProgress(TripItinerary Itinerary, IReadOnlyList<RideCho
         }
 
         RideChoice missed = Rides[step.Ride];
+        RideLine line = Itinerary.Legs.OfType<RideLeg>().ElementAt(step.Ride).Lines[missed.Line];
+
+        // Its departure's own key too, so it's still known once its prediction moves or it gains a real-time ID.
+        string[] keys = Departure(Known.ToLookup(StopLine.Of), line, missed) is { } departure
+            ? [LiveTrip.TripKey(missed.TripId, missed.Departs), LiveTrip.TripKey(departure)]
+            : [LiveTrip.TripKey(missed.TripId, missed.Departs)];
         TripProgress progress = this with
         {
-            MissedTrips = [.. MissedTrips, LiveTrip.TripKey(missed.TripId, missed.Departs)],
+            MissedTrips = [.. MissedTrips.Union(keys, StringComparer.Ordinal)],
             LeftAt = LeftAt ?? LeaveTime(),
             HeadOutSent = true,
             LeaveNowSent = true,
@@ -409,6 +415,10 @@ public sealed record TripProgress(TripItinerary Itinerary, IReadOnlyList<RideCho
         return ride < 0 ? null : Itinerary.Legs.OfType<RideLeg>().ElementAt(ride).Lines[Rides[ride].Line].BoardAt.Location;
     }
 
+    /// <summary>When to plan the rest of the trip for: the leave-at time while the rider hasn't left and it's still ahead, else now.</summary>
+    public TripTime ReplanTime(DateTimeOffset now) =>
+        LeftAt is null && NotBefore > now ? new TripTime(TripTimeMode.LeaveAt, NotBefore) : default;
+
     /// <summary>
     /// Continues on the best trip of <paramref name="plan"/>, planned again from <see cref="ReplanFrom"/>, as soon
     /// as the rider can be there. Keeps the rides taken, the walks to where the new plan starts, and what the
@@ -487,7 +497,7 @@ public sealed record TripProgress(TripItinerary Itinerary, IReadOnlyList<RideCho
         }
 
         return known[new StopLine(stop.Id, line.Route.Id, line.Direction.Id)]
-            .FirstOrDefault(a => a.TripId == tripId && a.Status != ArrivalStatus.Canceled && a.PredictedTime > departs)?.PredictedTime;
+            .FirstOrDefault(a => a.IsTrip(tripId) && a.Status != ArrivalStatus.Canceled && a.PredictedTime > departs)?.PredictedTime;
     }
 
     /// <summary>When the rider leaves: when they left, else the first ride's departure less the walk to it (a walk-only trip's start).</summary>

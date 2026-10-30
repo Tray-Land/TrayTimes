@@ -342,7 +342,8 @@ public sealed class TransitAppService : ITransitService
                 NonEmpty(item.RtTripId) ?? NonEmpty(item.TripSearchKey),
                 item.ScheduledDepartureTime is { } scheduled && double.IsFinite(scheduled) ? FromUnix(scheduled) : null,
                 route.Color,
-                route.Mode));
+                route.Mode,
+                NonEmpty(item.TripSearchKey)));
         }
     }
 
