@@ -125,9 +125,11 @@ public sealed class TripWalkItem : TripLegItem
 public sealed class TripRideItem : TripLegItem
 {
     /// <param name="times">The first ride's departures to track (the trip view); empty in the progress view.</param>
-    public TripRideItem(LiveRide ride, IReadOnlyList<BusTimeItem> times, DataTemplate? timeTemplate, TripLegState? state = null)
+    /// <param name="alerts">The route's service alerts, which a warning sign under its badge opens.</param>
+    public TripRideItem(LiveRide ride, IReadOnlyList<BusTimeItem> times, DataTemplate? timeTemplate, IReadOnlyList<ServiceAlert> alerts, TripLegState? state = null)
         : base(state)
     {
+        Alerts = alerts;
         RouteChipItem badge = new(ride.Line.Route.DisplayId, MapHelpers.ParseRouteColor(ride.Departure?.RouteColor ?? ride.Line.Route.Color), false);
         RouteLabel = ride.Line.Route.DisplayId;
         RouteBadge = badge.Label;
@@ -153,6 +155,8 @@ public sealed class TripRideItem : TripLegItem
     /// <summary>The route's whole name, for screen readers.</summary>
     public string RouteLabel { get; }
 
+    public IReadOnlyList<ServiceAlert> Alerts { get; }
+
     /// <summary>The route's name as its narrow badge shows it ("BRN" for "Brown").</summary>
     public string RouteBadge { get; }
 
@@ -176,7 +180,7 @@ public sealed class TripRideItem : TripLegItem
 
     public Visibility TimesVisibility => Times.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
-    public override string Signature => $"{MarkerSignature}|{RouteLabel}|{RouteBackground.Color}|{Destination}|{Board}|{Detail}|{Alight}|{string.Join(';', Times.Select(t => t.Signature))}";
+    public override string Signature => $"{MarkerSignature}|{RouteLabel}|{RouteBackground.Color}|{Destination}|{Board}|{Detail}|{Alight}|{string.Join(';', Times.Select(t => t.Signature))}|{AlertsSignature.Of(Alerts)}";
 
     protected override string Description => AppStrings.Format("TripRideNameFormat", RouteLabel, Destination, Board, Detail, Alight);
 }

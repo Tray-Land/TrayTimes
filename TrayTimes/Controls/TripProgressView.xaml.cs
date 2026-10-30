@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using TrayTimes.Commute;
 using TrayTimes.Services;
+using TrayTimes.Transit;
 using TrayTimes.Views;
 
 namespace TrayTimes.Controls;
@@ -42,7 +43,8 @@ public sealed partial class TripProgressView : UserControl
 
     /// <summary>Shows <paramref name="trip"/> at <paramref name="now"/>.</summary>
     /// <param name="step">Where the rider is; null for a trip waiting to be resumed (the Resume card).</param>
-    public void Show(ActiveTrip trip, TripStep? step, DateTimeOffset now)
+    /// <param name="alerts">Where each ride's route's service alerts come from.</param>
+    public void Show(ActiveTrip trip, TripStep? step, AlertBook alerts, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(trip);
         LiveTrip live = trip.Progress.Trip;
@@ -71,11 +73,11 @@ public sealed partial class TripProgressView : UserControl
         Announce(step is null ? "resume" : $"{step.Kind}|{step.Ride}|{step.AwaitsReplan}");
         if (step is not null)
         {
-            ShowSteps(live, step, trip.Leg.To.Name);
+            ShowSteps(live, step, trip.Leg.To.Name, alerts, now);
         }
     }
 
-    private void ShowSteps(LiveTrip live, TripStep step, string destination)
+    private void ShowSteps(LiveTrip live, TripStep step, string destination, AlertBook alerts, DateTimeOffset now)
     {
         List<TripLegItem> items = [];
         for (int i = 0; i < live.Legs.Count; i++)
@@ -87,7 +89,7 @@ public sealed partial class TripProgressView : UserControl
             }
             else if (live.Legs[i] is LiveRide ride)
             {
-                items.Add(new TripRideItem(ride, [], timeTemplate: null, step.StateOf(i)) { JoinsPrevious = i > 0, JoinsNext = hasNext });
+                items.Add(new TripRideItem(ride, [], timeTemplate: null, alerts.For(ride.Line.Route.Id, now), step.StateOf(i)) { JoinsPrevious = i > 0, JoinsNext = hasNext });
             }
         }
 

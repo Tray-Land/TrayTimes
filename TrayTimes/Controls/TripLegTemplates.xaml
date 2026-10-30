@@ -148,27 +148,35 @@
                     Style="{StaticResource TripLegLinkStyle}"
                     Visibility="{x:Bind NextLinkVisibility}" />
             </Grid>
-            <Border
+            <StackPanel
                 Grid.Column="1"
-                Height="28"
                 Margin="0,8,0,0"
-                Padding="4,0"
                 VerticalAlignment="Top"
-                Background="{x:Bind RouteBackground}"
-                CornerRadius="4"
-                Opacity="{x:Bind RowOpacity}">
-                <!--  A name too long even in short ("UP-NW") shrinks to fit rather than being cut off  -->
-                <Viewbox
+                Opacity="{x:Bind RowOpacity}"
+                Spacing="6">
+                <Border
+                    Height="28"
+                    Padding="4,0"
+                    Background="{x:Bind RouteBackground}"
+                    CornerRadius="4">
+                    <!--  A name too long even in short ("UP-NW") shrinks to fit rather than being cut off  -->
+                    <Viewbox
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        StretchDirection="DownOnly">
+                        <TextBlock
+                            AutomationProperties.Name="{x:Bind RouteLabel}"
+                            Foreground="{x:Bind RouteForeground}"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="{x:Bind RouteBadge}" />
+                    </Viewbox>
+                </Border>
+                <!--  A warning sign that opens the route's service alerts, when it has any  -->
+                <controls:AlertsButton
                     HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    StretchDirection="DownOnly">
-                    <TextBlock
-                        AutomationProperties.Name="{x:Bind RouteLabel}"
-                        Foreground="{x:Bind RouteForeground}"
-                        Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="{x:Bind RouteBadge}" />
-                </Viewbox>
-            </Border>
+                    Alerts="{x:Bind Alerts}"
+                    Route="{x:Bind RouteLabel}" />
+            </StackPanel>
             <StackPanel
                 Grid.Column="2"
                 Margin="12,8,0,8"

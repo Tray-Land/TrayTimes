@@ -2126,7 +2126,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _tripSelection.Update(new TripPlan([], []), [], now, time: _tripTime);
         }
 
-        _tripView.Show(leg, _tripSelection, arrivals, _tracker.Current, now, (DataTemplate)Root.Resources["BusTimeTemplate"],
+        _tripView.Show(leg, _tripSelection, arrivals, _tracker.Current, _monitor.Metadata.Alerts, now, (DataTemplate)Root.Resources["BusTimeTemplate"],
             timed ? _timedTripMonitor.IsLoading && shown?.Plan is null
                 : _isReplanning || (_suggestionMonitor.IsLoading && shown?.Plan is null),
             timed ? _timedTripError : _suggestionError, _tripTime);
@@ -2333,7 +2333,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
 
         TripStep? step = _trips.Step; // Null while the trip waits to be resumed.
-        _progressView.Show(trip, step, now);
+        _progressView.Show(trip, step, _monitor.Metadata.Alerts, now);
         if (_tripMap.Draw(trip.Progress.Trip, trip.Leg))
         {
             _vehiclePositions.Invalidate();

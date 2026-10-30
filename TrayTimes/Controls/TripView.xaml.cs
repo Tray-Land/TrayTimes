@@ -39,7 +39,8 @@ public sealed partial class TripView : UserControl
 
     public void FocusBack() => BackButton.Focus(FocusState.Programmatic);
 
-    public void Show(CommuteLeg leg, TripSelection selection, IReadOnlyList<Arrival> arrivals, TrackedBus? tracked,
+    /// <param name="alerts">Where each ride's route's service alerts come from.</param>
+    public void Show(CommuteLeg leg, TripSelection selection, IReadOnlyList<Arrival> arrivals, TrackedBus? tracked, AlertBook alerts,
         DateTimeOffset now, DataTemplate timeTemplate, bool isReplanning, string? error, TripTime time = default)
     {
         _time = time;
@@ -68,7 +69,7 @@ public sealed partial class TripView : UserControl
             ?? (trip is null ? AppStrings.Format("SuggestionNoTripFormat", leg.To.Name)
                 : !trip.IsLive ? AppStrings.Get("TripFutureScheduled") : string.Empty);
         ShowOptions(selection);
-        ShowLegs(trip, leg, arrivals, tracked, now, timeTemplate);
+        ShowLegs(trip, leg, arrivals, tracked, alerts, now, timeTemplate);
     }
 
     private void ShowOptions(TripSelection selection)
@@ -105,7 +106,7 @@ public sealed partial class TripView : UserControl
         }
     }
 
-    private void ShowLegs(LiveTrip? trip, CommuteLeg leg, IReadOnlyList<Arrival> arrivals, TrackedBus? tracked,
+    private void ShowLegs(LiveTrip? trip, CommuteLeg leg, IReadOnlyList<Arrival> arrivals, TrackedBus? tracked, AlertBook alerts,
         DateTimeOffset now, DataTemplate timeTemplate)
     {
         List<TripLegItem> items = [];
@@ -125,7 +126,7 @@ public sealed partial class TripView : UserControl
                     BusTimeItem[] times = firstRide
                         ? [.. departures.Select(a => new BusTimeItem(a, ride.Line.BoardAt.Location, now, current, ride.Line.BoardAt.Name))]
                         : [];
-                    items.Add(new TripRideItem(ride, times, timeTemplate));
+                    items.Add(new TripRideItem(ride, times, timeTemplate, alerts.For(ride.Line.Route.Id, now)));
                     firstRide = false;
                 }
             }
