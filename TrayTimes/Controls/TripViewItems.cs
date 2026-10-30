@@ -129,7 +129,8 @@ public sealed class TripRideItem : TripLegItem
         : base(state)
     {
         RouteChipItem badge = new(ride.Line.Route.DisplayId, MapHelpers.ParseRouteColor(ride.Departure?.RouteColor ?? ride.Line.Route.Color), false);
-        RouteLabel = badge.Label;
+        RouteLabel = ride.Line.Route.DisplayId;
+        RouteBadge = badge.Label;
         RouteBackground = badge.Background;
         RouteForeground = badge.Foreground;
         Destination = ride.Departure?.Destination is { Length: > 0 } headsign ? headsign : ride.Line.Direction.Name;
@@ -149,7 +150,11 @@ public sealed class TripRideItem : TripLegItem
         TimesName = AppStrings.Format("TripTimesNameFormat", RouteLabel, ride.Line.BoardAt.Name);
     }
 
+    /// <summary>The route's whole name, for screen readers.</summary>
     public string RouteLabel { get; }
+
+    /// <summary>The route's name as its narrow badge shows it ("BRN" for "Brown").</summary>
+    public string RouteBadge { get; }
 
     public SolidColorBrush RouteBackground { get; }
 

@@ -172,9 +172,10 @@ public sealed class SuggestionCardItem
 }
 
 /// <summary>One ride's route badge on the suggestion card, after an arrow from the ride before it.</summary>
-public sealed class RouteChipItem(string label, Color color, bool isTransfer)
+/// <param name="displayId">The route's name, which the badge shows in short ("Brown" as "BRN").</param>
+public sealed class RouteChipItem(string displayId, Color color, bool isTransfer)
 {
-    public string Label { get; } = label;
+    public string Label { get; } = RouteNames.Short(displayId);
 
     public SolidColorBrush Background { get; } = new(color);
 

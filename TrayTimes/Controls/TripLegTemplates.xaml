@@ -157,12 +157,17 @@
                 Background="{x:Bind RouteBackground}"
                 CornerRadius="4"
                 Opacity="{x:Bind RowOpacity}">
-                <TextBlock
+                <!--  A name too long even in short ("UP-NW") shrinks to fit rather than being cut off  -->
+                <Viewbox
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Foreground="{x:Bind RouteForeground}"
-                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                    Text="{x:Bind RouteLabel}" />
+                    StretchDirection="DownOnly">
+                    <TextBlock
+                        AutomationProperties.Name="{x:Bind RouteLabel}"
+                        Foreground="{x:Bind RouteForeground}"
+                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                        Text="{x:Bind RouteBadge}" />
+                </Viewbox>
             </Border>
             <StackPanel
                 Grid.Column="2"
