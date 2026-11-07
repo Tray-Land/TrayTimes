@@ -23,7 +23,7 @@ public sealed partial class PlacePicker : UserControl
         if (!GeocodingService.IsAvailable)
         {
             AddressBox.IsEnabled = false;
-            AddressBox.PlaceholderText = "Address search needs an Azure Maps key";
+            AddressBox.PlaceholderText = "Place search needs a Google Places or Azure Maps key";
         }
 
         ShowPlace();

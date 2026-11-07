@@ -5,7 +5,8 @@ using TrayTimes.Transit;
 
 namespace TrayTimes.Commute;
 
-public sealed record DestinationResult(string Name, GeoPoint Location, string? StopId = null)
+/// <summary><see cref="Title"/> and <see cref="Subtitle"/>, when set, are the place's name and address for a two-line row; <see cref="Name"/> is the full text.</summary>
+public sealed record DestinationResult(string Name, GeoPoint Location, string? StopId = null, string? Title = null, string? Subtitle = null)
 {
     public FavoritePlace AsPlace() => new(Guid.NewGuid().ToString("N"), PlaceKind.Custom, Name,
         new Place(Name, Location.Lat, Location.Lon), StopId);
@@ -45,7 +46,7 @@ public sealed class DestinationSearch(
         var addressResults = await addressTask.ConfigureAwait(false);
         var stopResults = await stopTask.ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
-        DestinationResult[] foundAddresses = [.. addressResults.Items.Select(a => new DestinationResult(a.Address, a.Location))];
+        DestinationResult[] foundAddresses = [.. addressResults.Items.Select(a => new DestinationResult(a.Address, a.Location, Title: a.Title, Subtitle: a.Subtitle))];
         DestinationResult[] foundStops = [.. stopResults.Items.DistinctBy(s => s.Id, StringComparer.Ordinal)
             .Select(s => new DestinationResult(s.Name, s.Location, s.Id))];
         return new DestinationSearchResults(

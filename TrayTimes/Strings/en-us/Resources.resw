@@ -857,17 +857,23 @@
   <data name="DestinationSearchMenu" xml:space="preserve">
     <value>Search for a place…</value>
   </data>
-  <data name="DestinationSearchBack.Content" xml:space="preserve">
+  <data name="DestinationSearchBack.ToolTipService.ToolTip" xml:space="preserve">
     <value>Back to departures</value>
+  </data>
+  <data name="DestinationSearchRecent.Text" xml:space="preserve">
+    <value>Recently searched</value>
+  </data>
+  <data name="DestinationSearchClearRecent.Content" xml:space="preserve">
+    <value>Clear</value>
+  </data>
+  <data name="DestinationSearchClearRecent.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Clear recently searched places</value>
   </data>
   <data name="DestinationSearchBack.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Back to departures</value>
   </data>
-  <data name="DestinationSearchQuery.Header" xml:space="preserve">
-    <value>Where are you going?</value>
-  </data>
   <data name="DestinationSearchQuery.PlaceholderText" xml:space="preserve">
-    <value>Address, stop name, or stop code</value>
+    <value>Where to? Place, address, or stop</value>
   </data>
   <data name="DestinationSearchQuery.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Search for a destination</value>
@@ -879,7 +885,7 @@
     <value>Press Enter or select Search to look up a destination. Nothing is searched while you type.</value>
   </data>
   <data name="DestinationSearchStopsOnly" xml:space="preserve">
-    <value>Address search needs an Azure Maps key. You can still search for a stop by name or code.</value>
+    <value>Place search needs a Google Places or Azure Maps key. You can still search for a stop by name or code.</value>
   </data>
   <data name="DestinationSearchEnterQuery" xml:space="preserve">
     <value>Enter an address, stop name, or stop code.</value>

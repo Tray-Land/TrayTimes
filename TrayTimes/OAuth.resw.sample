@@ -41,6 +41,10 @@
     <value></value>
     <comment>Transit API key (request one at transitapp.com/partners/apis). It's sent in the apiKey request header, never in URLs.</comment>
   </data>
+  <data name="GooglePlacesApiKey" xml:space="preserve">
+    <value></value>
+    <comment>Google Places API (New) key for place search when adding Home/Work/School or searching for a destination. Optional; without it, search falls back to Azure Maps addresses. Restrict the key to the Places API (New).</comment>
+  </data>
   <data name="AzureMapsKey" xml:space="preserve">
     <value></value>
     <comment>Azure Maps subscription key for the basemap, address search, and walking times (Azure portal > Azure Maps account > Authentication > Primary Key). Optional; without it the map has no basemap.</comment>

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using TrayTimes.Commute;
 using TrayTimes.Models;
 using TrayTimes.Transit;
 using Windows.Storage;
@@ -9,6 +10,7 @@ namespace TrayTimes.Services;
 [JsonSerializable(typeof(List<SavedStop>))]
 [JsonSerializable(typeof(Place))]
 [JsonSerializable(typeof(List<FavoritePlace>))]
+[JsonSerializable(typeof(List<RecentDestination>))]
 [JsonSerializable(typeof(MapView))]
 [JsonSerializable(typeof(ApiCallLog))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext;
@@ -55,6 +57,32 @@ internal static class SettingsService
             }
         }
     }
+
+    /// <summary>Destinations picked from search, newest first. Only chosen results are kept, never typed queries.</summary>
+    public static IReadOnlyList<RecentDestination> RecentDestinations
+    {
+        get
+        {
+            if (Get<string?>(nameof(RecentDestinations), null) is not { } json)
+            {
+                return [];
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize(json, SettingsJsonContext.Default.ListRecentDestination) ?? [];
+            }
+            catch (JsonException)
+            {
+                return [];
+            }
+        }
+    }
+
+    public static void AddRecentDestination(RecentDestination chosen) =>
+        Set(nameof(RecentDestinations), JsonSerializer.Serialize([.. RecentDestination.WithChosen(RecentDestinations, chosen)], SettingsJsonContext.Default.ListRecentDestination));
+
+    public static void ClearRecentDestinations() => Set(nameof(RecentDestinations), null);
 
     /// <summary>Where the flyout's map was when it was last dismissed, so reopening picks up there.</summary>
     public static MapView? FlyoutMapView

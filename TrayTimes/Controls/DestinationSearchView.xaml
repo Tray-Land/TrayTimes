@@ -11,26 +11,49 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Button
-            x:Uid="DestinationSearchBack"
-            AutomationProperties.AutomationId="DestinationSearchBack"
-            HorizontalAlignment="Left"
-            Click="Back_Click" />
-        <AutoSuggestBox
-            x:Name="QueryBox"
-            x:Uid="DestinationSearchQuery"
-            Grid.Row="1"
-            AutomationProperties.AutomationId="DestinationSearchQuery"
-            QueryIcon="Find"
-            QuerySubmitted="QueryBox_QuerySubmitted"
-            TextChanged="QueryBox_TextChanged" />
+        <Grid ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button
+                x:Uid="DestinationSearchBack"
+                AutomationProperties.AutomationId="DestinationSearchBack"
+                Click="Back_Click"
+                Style="{StaticResource ToolbarButtonStyle}">
+                <FontIcon
+                    AutomationProperties.AccessibilityView="Raw"
+                    FontSize="16"
+                    Glyph="&#xE72B;" />
+            </Button>
+            <AutoSuggestBox
+                x:Name="QueryBox"
+                x:Uid="DestinationSearchQuery"
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                AutomationProperties.AutomationId="DestinationSearchQuery"
+                QueryIcon="Find"
+                QuerySubmitted="QueryBox_QuerySubmitted"
+                TextChanged="QueryBox_TextChanged" />
+        </Grid>
         <TextBlock
             x:Name="StatusText"
-            Grid.Row="2"
+            Grid.Row="1"
             AutomationProperties.AutomationId="DestinationSearchStatus"
             AutomationProperties.LiveSetting="Polite"
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             TextWrapping="Wrap" />
+        <Grid x:Name="RecentHeader" Grid.Row="2" Visibility="Collapsed">
+            <TextBlock
+                x:Uid="DestinationSearchRecent"
+                VerticalAlignment="Center"
+                Style="{StaticResource BodyStrongTextBlockStyle}" />
+            <HyperlinkButton
+                x:Uid="DestinationSearchClearRecent"
+                HorizontalAlignment="Right"
+                AutomationProperties.AutomationId="DestinationSearchClearRecent"
+                Click="ClearRecent_Click" />
+        </Grid>
         <ListView
             x:Name="ResultsList"
             x:Uid="DestinationSearchResults"
@@ -44,10 +67,15 @@
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="controls:DestinationSearchItem" x:DefaultBindMode="OneTime">
                     <StackPanel Padding="4" Spacing="2" AutomationProperties.Name="{x:Bind AutomationName}">
-                        <TextBlock Text="{x:Bind Label}" TextWrapping="Wrap" />
+                        <TextBlock
+                            MaxLines="2"
+                            Text="{x:Bind Label}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap" />
                         <TextBlock
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
+                            TextTrimming="CharacterEllipsis"
                             Text="{x:Bind Detail}" />
                     </StackPanel>
                 </DataTemplate>

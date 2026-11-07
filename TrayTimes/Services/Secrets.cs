@@ -11,6 +11,11 @@ internal static class Secrets
     private static readonly Lazy<string?> s_transitApiKey = new(() => GetOAuthString("TransitApiKey"));
     private static readonly Lazy<string?> s_azureMapsKey = new(() => GetOAuthString("AzureMapsKey"));
 
+    private static readonly Lazy<string?> s_googlePlacesApiKey = new(() => GetOAuthString("GooglePlacesApiKey"));
+
+    /// <summary>The Google Places API (New) key for place search, or null when OAuth.resw doesn't provide one.</summary>
+    public static string? GooglePlacesApiKey => s_googlePlacesApiKey.Value;
+
     /// <summary>The Transit API key (transitapp.com/partners/apis), or null when OAuth.resw doesn't provide one.</summary>
     public static string? TransitApiKey => s_transitApiKey.Value;
 

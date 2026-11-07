@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net.Http;
 using System.Text.Json;
+using TrayTimes.Commute;
 using TrayTimes.Models;
 using TrayTimes.Transit;
 
@@ -18,12 +19,23 @@ internal static class GeocodingService
         SettingsService.Places.FirstOrDefault(p => p.Kind == PlaceKind.Home)?.Location
         ?? (SettingsService.FlyoutMapView is { } view ? new GeoPoint(view.Lat, view.Lon) : null);
 
-    /// <summary>False without an Azure Maps key; callers should fall back to device location.</summary>
-    public static bool IsAvailable => Secrets.AzureMapsKey is not null;
+    /// <summary>False without a Google Places or Azure Maps key; callers should fall back to device location.</summary>
+    public static bool IsAvailable => Secrets.GooglePlacesApiKey is not null || Secrets.AzureMapsKey is not null;
 
+    /// <summary>Finds places and addresses. Google Places finds businesses and landmarks by name; Azure Maps is the address-only fallback.</summary>
     public static async Task<IReadOnlyList<GeocodeResult>> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
-        if (Secrets.AzureMapsKey is not { } key || string.IsNullOrWhiteSpace(query))
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return [];
+        }
+
+        if (Secrets.GooglePlacesApiKey is { } googleKey)
+        {
+            return await SearchGoogleAsync(query.Trim(), googleKey, cancellationToken);
+        }
+
+        if (Secrets.AzureMapsKey is not { } key)
         {
             return [];
         }
@@ -114,6 +126,17 @@ internal static class GeocodingService
             && address.TryGetProperty("freeformAddress", out JsonElement text)
                 ? text.GetString()
                 : null;
+    }
+
+    private static async Task<IReadOnlyList<GeocodeResult>> SearchGoogleAsync(string query, string key, CancellationToken cancellationToken)
+    {
+        using StringContent content = new(GooglePlacesSearch.BuildRequestBody(query, BiasPoint), System.Text.Encoding.UTF8, "application/json");
+        using HttpRequestMessage request = new(HttpMethod.Post, GooglePlacesSearch.Endpoint) { Content = content };
+        request.Headers.Add("X-Goog-Api-Key", key);
+        request.Headers.Add("X-Goog-FieldMask", GooglePlacesSearch.FieldMask);
+        using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return GooglePlacesSearch.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
     }
 
     private static async Task<JsonDocument> GetJsonAsync(string url, CancellationToken cancellationToken)

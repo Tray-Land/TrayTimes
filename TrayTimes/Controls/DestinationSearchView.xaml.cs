@@ -31,9 +31,36 @@ public sealed partial class DestinationSearchView : UserControl
         _near = near;
         _search = new DestinationSearch(GeocodingService.IsAvailable ? GeocodingService.SearchAsync : null, service.SearchStopsAsync);
         QueryBox.Text = string.Empty;
-        ResultsList.ItemsSource = null;
+        ShowIdle();
+        FocusQuery();
+    }
+
+    /// <summary>
+    /// Puts the cursor in the search box. The view has usually only just become visible (or been created), so
+    /// focus is retried once the layout pass has run.
+    /// </summary>
+    private void FocusQuery()
+    {
+        UpdateLayout();
+        if (!QueryBox.Focus(FocusState.Programmatic))
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => QueryBox.Focus(FocusState.Programmatic));
+        }
+    }
+
+    /// <summary>The help text, with the recently chosen destinations below it while the box is empty.</summary>
+    private void ShowIdle()
+    {
         ShowHelp();
-        QueryBox.Focus(FocusState.Programmatic);
+        DestinationSearchItem[] recents = [.. SettingsService.RecentDestinations.Select(r => new DestinationSearchItem(r.ToResult()))];
+        ResultsList.ItemsSource = recents.Length == 0 ? null : recents;
+        RecentHeader.Visibility = recents.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ClearRecent_Click(object sender, RoutedEventArgs e)
+    {
+        SettingsService.ClearRecentDestinations();
+        ShowIdle();
     }
 
     public void Cancel()
@@ -59,6 +86,13 @@ public sealed partial class DestinationSearchView : UserControl
     private void QueryBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         Cancel(); // Editing invalidates an in-flight submit, but never starts another request.
+        if (string.IsNullOrWhiteSpace(sender.Text))
+        {
+            ShowIdle();
+            return;
+        }
+
+        RecentHeader.Visibility = Visibility.Collapsed;
         ResultsList.ItemsSource = null;
         ShowHelp();
     }
@@ -79,6 +113,7 @@ public sealed partial class DestinationSearchView : UserControl
 
         Cancel();
         CancellationTokenSource request = _request = new();
+        RecentHeader.Visibility = Visibility.Collapsed;
         ResultsList.ItemsSource = null;
         StatusText.Text = AppStrings.Get("DestinationSearchLoading");
         using IDisposable scope = TransitRequestDiagnostics.BeginScope(TransitConsumer.Commute, TransitTrigger.PickerSelection);
@@ -129,6 +164,7 @@ public sealed partial class DestinationSearchView : UserControl
     {
         if (e.ClickedItem is DestinationSearchItem item)
         {
+            SettingsService.AddRecentDestination(RecentDestination.From(item.Result));
             DestinationChosen?.Invoke(this, item.Result);
         }
     }
@@ -138,9 +174,12 @@ public sealed class DestinationSearchItem(DestinationResult result)
 {
     public DestinationResult Result { get; } = result;
 
-    public string Label => Result.Name;
+    /// <summary>A place's name (or the whole address when it has none).</summary>
+    public string Label => Result.Title ?? Result.Name;
 
-    public string Detail => Result.StopId is null ? AppStrings.Get("DestinationSearchAddress") : AppStrings.Format("DestinationSearchStopFormat", Result.StopId);
+    /// <summary>A place's address, else "Address", else the stop code.</summary>
+    public string Detail => Result.Subtitle
+        ?? (Result.StopId is null ? AppStrings.Get("DestinationSearchAddress") : AppStrings.Format("DestinationSearchStopFormat", Result.StopId));
 
     public string AutomationName => AppStrings.Format("DestinationSearchResultNameFormat", Label, Detail);
 }
