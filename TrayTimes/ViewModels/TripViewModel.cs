@@ -133,38 +133,94 @@ internal sealed partial class TripViewModel : ObservableObject
 
     private static string Clock(DateTimeOffset at) => at.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
 
-    /// <summary>The date and time to start the editor at: the time already chosen if it is still ahead, else half an hour from now.</summary>
-    public (DateTime Date, DateTime MinDate, TimeSpan Clock) StartEditing(TripTimeMode mode, DateTimeOffset now)
+    // The time editor (leave at / arrive by).
+
+    private TripTimeMode _editingMode;
+
+    /// <summary>Raised when the time editor should open.</summary>
+    public event EventHandler? EditorOpenRequested;
+
+    /// <summary>Raised when the time editor should close, its time having been accepted or cancelled.</summary>
+    public event EventHandler? EditorCloseRequested;
+
+    [ObservableProperty]
+    public partial string EditorHeading { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial DateTimeOffset? EditorDate { get; set; }
+
+    [ObservableProperty]
+    public partial TimeSpan? EditorClock { get; set; }
+
+    /// <summary>The earliest date the editor offers: today.</summary>
+    [ObservableProperty]
+    public partial DateTimeOffset EditorMinDate { get; set; }
+
+    /// <summary>What is wrong with the time entered; empty when nothing is.</summary>
+    [ObservableProperty]
+    public partial string ValidationText { get; set; } = string.Empty;
+
+    public bool HasValidation => ValidationText.Length > 0;
+
+    partial void OnValidationTextChanged(string value) => OnPropertyChanged(nameof(HasValidation));
+
+    [RelayCommand]
+    private void EditLeaveAt() => StartEditing(TripTimeMode.LeaveAt, DateTimeOffset.Now);
+
+    [RelayCommand]
+    private void EditArriveBy() => StartEditing(TripTimeMode.ArriveBy, DateTimeOffset.Now);
+
+    /// <summary>Starts the editor at the time already chosen if it is still ahead, else half an hour from now.</summary>
+    internal void StartEditing(TripTimeMode mode, DateTimeOffset now)
     {
+        _editingMode = mode;
         DateTimeOffset at = _time.Mode != TripTimeMode.Now && _time.At > now ? _time.At.ToLocalTime() : now.AddMinutes(30);
-        return (at.Date, now.Date, new TimeSpan(at.Hour, (at.Minute / 5) * 5, 0));
+        EditorMinDate = now.Date;
+        EditorDate = at.Date;
+        EditorClock = new TimeSpan(at.Hour, (at.Minute / 5) * 5, 0);
+        EditorHeading = AppStrings.Get(mode == TripTimeMode.LeaveAt ? "TripLeaveAt/Text" : "TripArriveBy/Text");
+        ValidationText = string.Empty;
+        EditorOpenRequested?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Asks for the time the rider entered. Returns the resource key of what is wrong with it, or null when it was accepted.</summary>
-    public string? TryApplyTime(TripTimeMode mode, DateTimeOffset? date, TimeSpan? clock)
+    /// <summary>Asks for the time the rider entered, closing the editor when it is accepted and saying what is wrong with it when not.</summary>
+    [RelayCommand]
+    private void ApplyTime()
     {
-        TripTime requested;
+        string? errorKey = Validate(out TripTime requested);
+        if (errorKey is not null)
+        {
+            ValidationText = AppStrings.Get(errorKey);
+            return;
+        }
+
+        ValidationText = string.Empty;
+        TimeRequested?.Invoke(this, requested);
+        EditorCloseRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    [RelayCommand]
+    private void CancelEditing() => EditorCloseRequested?.Invoke(this, EventArgs.Empty);
+
+    /// <returns>The resource key of what is wrong with the time entered, or null when it is acceptable.</returns>
+    private string? Validate(out TripTime requested)
+    {
+        requested = default;
         try
         {
-            if (date is not { } day || clock is not { } time)
+            if (EditorDate is not { } day || EditorClock is not { } time)
             {
                 return "TripTimeRequired";
             }
 
-            requested = TripTime.FromLocal(mode, day.Date, time, TimeZoneInfo.Local);
+            requested = TripTime.FromLocal(_editingMode, day.Date, time, TimeZoneInfo.Local);
         }
         catch (ArgumentException)
         {
             return "TripTimeAmbiguous";
         }
 
-        if (requested.At <= DateTimeOffset.Now)
-        {
-            return "TripTimeMustBeFuture";
-        }
-
-        TimeRequested?.Invoke(this, requested);
-        return null;
+        return requested.At <= DateTimeOffset.Now ? "TripTimeMustBeFuture" : null;
     }
 
     [RelayCommand]

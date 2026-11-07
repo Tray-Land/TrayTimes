@@ -65,36 +65,37 @@
                         <Flyout x:Name="TimeEditorFlyout" Placement="BottomEdgeAlignedRight">
                             <StackPanel Width="280" Spacing="12">
                                 <TextBlock
-                                    x:Name="TimeEditorHeading"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    Style="{StaticResource BodyStrongTextBlockStyle}"
+                                    Text="{x:Bind ViewModel.EditorHeading, Mode=OneWay}" />
                                 <CalendarDatePicker
-                                    x:Name="TravelDatePicker"
                                     x:Uid="TripTravelDate"
                                     AutomationProperties.AutomationId="TripTravelDate"
-                                    HorizontalAlignment="Stretch" />
+                                    Date="{x:Bind ViewModel.EditorDate, Mode=TwoWay}"
+                                    HorizontalAlignment="Stretch"
+                                    MinDate="{x:Bind ViewModel.EditorMinDate, Mode=OneWay}" />
                                 <TimePicker
-                                    x:Name="TravelClockPicker"
                                     x:Uid="TripTravelClock"
                                     AutomationProperties.AutomationId="TripTravelClock"
                                     HorizontalAlignment="Stretch"
-                                    MinuteIncrement="5" />
+                                    MinuteIncrement="5"
+                                    SelectedTime="{x:Bind ViewModel.EditorClock, Mode=TwoWay}" />
                                 <TextBlock
-                                    x:Name="TimeValidationText"
                                     AutomationProperties.AutomationId="TripTimeValidation"
                                     AutomationProperties.LiveSetting="Polite"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="{x:Bind ViewModel.ValidationText, Mode=OneWay}"
                                     TextWrapping="Wrap"
-                                    Visibility="Collapsed" />
+                                    Visibility="{x:Bind ViewModel.HasValidation, Mode=OneWay}" />
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button
                                         x:Uid="TripTimeApply"
                                         AutomationProperties.AutomationId="TripTimeApply"
-                                        Click="TimeApply_Click"
+                                        Command="{x:Bind ViewModel.ApplyTimeCommand}"
                                         Style="{StaticResource AccentButtonStyle}" />
                                     <Button
                                         x:Uid="TripTimeCancel"
                                         AutomationProperties.AutomationId="TripTimeCancel"
-                                        Click="TimeCancel_Click" />
+                                        Command="{x:Bind ViewModel.CancelEditingCommand}" />
                                 </StackPanel>
                             </StackPanel>
                         </Flyout>
@@ -112,11 +113,11 @@
                             <MenuFlyoutItem
                                 x:Uid="TripLeaveAt"
                                 AutomationProperties.AutomationId="TripLeaveAt"
-                                Click="LeaveAt_Click" />
+                                Command="{x:Bind ViewModel.EditLeaveAtCommand}" />
                             <MenuFlyoutItem
                                 x:Uid="TripArriveBy"
                                 AutomationProperties.AutomationId="TripArriveBy"
-                                Click="ArriveBy_Click" />
+                                Command="{x:Bind ViewModel.EditArriveByCommand}" />
                         </MenuFlyout>
                     </DropDownButton.Flyout>
                 </DropDownButton>

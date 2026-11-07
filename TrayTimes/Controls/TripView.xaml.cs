@@ -17,7 +17,6 @@ namespace TrayTimes.Controls;
 public sealed partial class TripView : UserControl
 {
     private bool _updating;
-    private TripTimeMode _editingMode;
 
     public TripView()
     {
@@ -26,6 +25,8 @@ public sealed partial class TripView : UserControl
         ViewModel.OptionChosen += (_, itinerary) => OptionChosen?.Invoke(this, itinerary);
         ViewModel.TimeRequested += (_, time) => TimeRequested?.Invoke(this, time);
         ViewModel.GoRequested += (_, e) => GoRequested?.Invoke(this, e);
+        ViewModel.EditorOpenRequested += OnEditorOpenRequested;
+        ViewModel.EditorCloseRequested += OnEditorCloseRequested;
         InitializeComponent();
     }
 
@@ -84,36 +85,14 @@ public sealed partial class TripView : UserControl
         }
     }
 
-    private void LeaveAt_Click(object sender, RoutedEventArgs e) => EditTime(TripTimeMode.LeaveAt);
-
-    private void ArriveBy_Click(object sender, RoutedEventArgs e) => EditTime(TripTimeMode.ArriveBy);
-
-    private void EditTime(TripTimeMode mode)
-    {
-        _editingMode = mode;
-        (DateTime date, DateTime minDate, TimeSpan clock) = ViewModel.StartEditing(mode, DateTimeOffset.Now);
-        TravelDatePicker.MinDate = minDate;
-        TravelDatePicker.Date = date;
-        TravelClockPicker.SelectedTime = clock;
-        TimeEditorHeading.Text = AppStrings.Get(mode == TripTimeMode.LeaveAt ? "TripLeaveAt/Text" : "TripArriveBy/Text");
-        TimeValidationText.Visibility = Visibility.Collapsed;
+    private void OnEditorOpenRequested(object? sender, EventArgs e) =>
         DispatcherQueue.TryEnqueue(() => TimeEditorFlyout.ShowAt(TimeButton));
-    }
 
-    private void TimeApply_Click(object sender, RoutedEventArgs e)
+    private void OnEditorCloseRequested(object? sender, EventArgs e)
     {
-        if (ViewModel.TryApplyTime(_editingMode, TravelDatePicker.Date, TravelClockPicker.SelectedTime) is { } errorKey)
-        {
-            TimeValidationText.Text = AppStrings.Get(errorKey);
-            TimeValidationText.Visibility = Visibility.Visible;
-            return;
-        }
-
         TimeEditorFlyout.Hide();
         TimeButton.Focus(FocusState.Programmatic);
     }
-
-    private void TimeCancel_Click(object sender, RoutedEventArgs e) => TimeEditorFlyout.Hide();
 
     private void OptionsBar_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
