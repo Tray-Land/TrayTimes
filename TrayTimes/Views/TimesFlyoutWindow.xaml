@@ -88,35 +88,46 @@
                 x:DataType="views:ArrivalItem"
                 x:DefaultBindMode="OneTime">
                 <StackPanel Loaded="ArrivalRow_Loaded">
-                    <Button
-                        AutomationProperties.Name="{x:Bind AutomationName}"
-                        Click="ArrivalButton_Click"
-                        Opacity="{x:Bind RowOpacity}"
-                        Style="{StaticResource RowButtonStyle}"
-                        ToolTipService.ToolTip="Show this route's vehicles on the map">
+                    <Grid Opacity="{x:Bind RowOpacity}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!--  The route's number opens its line: where it goes and where its buses are  -->
+                        <Button
+                            MinWidth="44"
+                            Height="28"
+                            Margin="8,6,0,6"
+                            VerticalAlignment="Center"
+                            AutomationProperties.AutomationId="RouteBadgeButton"
+                            AutomationProperties.Name="{x:Bind LineDetailName}"
+                            Background="{x:Bind views:XamlFunctions.Solid(RouteColor)}"
+                            Click="RouteBadgeButton_Click"
+                            Style="{StaticResource RouteBadgeButtonStyle}"
+                            ToolTipService.ToolTip="{x:Bind LineDetailName}">
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Foreground="{x:Bind views:XamlFunctions.Solid(RouteTextColor)}"
+                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                Text="{x:Bind RouteLabel}" />
+                        </Button>
+
+                        <Button
+                            Grid.Column="1"
+                            Padding="12,6,8,6"
+                            AutomationProperties.Name="{x:Bind AutomationName}"
+                            Click="ArrivalButton_Click"
+                            Style="{StaticResource RowButtonStyle}"
+                            ToolTipService.ToolTip="Show this route's vehicles on the map">
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
 
-                            <Border
-                                MinWidth="44"
-                                Height="28"
-                                Padding="6,0"
-                                VerticalAlignment="Center"
-                                Background="{x:Bind views:XamlFunctions.Solid(RouteColor)}"
-                                CornerRadius="4">
-                                <TextBlock
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Foreground="{x:Bind views:XamlFunctions.Solid(RouteTextColor)}"
-                                    Style="{StaticResource BodyStrongTextBlockStyle}"
-                                    Text="{x:Bind RouteLabel}" />
-                            </Border>
-
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <StackPanel VerticalAlignment="Center">
                                 <TextBlock
                                     Text="{x:Bind Destination}"
                                     TextTrimming="CharacterEllipsis"
@@ -152,7 +163,7 @@
                             </StackPanel>
 
                             <StackPanel
-                                Grid.Column="2"
+                                Grid.Column="1"
                                 VerticalAlignment="Center"
                                 Loaded="Eta_Loaded"
                                 Opacity="{x:Bind EtaOpacity}"
@@ -170,7 +181,8 @@
                                     Text="{x:Bind UnitText}" />
                             </StackPanel>
                         </Grid>
-                    </Button>
+                        </Button>
+                    </Grid>
 
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -556,6 +568,12 @@
             HorizontalContentAlignment="Stretch"
             VerticalContentAlignment="Stretch"
             Visibility="{x:Bind ViewModel.ShowsSearch, Mode=OneWay}" />
+        <ContentControl
+            x:Name="LineHost"
+            Grid.Row="3"
+            HorizontalContentAlignment="Stretch"
+            VerticalContentAlignment="Stretch"
+            Visibility="{x:Bind ViewModel.ShowsLine, Mode=OneWay}" />
         <ContentControl
             x:Name="TripHost"
             Grid.Row="3"

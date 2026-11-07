@@ -155,23 +155,28 @@
                 VerticalAlignment="Top"
                 Opacity="{x:Bind RowOpacity}"
                 Spacing="6">
-                <Border
+                <!--  The badge opens the route's line detail  -->
+                <Button
                     Height="28"
                     Padding="4,0"
+                    HorizontalAlignment="Stretch"
+                    AutomationProperties.AutomationId="TripRouteBadgeButton"
+                    AutomationProperties.Name="{x:Bind LineName}"
                     Background="{x:Bind views:XamlFunctions.Solid(RouteColor)}"
-                    CornerRadius="4">
+                    Click="RouteBadge_Click"
+                    Style="{StaticResource RouteBadgeButtonStyle}">
                     <!--  A name too long even in short ("UP-NW") shrinks to fit rather than being cut off  -->
                     <Viewbox
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         StretchDirection="DownOnly">
                         <TextBlock
-                            AutomationProperties.Name="{x:Bind RouteLabel}"
+                            AutomationProperties.AccessibilityView="Raw"
                             Foreground="{x:Bind views:XamlFunctions.Solid(RouteTextColor)}"
                             Style="{StaticResource BodyStrongTextBlockStyle}"
                             Text="{x:Bind RouteBadge}" />
                     </Viewbox>
-                </Border>
+                </Button>
                 <!--  A warning sign that opens the route's service alerts, when it has any  -->
                 <controls:AlertsButton
                     HorizontalAlignment="Center"

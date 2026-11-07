@@ -1444,4 +1444,69 @@
     <value>Medical emergency</value>
     <comment>Why a service alert was issued.</comment>
   </data>
+  <data name="LineFitLabel" xml:space="preserve">
+    <value>Show the whole line on the map</value>
+    <comment>Map context menu item on a bus line's page.</comment>
+  </data>
+  <data name="LineDetailOpenFormat" xml:space="preserve">
+    <value>{0}: route, stops and buses</value>
+    <comment>Name of a route's number button on the board. {0} is the route, such as "Bus 14".</comment>
+  </data>
+  <data name="LineLoading" xml:space="preserve">
+    <value>Loading the line…</value>
+    <comment>Shown on a bus line's page while its stops load.</comment>
+  </data>
+  <data name="LineLoadFailed" xml:space="preserve">
+    <value>Couldn't load this line. Go back and try again in a moment.</value>
+    <comment>Shown on a bus line's page when its stops could not be loaded.</comment>
+  </data>
+  <data name="LineNoStops" xml:space="preserve">
+    <value>No stops are listed for this line.</value>
+    <comment>Shown on a bus line's page when it has no stops.</comment>
+  </data>
+  <data name="LineNotConfigured" xml:space="preserve">
+    <value>Add a Transit API key in settings to see lines.</value>
+    <comment>Shown on a bus line's page when the app has no key for the transit service.</comment>
+  </data>
+  <data name="LineStopTransfersFormat" xml:space="preserve">
+    <value>Transfers: {0}</value>
+    <comment>Spoken with a stop on a bus line's page. {0} lists the other routes that serve the stop.</comment>
+  </data>
+  <data name="LineStopBusNearby" xml:space="preserve">
+    <value>A bus is nearest this stop</value>
+    <comment>Spoken with a stop on a bus line's page.</comment>
+  </data>
+  <data name="LineStopBusesNearbyFormat" xml:space="preserve">
+    <value>{0} buses are nearest this stop</value>
+    <comment>Spoken with a stop on a bus line's page. {0} is a number of buses.</comment>
+  </data>
+  <data name="LineStopFavorite" xml:space="preserve">
+    <value>Favorite stop</value>
+    <comment>Spoken with a stop on a bus line's page that is a favorite.</comment>
+  </data>
+  <data name="LineStopTripMenu" xml:space="preserve">
+    <value>Plan a trip here</value>
+    <comment>Menu item on a stop of a bus line's page.</comment>
+  </data>
+  <data name="LineStopAddFavoriteMenu" xml:space="preserve">
+    <value>Add to favorites</value>
+    <comment>Menu item on a stop of a bus line's page.</comment>
+  </data>
+  <data name="LineStopRemoveFavoriteMenu" xml:space="preserve">
+    <value>Remove from favorites</value>
+    <comment>Menu item on a stop of a bus line's page.</comment>
+  </data>
+  <data name="LineTripStartedFormat" xml:space="preserve">
+    <value>Planning a trip to {0}.</value>
+    <comment>Map caption after choosing a stop of a bus line as a destination. {0} is the stop's name.</comment>
+  </data>
+  <data name="LineDirections.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Direction</value>
+  </data>
+  <data name="LineStops.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Stops on this line</value>
+  </data>
+  <data name="LineLoadingRing.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Loading the line</value>
+  </data>
 </root>

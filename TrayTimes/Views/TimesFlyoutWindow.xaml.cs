@@ -105,6 +105,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private DestinationSearchView? _destinationSearch;
     private readonly TripMapRenderer _tripMap;
     private TripView? _tripView;
+    private LineDetailView? _lineView;
+    private readonly LineMapRenderer _lineMap;
     private TripProgressView? _progressView;
     private bool _progressMapInitialized;
     private readonly TripStepZoom _stepZoom = new();
@@ -170,6 +172,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _stopGlyph = new FontIcon { Glyph = MapHelpers.StopGlyph, FontSize = 14 };
         _tripMap = new TripMapRenderer(_routeLayer, _stopLayer, _placeLayer, _stopGlyph, _stopPins);
+        _lineMap = new LineMapRenderer(_routeLayer, _stopLayer, _stopPins);
         _busBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.White, 28);
         _selectedBusBackdropGlyph = MapHelpers.CreateGlyph(MapHelpers.StopGlyph, Microsoft.UI.Colors.Yellow, 38);
         _mapHeadingCallbackToken = Map.RegisterPropertyChangedCallback(WinUIEx.Maps.MapControl.HeadingProperty, (_, _) => UpdateVehicleArrows());
@@ -274,6 +277,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
         _isPopupVisible = false;
         _destinationSearch?.Cancel();
+        _lineView?.Cancel();
         _vehiclePositions.IsForeground = false;
         _lastDismissedAtUtc = DateTime.UtcNow;
         _hideTimer.Stop();
@@ -439,7 +443,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             SaveProgressMapView();
         }
-        else if (ViewModel.ShowsTrip || ViewModel.ShownPlace?.Center is not NearYou)
+        else if (ViewModel.ShowsTrip || ViewModel.ShowsLine || ViewModel.ShownPlace?.Center is not NearYou)
         {
             SettingsService.FlyoutMapView = null;
         }
@@ -479,7 +483,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _lastMinutes.Clear();
         _stripOffsets.Clear();
         _keepListScroll = false;
-        if (!ViewModel.IsTripShown)
+        if (!ViewModel.OwnsMap)
         {
             ClearVehicles();
             _routeLayer.MapElements.Clear();
@@ -499,7 +503,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     {
         if (update.Found is null)
         {
-            if (!ViewModel.IsTripShown)
+            if (!ViewModel.OwnsMap)
             {
                 _stopLayer.MapElements.Clear();
                 _stopPins.Clear();
@@ -511,13 +515,13 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return;
         }
 
-        if (update.Changed && !ViewModel.IsTripShown)
+        if (update.Changed && !ViewModel.OwnsMap)
         {
             RebuildStopPins();
             ShowCenterMarker(update.Found);
         }
 
-        if (update.Reframe && !ViewModel.IsTripShown)
+        if (update.Reframe && !ViewModel.OwnsMap)
         {
             _ = FrameListedStopsAsync(MapAnimationKind.None);
         }
@@ -592,7 +596,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         HashSet<RouteDirection> wanted = [.. arrivals
             .Where(a => a.Status != ArrivalStatus.Canceled && listed(StopLine.Of(a)))
             .Select(a => new RouteDirection(a.RouteId, a.DirectionId))];
-        if (_allowClose || ViewModel.IsTripShown || (_drawnRoutes?.SetEquals(wanted) ?? false))
+        if (_allowClose || ViewModel.OwnsMap || (_drawnRoutes?.SetEquals(wanted) ?? false))
         {
             return;
         }
@@ -719,6 +723,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             return Task.CompletedTask;
         }
 
+        if (ViewModel.ShowsLine)
+        {
+            return MapHelpers.FrameAsync(Map, _lineMap.Points, animation);
+        }
+
         if (ViewModel.IsTripShown)
         {
             return MapHelpers.FrameAsync(Map, _tripMap.Points, animation);
@@ -797,6 +806,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         if (_onlyTripId is not null)
         {
             vehicles = vehicles.Where(v => v.TripId == _onlyTripId).ToList();
+        }
+
+        if (ViewModel.ShowsLine)
+        {
+            _lineView?.ViewModel.SetVehicles(vehicles); // The stop list marks where they are.
         }
 
         HashSet<string> seen = [];
@@ -1306,11 +1320,19 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             _destinationSearch?.Cancel();
         }
+        else if (previous == FlyoutPage.Line)
+        {
+            _lineView?.Cancel();
+            _lineMap.Clear(); // Whatever page is next draws its own map.
+        }
 
         switch (page)
         {
             case FlyoutPage.Search:
                 ShowSearch();
+                break;
+            case FlyoutPage.Line:
+                ShowLinePage();
                 break;
             case FlyoutPage.Trip:
                 ShowTripPage();
@@ -1343,6 +1365,94 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         _destinationSearch.Open(_monitor.Service, ViewModel.SearchNear(mapCenter));
     }
 
+    /// <summary>A route's number was pressed: opens that line's detail, in the direction the row was going.</summary>
+    private void RouteBadgeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not ArrivalItem { Arrival: { } arrival })
+        {
+            return;
+        }
+
+        ViewModel.OpenLine(new LineRequest(arrival.RouteId, arrival.RouteDisplayId, arrival.Mode, arrival.RouteColor, arrival.VehicleKind, arrival.DirectionId));
+    }
+
+    private void ShowLinePage()
+    {
+        if (_lineView is null)
+        {
+            _lineView = new LineDetailView();
+            _lineView.BackRequested += (_, _) => ViewModel.CloseLine();
+            _lineView.MapChanged += LineView_MapChanged;
+            _lineView.StopChosen += LineView_StopChosen;
+            _lineView.TripRequested += LineView_TripRequested;
+            _lineView.FavoriteRequested += LineView_FavoriteRequested;
+            LineHost.Content = _lineView;
+        }
+
+        if (ViewModel.Line is not { } line)
+        {
+            return;
+        }
+
+        _vehiclePositions.Invalidate();
+        ClearVehicles();
+        HideMapCaption(animate: false);
+        _lineMap.Clear();
+        _placeLayer.MapElements.Clear();
+        ResetRoutes();
+        _tripMap.Invalidate();
+        SetFitLabel("LineFitLabel");
+        _lineView.Open(_monitor.Service, line);
+        _lineView.FocusBack();
+    }
+
+    /// <summary>The line's route is known (or its direction changed): draws it, and follows that direction's buses.</summary>
+    private void LineView_MapChanged(object? sender, LineMap map)
+    {
+        if (!ViewModel.ShowsLine || ViewModel.Line is not { } line)
+        {
+            return;
+        }
+
+        _lineMap.Draw(map, MapHelpers.ParseRouteColor(line.Color));
+        RouteDirection direction = new(line.RouteId, map.DirectionId);
+        if (_selectedLine != direction)
+        {
+            ClearVehicles();
+            _selectedLine = direction;
+        }
+
+        _selectedLineLabel = line.Label;
+        _selectedLineVehicle = line.VehicleKind;
+        _ = FrameListedStopsAsync(MapAnimationKind.Default);
+        _ = RefreshVehiclesAsync(TransitTrigger.VehicleSelected);
+    }
+
+    private void LineView_StopChosen(object? sender, TransitStop stop)
+    {
+        DeselectVehicle();
+        _ = MapHelpers.FrameAsync(Map, new[] { stop.Location }, MapAnimationKind.Default, singlePointZoom: 16);
+        ShowMapCaption(stop.Name);
+    }
+
+    private void LineView_TripRequested(object? sender, TransitStop stop)
+    {
+        ViewModel.PlanTripToStop(stop);
+        ShowMapCaption(AppStrings.Format("LineTripStartedFormat", stop.Name));
+    }
+
+    private void LineView_FavoriteRequested(object? sender, TransitStop stop)
+    {
+        if (_lineView is null || ViewModel.Line is not { } line)
+        {
+            return;
+        }
+
+        string caption = ViewModel.ToggleSavedStop(stop, line, _lineView.ViewModel.Subheading);
+        _lineView.ViewModel.RefreshFavorites();
+        ShowMapCaption(caption);
+    }
+
     private void ShowTripPage()
     {
         if (_tripView is null)
@@ -1352,6 +1462,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _tripView.OptionChosen += TripPanel_OptionChosen;
             _tripView.TimeRequested += TripPanel_TimeRequested;
             _tripView.GoRequested += TripPanel_GoRequested;
+            _tripView.LineRequested += (_, line) => ViewModel.OpenLine(line);
             TripHost.Content = _tripView;
         }
 
@@ -1451,6 +1562,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             _progressView.MissedRequested += (_, _) => _ = _trips.MissedAsync();
             _progressView.ResumeRequested += (_, _) => _ = _trips.ResumeAsync();
             _progressView.StepInvoked += ProgressView_StepInvoked;
+            _progressView.LineRequested += (_, line) => ViewModel.OpenLine(line);
             ProgressHost.Content = _progressView;
         }
 
@@ -1551,9 +1663,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         return GeoMath.PointAlong(ride.Line.Path, length > 0 ? (now - ride.Starts).TotalSeconds / length : 0) ?? ride.Line.BoardAt.Location;
     }
 
-    private void SetFitLabel(bool isTrip)
+    private void SetFitLabel(bool isTrip) => SetFitLabel(isTrip ? "TripFitLabel" : "BoardFitLabel");
+
+    private void SetFitLabel(string key)
     {
-        string label = AppStrings.Get(isTrip ? "TripFitLabel" : "BoardFitLabel");
+        string label = AppStrings.Get(key);
         FitMenuItem.Text = label;
         AutomationProperties.SetName(FitMenuItem, label);
     }
@@ -1613,6 +1727,9 @@ public sealed partial class TimesFlyoutWindow : WindowEx
             case FlyoutPage.Trip:
                 ViewModel.CloseTrip(restoreBoard: true, focusCard: true);
                 break;
+            case FlyoutPage.Line:
+                ViewModel.CloseLine();
+                break;
             case FlyoutPage.Progress:
                 ViewModel.CloseProgress(focusCard: true);
                 break;
@@ -1633,6 +1750,11 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             args.Handled = true;
             ViewModel.CloseProgress(focusCard: true);
+        }
+        else if (ViewModel.ShowsLine)
+        {
+            args.Handled = true;
+            ViewModel.CloseLine();
         }
     }
 }

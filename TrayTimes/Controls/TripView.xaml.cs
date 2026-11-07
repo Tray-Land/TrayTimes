@@ -14,7 +14,7 @@ namespace TrayTimes.Controls;
 /// A trip's live options and walking/ride legs, with when to travel and Go in its header. What it shows and does is in
 /// <see cref="TripViewModel"/>; this view fills the option bar, runs the time editor's flyout, and moves focus.
 /// </summary>
-public sealed partial class TripView : UserControl
+public sealed partial class TripView : UserControl, ILineLauncher
 {
     private bool _updating;
 
@@ -39,7 +39,12 @@ public sealed partial class TripView : UserControl
     /// <summary>Raised when the rider presses Go to start the selected option at the chosen time.</summary>
     public event EventHandler? GoRequested;
 
+    /// <summary>Raised when the rider presses a ride's route badge, to see that line.</summary>
+    internal event EventHandler<LineRequest>? LineRequested;
+
     internal TripViewModel ViewModel { get; }
+
+    void ILineLauncher.RequestLine(LineRequest line) => LineRequested?.Invoke(this, line);
 
     public void FocusBack() => BackButton.Focus(FocusState.Programmatic);
 

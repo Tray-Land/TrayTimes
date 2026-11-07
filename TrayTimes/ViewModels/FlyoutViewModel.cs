@@ -15,13 +15,14 @@ using Notice = TrayTimes.Commute.PlaceNotice;
 
 namespace TrayTimes.ViewModels;
 
-/// <summary>Which page of the flyout is over the map: the board, the destination search, a trip's options, or the active trip's progress.</summary>
+/// <summary>Which page of the flyout is over the map: the board, the destination search, a trip's options, the active trip's progress, or a bus line's detail.</summary>
 internal enum FlyoutPage
 {
     Board,
     Search,
     Trip,
     Progress,
+    Line,
 }
 
 /// <summary>What changed on the board when it was updated, for the view to put on the map.</summary>
@@ -254,7 +255,7 @@ internal sealed partial class FlyoutViewModel : ObservableObject
     public bool IsSuggestionBusy => _suggestionMonitor.IsLoading || _isReplanning;
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ShowsBoard), nameof(ShowsSearch), nameof(ShowsTrip), nameof(ShowsProgress), nameof(ShowsPlaceChip), nameof(IsTripShown))]
+    [NotifyPropertyChangedFor(nameof(ShowsBoard), nameof(ShowsSearch), nameof(ShowsTrip), nameof(ShowsProgress), nameof(ShowsLine), nameof(ShowsPlaceChip), nameof(IsTripShown), nameof(OwnsMap))]
     public partial FlyoutPage Page { get; set; }
 
     public bool ShowsBoard => Page == FlyoutPage.Board;
@@ -265,10 +266,21 @@ internal sealed partial class FlyoutViewModel : ObservableObject
 
     public bool ShowsProgress => Page == FlyoutPage.Progress;
 
+    public bool ShowsLine => Page == FlyoutPage.Line;
+
     public bool ShowsPlaceChip => Page is FlyoutPage.Board or FlyoutPage.Search;
 
     /// <summary>A trip, not the board, owns the map.</summary>
     public bool IsTripShown => Page is FlyoutPage.Trip or FlyoutPage.Progress;
+
+    /// <summary>A trip or a bus line, not the board, owns the map and its vehicles.</summary>
+    public bool OwnsMap => IsTripShown || ShowsLine;
+
+    /// <summary>The line the line page shows; null on any other page.</summary>
+    internal LineRequest? Line { get; private set; }
+
+    /// <summary>The page the line page was opened from, which Back returns to.</summary>
+    private FlyoutPage _lineReturn = FlyoutPage.Board;
 
     // State the window reads.
 
@@ -354,6 +366,7 @@ internal sealed partial class FlyoutViewModel : ObservableObject
     public void StartShowing()
     {
         CloseSearch();
+        CloseLine();
         CloseTrip(restoreBoard: true);
         if (_trips.Current is null)
         {
@@ -1127,16 +1140,28 @@ internal sealed partial class FlyoutViewModel : ObservableObject
     /// <returns>The caption to show; empty when the group is not a stop that can be saved.</returns>
     public string ToggleSavedStop(StopGroupItem group)
     {
-        if (group.Saveable is not { } stop)
-        {
-            return string.Empty;
-        }
+        return group.Saveable is { } stop
+            ? ToggleSavedStop(group.IsSaved, stop.Id, stop.Name, stop.Lat, stop.Lon, stop.Routes.FirstOrDefault())
+            : string.Empty;
+    }
 
+    /// <summary>A stop on the line page: saves it (all routes, noting this line), or removes it if already saved.</summary>
+    /// <returns>The caption to show.</returns>
+    public string ToggleSavedStop(TransitStop stop, LineRequest line, string directionName) => ToggleSavedStop(
+        SettingsService.Stops.Any(s => s.StopId == stop.Id),
+        stop.Id,
+        stop.Name,
+        stop.Location.Lat,
+        stop.Location.Lon,
+        new StopRouteInfo(line.RouteId, line.DisplayId, line.Color, line.DirectionId, directionName));
+
+    private static string ToggleSavedStop(bool isSaved, string id, string name, double lat, double lon, StopRouteInfo? route)
+    {
         IReadOnlyList<SavedStop> saved = SettingsService.Stops;
-        if (group.IsSaved)
+        if (isSaved)
         {
-            SettingsService.SetStops(saved.Where(s => s.StopId != stop.Id));
-            return $"Removed {stop.Name} from favorites.";
+            SettingsService.SetStops(saved.Where(s => s.StopId != id));
+            return $"Removed {name} from favorites.";
         }
 
         if (SavedStop.DistinctStopCount(saved) >= SettingsService.MaxFavoriteStops)
@@ -1144,19 +1169,18 @@ internal sealed partial class FlyoutViewModel : ObservableObject
             return $"You can have up to {SettingsService.MaxFavoriteStops} favorite stops. Remove one in settings first.";
         }
 
-        StopRouteInfo? route = stop.Routes.FirstOrDefault();
         SettingsService.AddStop(new SavedStop(
-            stop.Id,
-            stop.Name,
-            stop.Lat,
-            stop.Lon,
+            id,
+            name,
+            lat,
+            lon,
             route?.RouteId ?? string.Empty,
             route?.RouteDisplayId ?? string.Empty,
             route?.RouteColor,
             route?.DirectionId ?? string.Empty,
             route?.DirectionName ?? string.Empty,
             AllRoutes: true));
-        return $"Added {stop.Name} to favorites.";
+        return $"Added {name} to favorites.";
     }
 
     // The destination.
@@ -1214,6 +1238,50 @@ internal sealed partial class FlyoutViewModel : ObservableObject
             Page = FlyoutPage.Board;
             PageChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    /// <summary>Opens a bus line's detail over the map, from the board or from a trip's rides.</summary>
+    internal void OpenLine(LineRequest line)
+    {
+        if (Page is not (FlyoutPage.Board or FlyoutPage.Trip or FlyoutPage.Progress))
+        {
+            return;
+        }
+
+        _lineReturn = Page;
+        Line = line;
+        Page = FlyoutPage.Line;
+        PageChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Back from the line's detail to the page it was opened from: the trip, its progress, or the board and its map.</summary>
+    public void CloseLine()
+    {
+        if (Page != FlyoutPage.Line)
+        {
+            return;
+        }
+
+        FlyoutPage back = _lineReturn;
+        _lineReturn = FlyoutPage.Board;
+        Line = null;
+        bool tripGone = back == FlyoutPage.Trip ? _tripLeg is null
+            : back == FlyoutPage.Progress && _trips.Current is null; // It ended while the line was shown.
+        Page = back == FlyoutPage.Board || tripGone ? FlyoutPage.Board : back;
+        PageChanged?.Invoke(this, EventArgs.Empty);
+        if (Page == FlyoutPage.Board)
+        {
+            BoardRestoreRequested?.Invoke(this, false);
+        }
+    }
+
+    /// <summary>Goes back to the board with a trip to <paramref name="stop"/> suggested, as if it had been searched for.</summary>
+    public void PlanTripToStop(TransitStop stop)
+    {
+        _lineReturn = FlyoutPage.Board; // A new destination replaces the trip the line was opened from.
+        CloseTrip(restoreBoard: false);
+        CloseLine();
+        ChooseSearchedDestination(new DestinationResult(stop.Name, stop.Location, stop.Id));
     }
 
     /// <summary>Opens the trip using only the plan and departures already shown by the card; during a trip, its progress.</summary>

@@ -13,7 +13,7 @@ namespace TrayTimes.Controls;
 /// The active trip's progress. What it shows is in <see cref="TripProgressViewModel"/>; this view keeps focus where the
 /// rider left it when a button goes away, and has Narrator read the status when the step changes.
 /// </summary>
-public sealed partial class TripProgressView : UserControl
+public sealed partial class TripProgressView : UserControl, ILineLauncher
 {
     private string? _statusKey;
     private bool _announceNext;
@@ -48,7 +48,12 @@ public sealed partial class TripProgressView : UserControl
     /// <summary>Raised with the index, in the trip's legs, of the step the rider clicked.</summary>
     public event EventHandler<int>? StepInvoked;
 
+    /// <summary>Raised when the rider presses a ride's route badge, to see that line.</summary>
+    internal event EventHandler<LineRequest>? LineRequested;
+
     internal TripProgressViewModel ViewModel { get; }
+
+    void ILineLauncher.RequestLine(LineRequest line) => LineRequested?.Invoke(this, line);
 
     public void FocusBack() => BackButton.Focus(FocusState.Programmatic);
 

@@ -32,6 +32,64 @@
                 <Setter Property="Background" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
             </Style>
+
+            <!--  A route's colored badge as a button. Hover rings it and lightens it a little: the route color stays, so the number stays readable.  -->
+            <Style x:Key="RouteBadgeButtonStyle" TargetType="Button">
+                <Setter Property="Padding" Value="6,0" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid
+                                x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="{TemplateBinding CornerRadius}">
+                                <Border
+                                    x:Name="Tint"
+                                    Background="White"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0" />
+                                <Border
+                                    x:Name="Ring"
+                                    BorderBrush="{ThemeResource TextFillColorPrimaryBrush}"
+                                    BorderThickness="2"
+                                    CornerRadius="{TemplateBinding CornerRadius}"
+                                    Opacity="0" />
+                                <ContentPresenter
+                                    Padding="{TemplateBinding Padding}"
+                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                                    Content="{TemplateBinding Content}" />
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="Tint.Opacity" Value="0.18" />
+                                                <Setter Target="Ring.Opacity" Value="0.7" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="Ring.Opacity" Value="0.9" />
+                                                <Setter Target="Root.Opacity" Value="0.85" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="Root.Opacity" Value="0.5" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

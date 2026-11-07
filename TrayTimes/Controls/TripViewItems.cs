@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Windows.UI;
 using TrayTimes.Commute;
 using TrayTimes.Transit;
+using TrayTimes.ViewModels;
 using TrayTimes.Views;
 
 namespace TrayTimes.Controls;
@@ -149,7 +150,15 @@ public sealed class TripRideItem : TripLegItem
         Times = times;
         TimeTemplate = timeTemplate;
         TimesName = AppStrings.Format("TripTimesNameFormat", RouteLabel, ride.Line.BoardAt.Name);
+        Line = new LineRequest(ride.Line.Route.Id, ride.Line.Route.DisplayId, ride.Line.Route.Mode,
+            ride.Departure?.RouteColor ?? ride.Line.Route.Color, ride.Line.Route.VehicleKind, ride.Line.Direction.Id);
+        LineName = AppStrings.Format("LineDetailOpenFormat", Line.Label);
     }
+
+    /// <summary>The line the badge opens the detail of, in the direction this ride goes.</summary>
+    internal LineRequest Line { get; }
+
+    public string LineName { get; }
 
     /// <summary>The route's whole name, for screen readers.</summary>
     public string RouteLabel { get; }

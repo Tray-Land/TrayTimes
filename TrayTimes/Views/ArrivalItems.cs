@@ -214,6 +214,9 @@ public sealed class ArrivalItem
 
     public string TimesAutomationName { get; }
 
+    /// <summary>What the route's number says it opens, e.g. "Bus 14: route, stops and buses".</summary>
+    public string LineDetailName => AppStrings.Format("LineDetailOpenFormat", ViewModels.FlyoutViewModel.LineLabel(Arrival));
+
     /// <summary>When the rider would reach where they're headed on this trip, e.g. "Home by 5:42 PM"; empty if unknown.</summary>
     public string TripEtaText { get; } = string.Empty;
 
