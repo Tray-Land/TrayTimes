@@ -3,7 +3,8 @@
     x:Class="TrayTimes.Controls.TripView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:TrayTimes.Controls">
+    xmlns:controls="using:TrayTimes.Controls"
+    xmlns:views="using:TrayTimes.Views">
 
     <UserControl.Resources>
         <ResourceDictionary>
@@ -27,7 +28,7 @@
                 x:Name="BackButton"
                 x:Uid="TripBackButton"
                 AutomationProperties.AutomationId="TripBackButton"
-                Click="BackButton_Click"
+                Command="{x:Bind ViewModel.BackCommand}"
                 Style="{StaticResource ToolbarButtonStyle}">
                 <FontIcon
                     AutomationProperties.AccessibilityView="Raw"
@@ -36,14 +37,15 @@
             </Button>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock
-                    x:Name="HeadingText"
+                    Text="{x:Bind ViewModel.Heading, Mode=OneWay}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.Heading, Mode=OneWay}"
                     AutomationProperties.AutomationId="TripHeading"
                     MaxLines="2"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
                     TextTrimming="CharacterEllipsis"
                     TextWrapping="Wrap" />
                 <TextBlock
-                    x:Name="ArrivalText"
+                    Text="{x:Bind ViewModel.Arrival, Mode=OneWay}"
                     AutomationProperties.AutomationId="TripArrival"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
@@ -56,7 +58,9 @@
                 <DropDownButton
                     x:Name="TimeButton"
                     Padding="10,5,8,6"
-                    AutomationProperties.AutomationId="TripTimeButton">
+                    AutomationProperties.AutomationId="TripTimeButton"
+                    AutomationProperties.Name="{x:Bind ViewModel.TimeName, Mode=OneWay}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.TimeName, Mode=OneWay}">
                     <FlyoutBase.AttachedFlyout>
                         <Flyout x:Name="TimeEditorFlyout" Placement="BottomEdgeAlignedRight">
                             <StackPanel Width="280" Spacing="12">
@@ -96,7 +100,7 @@
                         </Flyout>
                     </FlyoutBase.AttachedFlyout>
                     <TextBlock
-                        x:Name="TimeButtonText"
+                        Text="{x:Bind ViewModel.TimeLabel, Mode=OneWay}"
                         MaxWidth="190"
                         TextTrimming="CharacterEllipsis" />
                     <DropDownButton.Flyout>
@@ -104,7 +108,7 @@
                             <MenuFlyoutItem
                                 x:Uid="TripLeaveNow"
                                 AutomationProperties.AutomationId="TripLeaveNow"
-                                Click="LeaveNow_Click" />
+                                Command="{x:Bind ViewModel.LeaveNowCommand}" />
                             <MenuFlyoutItem
                                 x:Uid="TripLeaveAt"
                                 AutomationProperties.AutomationId="TripLeaveAt"
@@ -117,12 +121,13 @@
                     </DropDownButton.Flyout>
                 </DropDownButton>
                 <Button
-                    x:Name="GoButton"
+                    AutomationProperties.Name="{x:Bind ViewModel.GoName, Mode=OneWay}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.GoName, Mode=OneWay}"
                     x:Uid="GoButton"
                     MinWidth="52"
                     AutomationProperties.AutomationId="GoButton"
-                    Click="GoButton_Click"
-                    IsEnabled="False"
+                    Command="{x:Bind ViewModel.GoCommand}"
+                    IsEnabled="{x:Bind ViewModel.CanGo, Mode=OneWay}"
                     Style="{StaticResource AccentButtonStyle}" />
             </StackPanel>
         </controls:TripHeaderPanel>
@@ -143,17 +148,17 @@
         </ScrollViewer>
 
         <InfoBar
-            x:Name="NoticeBar"
             Grid.Row="2"
             Margin="8,4"
             AutomationProperties.AutomationId="TripNotice"
             AutomationProperties.LiveSetting="Polite"
             IsClosable="False"
-            IsOpen="False"
-            Severity="Informational" />
+            IsOpen="{x:Bind ViewModel.IsNoticeOpen, Mode=OneWay}"
+            Message="{x:Bind ViewModel.NoticeMessage, Mode=OneWay}"
+            Severity="{x:Bind views:XamlFunctions.NoticeSeverity(ViewModel.IsNoticeWarning), Mode=OneWay}" />
 
         <ListView
-            x:Name="LegsList"
+            ItemsSource="{x:Bind ViewModel.Legs, Mode=OneTime}"
             x:Uid="TripLegs"
             Grid.Row="3"
             Padding="6,0,6,36"
@@ -170,18 +175,18 @@
             </ListView.ItemContainerStyle>
             <ListView.Footer>
                 <StackPanel
-                    x:Name="DestinationFooter"
+                    Visibility="{x:Bind ViewModel.ShowsDestination, Mode=OneWay}"
                     Margin="8,8,8,12"
                     Orientation="Horizontal"
                     Spacing="12">
                     <FontIcon
-                        x:Name="DestinationGlyph"
+                        Glyph="{x:Bind ViewModel.DestinationGlyph, Mode=OneWay}"
                         Width="40"
                         AutomationProperties.AccessibilityView="Raw"
                         FontSize="20"
                         Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                     <TextBlock
-                        x:Name="DestinationText"
+                        Text="{x:Bind ViewModel.DestinationText, Mode=OneWay}"
                         VerticalAlignment="Center"
                         AutomationProperties.AutomationId="TripDestination"
                         Style="{StaticResource BodyStrongTextBlockStyle}"

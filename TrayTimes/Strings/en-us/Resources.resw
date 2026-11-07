@@ -325,10 +325,13 @@
   <data name="SettingsMapCredits.Text" xml:space="preserve">
     <value>Basemap: Azure Maps. Map control: WinUIEx.Maps by Morten Nielsen.</value>
   </data>
-  <data name="SettingsCustomPlaceName" xml:space="preserve">
+  <data name="SettingsCustomPlaceNameBox.Header" xml:space="preserve">
     <value>Place name</value>
   </data>
-  <data name="SettingsCustomPlacePlaceholder" xml:space="preserve">
+  <data name="SettingsCustomPlaceNameBox.AutomationProperties.Name" xml:space="preserve">
+    <value>Place name</value>
+  </data>
+  <data name="SettingsCustomPlaceNameBox.PlaceholderText" xml:space="preserve">
     <value>Gym, the library, Grandma's...</value>
   </data>
   <data name="SettingsCustomPlaceDefaultName" xml:space="preserve">
@@ -714,6 +717,12 @@
     <value>Refresh arrival times</value>
   </data>
   <data name="RefreshMapMenuItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
+    <value>Refresh arrival times</value>
+  </data>
+  <data name="StatusRefreshButton.Content" xml:space="preserve">
+    <value>Refresh</value>
+  </data>
+  <data name="StatusRefreshButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve">
     <value>Refresh arrival times</value>
   </data>
   <data name="BoardFitLabel" xml:space="preserve">

@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Automation.Peers;
@@ -6,26 +5,36 @@ using Microsoft.UI.Xaml.Controls;
 using TrayTimes.Commute;
 using TrayTimes.Services;
 using TrayTimes.Transit;
-using TrayTimes.Views;
+using TrayTimes.ViewModels;
 
 namespace TrayTimes.Controls;
 
 /// <summary>
-/// The active trip's progress: the current step with what to do next (and I missed it while heading to or on a
-/// ride), and every step, done, current, or upcoming. A trip saved before a restart shows the Resume card
-/// instead. It presents the trip as <see cref="ActiveTripService"/> has it and never requests anything; the
-/// flyout acts on its events.
+/// The active trip's progress. What it shows is in <see cref="TripProgressViewModel"/>; this view keeps focus where the
+/// rider left it when a button goes away, and has Narrator read the status when the step changes.
 /// </summary>
 public sealed partial class TripProgressView : UserControl
 {
-    private readonly ObservableCollection<TripLegItem> _legs = [];
     private string? _statusKey;
     private bool _announceNext;
 
     public TripProgressView()
     {
+        ViewModel = new TripProgressViewModel();
+        ViewModel.BackRequested += (_, e) => BackRequested?.Invoke(this, e);
+        ViewModel.EndRequested += (_, e) => EndRequested?.Invoke(this, e);
+        ViewModel.MissedRequested += (_, e) =>
+        {
+            _announceNext = true; // The step stays the same, re-timed: say its new time.
+            MissedRequested?.Invoke(this, e);
+        };
+        ViewModel.ResumeRequested += (_, e) =>
+        {
+            _announceNext = true;
+            ResumeRequested?.Invoke(this, e);
+        };
+        ViewModel.StepInvoked += (_, leg) => StepInvoked?.Invoke(this, leg);
         InitializeComponent();
-        StepsList.ItemsSource = _legs;
     }
 
     public event EventHandler? BackRequested;
@@ -39,6 +48,8 @@ public sealed partial class TripProgressView : UserControl
     /// <summary>Raised with the index, in the trip's legs, of the step the rider clicked.</summary>
     public event EventHandler<int>? StepInvoked;
 
+    internal TripProgressViewModel ViewModel { get; }
+
     public void FocusBack() => BackButton.Focus(FocusState.Programmatic);
 
     /// <summary>Shows <paramref name="trip"/> at <paramref name="now"/>.</summary>
@@ -46,54 +57,15 @@ public sealed partial class TripProgressView : UserControl
     /// <param name="alerts">Where each ride's route's service alerts come from.</param>
     public void Show(ActiveTrip trip, TripStep? step, AlertBook alerts, DateTimeOffset now)
     {
-        ArgumentNullException.ThrowIfNull(trip);
-        LiveTrip live = trip.Progress.Trip;
-        HeadingText.Text = AppStrings.Format("TripProgressHeadingFormat", trip.Leg.To.Name);
-        ToolTipService.SetToolTip(HeadingText, HeadingText.Text);
-        ArrivalText.Text = TripMessages.Arrival(trip.Leg, live.Arrives, now);
-        DestinationGlyph.Glyph = MapHelpers.PlaceGlyph(trip.Leg.To.Kind);
-        DestinationText.Text = AppStrings.Format("TripDestinationFormat", trip.Leg.To.Name, TripMessages.When(live.Arrives, now));
-
-        TripStatus status = step is null ? TripMessages.Resume(trip) : TripMessages.Status(trip, step, now);
-        StatusText.Text = status.Title;
-        StatusDetail.Text = status.Detail;
-        AutomationProperties.SetName(StatusText, status.Spoken);
         bool canMiss = step is { CanMiss: true };
         bool losesFocus = (!canMiss && HasFocus(MissedItButton)) || (step is not null && (HasFocus(ResumeButton) || HasFocus(DiscardButton)));
-        SetVisible(MissedItButton, canMiss);
-        SetVisible(ResumeButton, step is null);
-        SetVisible(DiscardButton, step is null);
-        SetVisible(EndTripButton, step is not null);
-        SetVisible(StepsList, step is not null);
+        ViewModel.Show(trip, step, alerts, now);
         if (losesFocus)
         {
             FocusBack(); // The button pressed went away (resumed, or the ride now waits for a new plan).
         }
 
-        Announce(step is null ? "resume" : $"{step.Kind}|{step.Ride}|{step.AwaitsReplan}");
-        if (step is not null)
-        {
-            ShowSteps(live, step, trip.Leg.To.Name, alerts, now);
-        }
-    }
-
-    private void ShowSteps(LiveTrip live, TripStep step, string destination, AlertBook alerts, DateTimeOffset now)
-    {
-        List<TripLegItem> items = [];
-        for (int i = 0; i < live.Legs.Count; i++)
-        {
-            bool hasNext = i + 1 < live.Legs.Count;
-            if (live.Legs[i] is LiveWalk walk)
-            {
-                items.Add(new TripWalkItem(walk, hasNext ? live.Legs[i + 1] : null, destination, step.StateOf(i)) { JoinsPrevious = i > 0, JoinsNext = hasNext });
-            }
-            else if (live.Legs[i] is LiveRide ride)
-            {
-                items.Add(new TripRideItem(ride, [], timeTemplate: null, alerts.For(ride.Line.Route.Id, now), step.StateOf(i)) { JoinsPrevious = i > 0, JoinsNext = hasNext });
-            }
-        }
-
-        TripLegItem.Sync(_legs, items);
+        Announce(ViewModel.StepKey);
     }
 
     /// <summary>Has Narrator read the status when the step changes, or the rider said they missed the ride, not each minute of the countdown.</summary>
@@ -111,30 +83,5 @@ public sealed partial class TripProgressView : UserControl
 
     private static bool HasFocus(Control control) => control.FocusState != FocusState.Unfocused;
 
-    private static void SetVisible(UIElement element, bool visible) => element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-
-    private void BackButton_Click(object sender, RoutedEventArgs e) => BackRequested?.Invoke(this, EventArgs.Empty);
-
-    private void EndTripButton_Click(object sender, RoutedEventArgs e) => EndRequested?.Invoke(this, EventArgs.Empty);
-
-    private void MissedItButton_Click(object sender, RoutedEventArgs e)
-    {
-        _announceNext = true; // The step stays the same, re-timed: say its new time.
-        MissedRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void ResumeButton_Click(object sender, RoutedEventArgs e)
-    {
-        _announceNext = true;
-        ResumeRequested?.Invoke(this, EventArgs.Empty);
-    }
-
-    /// <summary>Every leg is one step, in order, so a step's place in the list is its leg's index.</summary>
-    private void StepsList_ItemClick(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is TripLegItem item && _legs.IndexOf(item) is >= 0 and int leg)
-        {
-            StepInvoked?.Invoke(this, leg);
-        }
-    }
+    private void StepsList_ItemClick(object sender, ItemClickEventArgs e) => ViewModel.InvokeStepCommand.Execute(e.ClickedItem as TripLegItem);
 }

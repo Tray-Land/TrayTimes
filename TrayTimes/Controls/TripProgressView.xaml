@@ -26,7 +26,7 @@
                 x:Name="BackButton"
                 x:Uid="TripProgressBack"
                 AutomationProperties.AutomationId="TripProgressBackButton"
-                Click="BackButton_Click"
+                Command="{x:Bind ViewModel.BackCommand}"
                 Style="{StaticResource ToolbarButtonStyle}">
                 <FontIcon
                     AutomationProperties.AccessibilityView="Raw"
@@ -35,14 +35,15 @@
             </Button>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock
-                    x:Name="HeadingText"
+                    Text="{x:Bind ViewModel.Heading, Mode=OneWay}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.Heading, Mode=OneWay}"
                     AutomationProperties.AutomationId="TripProgressHeading"
                     MaxLines="2"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
                     TextTrimming="CharacterEllipsis"
                     TextWrapping="Wrap" />
                 <TextBlock
-                    x:Name="ArrivalText"
+                    Text="{x:Bind ViewModel.Arrival, Mode=OneWay}"
                     AutomationProperties.AutomationId="TripProgressArrival"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
@@ -53,7 +54,8 @@
                 x:Uid="EndTripButton"
                 VerticalAlignment="Center"
                 AutomationProperties.AutomationId="EndTripButton"
-                Click="EndTripButton_Click" />
+                Command="{x:Bind ViewModel.EndCommand}"
+                Visibility="{x:Bind ViewModel.HasStep, Mode=OneWay}" />
         </controls:TripHeaderPanel>
 
         <!--  The current step, large; the name of the status text is the whole card, read when the step changes  -->
@@ -68,17 +70,19 @@
             <StackPanel Spacing="4">
                 <TextBlock
                     x:Name="StatusText"
+                    AutomationProperties.Name="{x:Bind ViewModel.StatusName, Mode=OneWay}"
+                    Text="{x:Bind ViewModel.StatusTitle, Mode=OneWay}"
                     AutomationProperties.AutomationId="TripStatus"
                     AutomationProperties.LiveSetting="Polite"
                     Style="{StaticResource SubtitleTextBlockStyle}"
                     TextWrapping="Wrap" />
                 <TextBlock
-                    x:Name="StatusDetail"
+                    Text="{x:Bind ViewModel.StatusDetail, Mode=OneWay}"
                     AutomationProperties.AccessibilityView="Raw"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextWrapping="Wrap" />
                 <StackPanel
-                    x:Name="StatusActions"
+
                     Margin="0,4,0,0"
                     HorizontalAlignment="Right"
                     Orientation="Horizontal"
@@ -89,35 +93,36 @@
                         AutomationProperties.AutomationId="MissedItButton"
                         MinHeight="28"
                         Padding="8,3"
-                        Click="MissedItButton_Click"
+                        Command="{x:Bind ViewModel.MissedCommand}"
                         FontSize="12"
                         Style="{StaticResource SubtleButtonStyle}"
-                        Visibility="Collapsed" />
+                        Visibility="{x:Bind ViewModel.CanMiss, Mode=OneWay}" />
                     <Button
                         x:Name="ResumeButton"
                         x:Uid="ResumeTripButton"
                         AutomationProperties.AutomationId="ResumeTripButton"
-                        Click="ResumeButton_Click"
+                        Command="{x:Bind ViewModel.ResumeCommand}"
                         Style="{StaticResource AccentButtonStyle}"
-                        Visibility="Collapsed" />
+                        Visibility="{x:Bind ViewModel.IsWaitingToResume, Mode=OneWay}" />
                     <Button
                         x:Name="DiscardButton"
                         x:Uid="DiscardTripButton"
                         AutomationProperties.AutomationId="DiscardTripButton"
-                        Click="EndTripButton_Click"
-                        Visibility="Collapsed" />
+                        Command="{x:Bind ViewModel.EndCommand}"
+                        Visibility="{x:Bind ViewModel.IsWaitingToResume, Mode=OneWay}" />
                 </StackPanel>
             </StackPanel>
         </Border>
 
         <ListView
-            x:Name="StepsList"
+            Visibility="{x:Bind ViewModel.HasStep, Mode=OneWay}"
             x:Uid="TripSteps"
             Grid.Row="2"
             Padding="6,0,6,36"
             AutomationProperties.AutomationId="TripProgress"
             IsItemClickEnabled="True"
             ItemClick="StepsList_ItemClick"
+            ItemsSource="{x:Bind ViewModel.Legs, Mode=OneTime}"
             ItemTemplateSelector="{StaticResource LegTemplates}"
             SelectionMode="None">
             <ListView.ItemContainerStyle>
@@ -132,13 +137,13 @@
                     Orientation="Horizontal"
                     Spacing="12">
                     <FontIcon
-                        x:Name="DestinationGlyph"
+                        Glyph="{x:Bind ViewModel.DestinationGlyph, Mode=OneWay}"
                         Width="40"
                         AutomationProperties.AccessibilityView="Raw"
                         FontSize="20"
                         Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                     <TextBlock
-                        x:Name="DestinationText"
+                        Text="{x:Bind ViewModel.DestinationText, Mode=OneWay}"
                         VerticalAlignment="Center"
                         AutomationProperties.AutomationId="TripProgressDestination"
                         Style="{StaticResource BodyStrongTextBlockStyle}"

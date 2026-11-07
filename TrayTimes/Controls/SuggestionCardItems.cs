@@ -1,6 +1,4 @@
 using System.Globalization;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
 using TrayTimes.Commute;
 using TrayTimes.Services;
 using TrayTimes.Transit;
@@ -59,21 +57,21 @@ public sealed class SuggestionCardItem
 
     public bool CanChooseDestination { get; private init; } = true;
 
-    public Visibility TripVisibility => Trip is null ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsTrip => Trip is not null;
 
-    public Visibility NoticeVisibility => Trip is null ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsNotice => Trip is null;
 
-    public Visibility GlyphVisibility => IsBusy ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsGlyph => !IsBusy;
 
-    public Visibility BusyVisibility => IsBusy ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsBusy => IsBusy;
 
-    public Visibility DetailVisibility => Detail.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsDetail => Detail.Length > 0;
 
-    public Visibility NoteVisibility => Note.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsNote => Note.Length > 0;
 
-    public Visibility ActionVisibility => ActionText is null ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsAction => ActionText is not null;
 
-    public Visibility DestinationVisibility => CanChooseDestination ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsDestination => CanChooseDestination;
 
     /// <summary>Everything the card shows; equal signatures mean the card needn't be updated.</summary>
     public string Signature => string.Join('|', Key, Glyph, Title, Detail, Note, IsBusy, AutomationName, TripToolTip, ActionText, CanChooseDestination,
@@ -177,11 +175,11 @@ public sealed class RouteChipItem(string displayId, Color color, bool isTransfer
 {
     public string Label { get; } = RouteNames.Short(displayId);
 
-    public SolidColorBrush Background { get; } = new(color);
+    public Color Color { get; } = color;
 
-    public SolidColorBrush Foreground { get; } = new(MapHelpers.ContrastingText(color));
+    public Color TextColor { get; } = MapHelpers.ContrastingText(color);
 
-    public Visibility ArrowVisibility { get; } = isTransfer ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsArrow { get; } = isTransfer;
 
-    public string Signature => $"{Label}|{Background.Color}|{ArrowVisibility}";
+    public string Signature => $"{Label}|{Color}|{ShowsArrow}";
 }

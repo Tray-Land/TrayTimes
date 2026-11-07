@@ -12,36 +12,38 @@
             </Grid.ColumnDefinitions>
             <AutoSuggestBox
                 x:Name="AddressBox"
-                PlaceholderText="Search for an address"
+                AutomationProperties.Name="{x:Bind AddressAutomationName, Mode=OneWay}"
+                Header="{x:Bind Header, Mode=OneWay}"
+                IsEnabled="{x:Bind ViewModel.IsSearchAvailable, Mode=OneTime}"
+                ItemsSource="{x:Bind ViewModel.Suggestions, Mode=OneWay}"
+                PlaceholderText="{x:Bind SearchPlaceholder, Mode=OneTime}"
                 QueryIcon="Find"
                 QuerySubmitted="AddressBox_QuerySubmitted"
                 SuggestionChosen="AddressBox_SuggestionChosen"
                 TextChanged="AddressBox_TextChanged" />
             <Button
-                x:Name="LocateButton"
                 Grid.Column="1"
                 VerticalAlignment="Bottom"
                 AutomationProperties.Name="Use my current location"
-                Click="LocateButton_Click"
+                Command="{x:Bind ViewModel.LocateCommand}"
                 ToolTipService.ToolTip="Use my current location">
                 <FontIcon FontSize="16" Glyph="&#xE81D;" />
             </Button>
         </Grid>
         <StackPanel Orientation="Horizontal" Spacing="4">
             <TextBlock
-                x:Name="CurrentText"
                 VerticalAlignment="Center"
                 AutomationProperties.LiveSetting="Polite"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Style="{StaticResource CaptionTextBlockStyle}"
+                Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"
                 TextWrapping="Wrap" />
             <HyperlinkButton
-                x:Name="ClearButton"
                 Padding="4,0"
-                Click="ClearButton_Click"
+                Command="{x:Bind ViewModel.ClearCommand}"
                 Content="Clear"
                 FontSize="12"
-                Visibility="Collapsed" />
+                Visibility="{x:Bind ViewModel.CanClear, Mode=OneWay}" />
         </StackPanel>
     </StackPanel>
 </UserControl>

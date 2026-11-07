@@ -9,6 +9,7 @@
     xmlns:map="using:WinUIEx.Maps"
     xmlns:models="using:TrayTimes.Models"
     xmlns:transit="using:TrayTimes.Transit"
+    xmlns:vm="using:TrayTimes.ViewModels"
     MinHeight="480"
     MinWidth="520"
     IsMaximizable="False"
@@ -88,10 +89,9 @@
                 <TextBlock x:Uid="SettingsIntroduction" Style="{StaticResource SettingsDescriptionStyle}" />
 
                 <InfoBar
-                    x:Name="KeyBar"
                     x:Uid="SettingsKeyBar"
                     IsClosable="False"
-                    IsOpen="False"
+                    IsOpen="{x:Bind ViewModel.IsKeyMissing, Mode=OneTime}"
                     Severity="Error" />
 
                 <TextBlock x:Uid="SettingsCommuteHeading" Style="{StaticResource SettingsSectionStyle}" />
@@ -117,27 +117,60 @@
                     <StackPanel Spacing="16">
                         <TextBlock x:Uid="SettingsPlacesHelp" Style="{StaticResource SettingsDescriptionStyle}" />
                         <controls:PlacePicker
-                            x:Name="HomePicker"
                             x:Uid="SettingsHomePicker"
                             AutomationProperties.AutomationId="HomePicker"
-                            PlaceChosen="FixedPlacePicker_PlaceChosen" />
+                            Place="{x:Bind ViewModel.HomePlace, Mode=TwoWay}" />
                         <controls:PlacePicker
-                            x:Name="WorkPicker"
                             x:Uid="SettingsWorkPicker"
                             AutomationProperties.AutomationId="WorkPicker"
-                            PlaceChosen="FixedPlacePicker_PlaceChosen" />
+                            Place="{x:Bind ViewModel.WorkPlace, Mode=TwoWay}" />
                         <controls:PlacePicker
-                            x:Name="SchoolPicker"
                             x:Uid="SettingsSchoolPicker"
                             AutomationProperties.AutomationId="SchoolPicker"
-                            PlaceChosen="FixedPlacePicker_PlaceChosen" />
-                        <StackPanel x:Name="CustomPlacesPanel" Spacing="16" />
+                            Place="{x:Bind ViewModel.SchoolPlace, Mode=TwoWay}" />
+                        <ItemsControl
+                            x:Name="CustomPlacesList"
+                            IsTabStop="False"
+                            ItemsSource="{x:Bind ViewModel.CustomPlaces, Mode=OneTime}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Spacing="16" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:CustomPlaceViewModel">
+                                    <StackPanel Spacing="8">
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox
+                                                x:Uid="SettingsCustomPlaceNameBox"
+                                                AutomationProperties.AutomationId="{x:Bind NameAutomationId, Mode=OneTime}"
+                                                Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                            <Button
+                                                Grid.Column="1"
+                                                VerticalAlignment="Bottom"
+                                                AutomationProperties.AutomationId="{x:Bind RemoveAutomationId, Mode=OneTime}"
+                                                AutomationProperties.Name="{x:Bind RemoveLabel, Mode=OneWay}"
+                                                Command="{x:Bind RemoveCommand}"
+                                                Style="{StaticResource ToolbarButtonStyle}"
+                                                ToolTipService.ToolTip="{x:Bind RemoveLabel, Mode=OneWay}">
+                                                <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                                            </Button>
+                                        </Grid>
+                                        <controls:PlacePicker AddressAutomationName="{x:Bind AddressLabel, Mode=OneWay}" Place="{x:Bind Place, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
                         <Button
                             x:Name="AddPlaceButton"
                             x:Uid="SettingsAddPlaceButton"
                             AutomationProperties.AutomationId="AddPlaceButton"
                             HorizontalAlignment="Left"
-                            Click="AddPlaceButton_Click">
+                            Command="{x:Bind ViewModel.AddCustomPlaceCommand}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <FontIcon
                                     AutomationProperties.AccessibilityView="Raw"
@@ -150,9 +183,9 @@
                 </Expander>
 
                 <Expander
-                    x:Name="SavedStopsExpander"
                     x:Uid="SettingsSavedStopsExpander"
                     AutomationProperties.AutomationId="SavedStopsExpander"
+                    IsExpanded="{x:Bind ViewModel.IsSavedStopsExpanded, Mode=TwoWay}"
                     Style="{StaticResource SettingsExpanderStyle}">
                     <Expander.Header>
                         <Grid ColumnSpacing="16">
@@ -177,9 +210,10 @@
                             CanDragItems="True"
                             CanReorderItems="True"
                             DragItemsCompleted="SavedStopsList_DragItemsCompleted"
+                            ItemsSource="{x:Bind ViewModel.SavedStops, Mode=OneTime}"
                             SelectionMode="None">
                             <ListView.ItemTemplate>
-                                <DataTemplate x:DataType="local:SavedStopRow" x:DefaultBindMode="OneTime">
+                                <DataTemplate x:DataType="vm:SavedStopRow" x:DefaultBindMode="OneTime">
                                     <Grid Padding="0,8" ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
@@ -207,7 +241,7 @@
                                         <Button
                                             x:Uid="SettingsRemoveStopButton"
                                             Grid.Column="2"
-                                            Click="RemoveStopButton_Click"
+                                            Command="{x:Bind RemoveCommand}"
                                             Style="{StaticResource ToolbarButtonStyle}">
                                             <FontIcon
                                                 AutomationProperties.AccessibilityView="Raw"
@@ -219,16 +253,16 @@
                             </ListView.ItemTemplate>
                         </ListView>
                         <TextBlock
-                            x:Name="NoStopsText"
                             x:Uid="SettingsNoStopsText"
-                            Style="{StaticResource SettingsDescriptionStyle}" />
+                            Style="{StaticResource SettingsDescriptionStyle}"
+                            Visibility="{x:Bind ViewModel.HasNoSavedStops, Mode=OneWay}" />
                     </StackPanel>
                 </Expander>
 
                 <Expander
-                    x:Name="AddStopExpander"
                     x:Uid="SettingsAddStopExpander"
                     AutomationProperties.AutomationId="AddStopExpander"
+                    IsExpanded="{x:Bind ViewModel.IsAddStopExpanded, Mode=TwoWay}"
                     Style="{StaticResource SettingsExpanderStyle}">
                     <Expander.Header>
                         <Grid ColumnSpacing="16">
@@ -254,19 +288,19 @@
                                 x:Name="AreaSearchBox"
                                 x:Uid="SettingsAreaBox"
                                 AutomationProperties.AutomationId="AreaSearchBox"
-                                KeyDown="AreaSearchBox_KeyDown" />
+                                KeyDown="AreaSearchBox_KeyDown"
+                                Text="{x:Bind ViewModel.AreaSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <Button
-                                x:Name="AreaSearchButton"
                                 x:Uid="SettingsAreaButton"
                                 Grid.Column="1"
                                 AutomationProperties.AutomationId="AreaSearchButton"
                                 VerticalAlignment="Bottom"
-                                Click="AreaSearchButton_Click" />
+                                Command="{x:Bind ViewModel.FindAreaCommand}" />
                         </Grid>
                         <TextBlock
-                            x:Name="AreaStatusText"
                             Style="{StaticResource SettingsDescriptionStyle}"
-                            Visibility="Collapsed" />
+                            Text="{x:Bind ViewModel.AreaStatus, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.HasAreaStatus, Mode=OneWay}" />
                         <Grid
                             Height="280"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -278,11 +312,10 @@
                                 AutomationProperties.AutomationId="PickerMap"
                                 MapStyle="Road" />
                             <ProgressRing
-                                x:Name="PickerLoadingRing"
                                 x:Uid="SettingsPickerLoadingRing"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
-                                IsActive="False" />
+                                IsActive="{x:Bind ViewModel.IsPickerLoading, Mode=OneWay}" />
                         </Grid>
                         <Grid ColumnSpacing="8">
                             <Grid.ColumnDefinitions>
@@ -290,31 +323,32 @@
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
                             <TextBox
-                                x:Name="StopSearchBox"
                                 x:Uid="SettingsStopSearchBox"
                                 AutomationProperties.AutomationId="StopSearchBox"
-                                KeyDown="StopSearchBox_KeyDown" />
+                                KeyDown="StopSearchBox_KeyDown"
+                                Text="{x:Bind ViewModel.StopSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
                             <Button
-                                x:Name="StopSearchButton"
                                 x:Uid="SettingsStopSearchButton"
                                 Grid.Column="1"
                                 AutomationProperties.AutomationId="StopSearchButton"
                                 VerticalAlignment="Bottom"
-                                Click="StopSearchButton_Click" />
+                                Command="{x:Bind ViewModel.SearchStopsCommand}"
+                                IsEnabled="{x:Bind ViewModel.IsServiceConfigured, Mode=OneTime}" />
                         </Grid>
                         <Button
-                            x:Name="LoadRoutesButton"
                             x:Uid="SettingsLoadRoutesButton"
                             AutomationProperties.AutomationId="LoadRoutesButton"
                             HorizontalAlignment="Left"
-                            Click="LoadRoutesButton_Click" />
+                            Command="{x:Bind ViewModel.LoadRoutesCommand}"
+                            IsEnabled="{x:Bind ViewModel.IsLoadRoutesEnabled, Mode=OneWay}" />
                         <ComboBox
-                            x:Name="RouteBox"
                             x:Uid="SettingsRouteBox"
                             AutomationProperties.AutomationId="RouteBox"
                             HorizontalAlignment="Stretch"
-                            IsEnabled="False"
-                            SelectionChanged="RouteBox_SelectionChanged">
+                            IsEnabled="{x:Bind ViewModel.IsRouteEnabled, Mode=OneWay}"
+                            ItemsSource="{x:Bind ViewModel.Routes, Mode=OneWay}"
+                            PlaceholderText="{x:Bind ViewModel.RoutePlaceholder, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.SelectedRoute, Mode=TwoWay}">
                             <ComboBox.ItemTemplate>
                                 <DataTemplate x:DataType="transit:TransitRoute" x:DefaultBindMode="OneTime">
                                     <TextBlock Text="{x:Bind local:AppStrings.RouteName(DisplayId, Name)}" />
@@ -322,37 +356,38 @@
                             </ComboBox.ItemTemplate>
                         </ComboBox>
                         <ComboBox
-                            x:Name="DirectionBox"
                             x:Uid="SettingsDirectionBox"
                             AutomationProperties.AutomationId="DirectionBox"
                             HorizontalAlignment="Stretch"
-                            IsEnabled="False"
-                            SelectionChanged="DirectionBox_SelectionChanged" />
+                            IsEnabled="{x:Bind ViewModel.IsDirectionEnabled, Mode=OneWay}"
+                            ItemsSource="{x:Bind ViewModel.Directions, Mode=OneWay}"
+                            PlaceholderText="{x:Bind ViewModel.DirectionPlaceholder, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.SelectedDirection, Mode=TwoWay}" />
                         <ComboBox
-                            x:Name="StopBox"
                             x:Uid="SettingsStopBox"
                             AutomationProperties.AutomationId="StopBox"
                             HorizontalAlignment="Stretch"
-                            IsEnabled="False"
-                            SelectionChanged="StopBox_SelectionChanged" />
+                            IsEnabled="{x:Bind ViewModel.IsStopEnabled, Mode=OneWay}"
+                            ItemsSource="{x:Bind ViewModel.Stops, Mode=OneWay}"
+                            PlaceholderText="{x:Bind ViewModel.StopPlaceholder, Mode=OneWay}"
+                            SelectedItem="{x:Bind ViewModel.SelectedStop, Mode=TwoWay}" />
                         <CheckBox
-                            x:Name="AllRoutesCheck"
                             x:Uid="SettingsAllRoutesCheck"
-                            AutomationProperties.AutomationId="AllRoutesCheck">
+                            AutomationProperties.AutomationId="AllRoutesCheck"
+                            IsChecked="{x:Bind ViewModel.AllRoutes, Mode=TwoWay}"
+                            IsEnabled="{x:Bind ViewModel.IsAllRoutesEnabled, Mode=OneWay}">
                             <TextBlock x:Uid="SettingsAllRoutesLabel" TextWrapping="Wrap" />
                         </CheckBox>
                         <Button
-                            x:Name="AddStopButton"
                             x:Uid="SettingsAddStopButton"
                             AutomationProperties.AutomationId="AddStopButton"
                             HorizontalAlignment="Left"
-                            Click="AddStopButton_Click"
-                            IsEnabled="False"
+                            Command="{x:Bind ViewModel.AddStopCommand}"
                             Style="{StaticResource AccentButtonStyle}" />
                         <TextBlock
-                            x:Name="AddStatusText"
                             AutomationProperties.LiveSetting="Polite"
-                            Style="{StaticResource SettingsDescriptionStyle}" />
+                            Style="{StaticResource SettingsDescriptionStyle}"
+                            Text="{x:Bind ViewModel.AddStatus, Mode=OneWay}" />
                     </StackPanel>
                 </Expander>
 
@@ -386,9 +421,11 @@
                         AutomationProperties.LabeledBy="{x:Bind HeadOutLabel, Mode=OneTime}"
                         Width="124"
                         VerticalAlignment="Center"
+                        Maximum="{x:Bind ViewModel.MaxHeadOutMinutes, Mode=OneTime}"
+                        Minimum="{x:Bind ViewModel.MinHeadOutMinutes, Mode=OneTime}"
                         SmallChange="1"
                         SpinButtonPlacementMode="Inline"
-                        ValueChanged="HeadOutBox_ValueChanged" />
+                        Value="{x:Bind ViewModel.HeadOutMinutes, Mode=TwoWay}" />
                 </Grid>
                 <Grid Style="{StaticResource SettingsCardStyle}">
                     <Grid.ColumnDefinitions>
@@ -408,13 +445,12 @@
                         <TextBlock x:Uid="SettingsKeepAwakeDescription" Style="{StaticResource SettingsDescriptionStyle}" />
                     </StackPanel>
                     <ToggleSwitch
-                        x:Name="KeepAwakeToggle"
                         Grid.Column="2"
                         AutomationProperties.AutomationId="KeepAwakeToggle"
                         AutomationProperties.LabeledBy="{x:Bind KeepAwakeLabel, Mode=OneTime}"
+                        IsOn="{x:Bind ViewModel.KeepAwakeWhileTracking, Mode=TwoWay}"
                         MinWidth="0"
-                        VerticalAlignment="Center"
-                        Toggled="KeepAwakeToggle_Toggled" />
+                        VerticalAlignment="Center" />
                 </Grid>
 
                 <TextBlock x:Uid="SettingsAppHeading" Style="{StaticResource SettingsSectionStyle}" />
@@ -435,19 +471,19 @@
                             Style="{StaticResource SettingsCardTitleStyle}" />
                         <TextBlock x:Uid="SettingsStartupDescription" Style="{StaticResource SettingsDescriptionStyle}" />
                         <TextBlock
-                            x:Name="StartupStatusText"
                             AutomationProperties.LiveSetting="Polite"
                             Style="{StaticResource SettingsDescriptionStyle}"
-                            Visibility="Collapsed" />
+                            Text="{x:Bind ViewModel.StartupStatus, Mode=OneWay}"
+                            Visibility="{x:Bind ViewModel.HasStartupStatus, Mode=OneWay}" />
                     </StackPanel>
                     <ToggleSwitch
-                        x:Name="StartupToggle"
                         Grid.Column="2"
                         AutomationProperties.AutomationId="StartupToggle"
                         AutomationProperties.LabeledBy="{x:Bind StartupLabel, Mode=OneTime}"
+                        IsEnabled="{x:Bind ViewModel.IsStartupToggleEnabled, Mode=OneWay}"
+                        IsOn="{x:Bind ViewModel.RunAtStartup, Mode=TwoWay}"
                         MinWidth="0"
-                        VerticalAlignment="Center"
-                        Toggled="StartupToggle_Toggled" />
+                        VerticalAlignment="Center" />
                 </Grid>
 
                 <Expander
@@ -469,33 +505,31 @@
                     </Expander.Header>
                     <StackPanel Spacing="12">
                         <TextBlock
-                            x:Name="BudgetText"
                             AutomationProperties.LiveSetting="Polite"
+                            Text="{x:Bind ViewModel.BudgetText, Mode=OneWay}"
                             TextWrapping="Wrap" />
                         <TextBlock
-                            x:Name="EstimateText"
                             AutomationProperties.LiveSetting="Polite"
+                            Text="{x:Bind ViewModel.EstimateText, Mode=OneWay}"
                             TextWrapping="Wrap" />
                         <TextBlock x:Uid="SettingsBudgetHelp" Style="{StaticResource SettingsDescriptionStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="12">
                             <NumberBox
-                                x:Name="CallsPerMinuteBox"
                                 x:Uid="SettingsCallsPerMinuteBox"
                                 AutomationProperties.AutomationId="CallsPerMinuteBox"
                                 Width="160"
                                 Minimum="1"
                                 SmallChange="1"
                                 SpinButtonPlacementMode="Compact"
-                                ValueChanged="BudgetBox_ValueChanged" />
+                                Value="{x:Bind ViewModel.CallsPerMinute, Mode=TwoWay}" />
                             <NumberBox
-                                x:Name="CallsPerMonthBox"
                                 x:Uid="SettingsCallsPerMonthBox"
                                 AutomationProperties.AutomationId="CallsPerMonthBox"
                                 Width="160"
                                 Minimum="1"
                                 SmallChange="100"
                                 SpinButtonPlacementMode="Compact"
-                                ValueChanged="BudgetBox_ValueChanged" />
+                                Value="{x:Bind ViewModel.CallsPerMonth, Mode=TwoWay}" />
                         </StackPanel>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
@@ -522,11 +556,11 @@
                                 Style="{StaticResource SettingsDescriptionStyle}" />
                         </Grid>
                         <ItemsControl
-                            x:Name="ApiUsageList"
                             x:Uid="SettingsApiUsageList"
-                            IsTabStop="False">
+                            IsTabStop="False"
+                            ItemsSource="{x:Bind ViewModel.ApiUsage, Mode=OneTime}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="local:ApiUsageRow" x:DefaultBindMode="OneTime">
+                                <DataTemplate x:DataType="vm:ApiUsageRow" x:DefaultBindMode="OneTime">
                                     <Grid Padding="0,6" ColumnSpacing="12">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />

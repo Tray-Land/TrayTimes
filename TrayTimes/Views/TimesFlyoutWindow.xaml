@@ -61,13 +61,13 @@
                                 <FontIcon
                                     FontSize="12"
                                     Glyph="&#xEA8F;"
-                                    Visibility="{x:Bind TrackOutlineVisibility}" />
+                                    Visibility="{x:Bind ShowsTrackOutline}" />
                                 <!--  Tracked: solid gold bell emoji  -->
                                 <FontIcon
                                     FontFamily="Segoe UI Emoji"
                                     FontSize="12"
                                     Glyph="&#x1F514;"
-                                    Visibility="{x:Bind TrackedBellVisibility}" />
+                                    Visibility="{x:Bind ShowsTrackedBell}" />
                             </Grid>
                             <TextBlock
                                 VerticalAlignment="Center"
@@ -106,12 +106,12 @@
                                 Height="28"
                                 Padding="6,0"
                                 VerticalAlignment="Center"
-                                Background="{x:Bind RouteBackground}"
+                                Background="{x:Bind views:XamlFunctions.Solid(RouteColor)}"
                                 CornerRadius="4">
                                 <TextBlock
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
-                                    Foreground="{x:Bind RouteForeground}"
+                                    Foreground="{x:Bind views:XamlFunctions.Solid(RouteTextColor)}"
                                     Style="{StaticResource BodyStrongTextBlockStyle}"
                                     Text="{x:Bind RouteLabel}" />
                             </Border>
@@ -140,14 +140,14 @@
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                         Style="{StaticResource CaptionTextBlockStyle}"
                                         Text="|"
-                                        Visibility="{x:Bind TripEtaVisibility}" />
+                                        Visibility="{x:Bind ShowsTripEta}" />
                                     <TextBlock
                                         Grid.Column="2"
                                         Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                         Style="{StaticResource CaptionTextBlockStyle}"
                                         Text="{x:Bind TripEtaText}"
                                         TextTrimming="CharacterEllipsis"
-                                        Visibility="{x:Bind TripEtaVisibility}" />
+                                        Visibility="{x:Bind ShowsTripEta}" />
                                 </Grid>
                             </StackPanel>
 
@@ -246,7 +246,7 @@
                             Click="SaveStopButton_Click"
                             Style="{StaticResource ToolbarButtonStyle}"
                             ToolTipService.ToolTip="{x:Bind SaveLabel}"
-                            Visibility="{x:Bind SaveVisibility}">
+                            Visibility="{x:Bind ShowsSave}">
                             <FontIcon
                                 FontSize="16"
                                 Glyph="{x:Bind SaveGlyph}"
@@ -259,7 +259,7 @@
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Text="{x:Bind EmptyText}"
                         TextWrapping="Wrap"
-                        Visibility="{x:Bind EmptyVisibility}" />
+                        Visibility="{x:Bind ShowsEmpty}" />
                 </StackPanel>
             </DataTemplate>
         </Grid.Resources>
@@ -282,7 +282,10 @@
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid Width="8" Height="8">
-                    <Ellipse x:Name="LiveDot" Fill="{ThemeResource SystemFillColorSuccessBrush}" />
+                    <Ellipse
+                        x:Name="LiveDot"
+                        Fill="{ThemeResource SystemFillColorSuccessBrush}"
+                        Opacity="{x:Bind ViewModel.LiveDotOpacity, Mode=OneWay}" />
                     <!--  Negative margin lets the ring circle the dot without shifting the text  -->
                     <ProgressRing
                         x:Name="LoadingRing"
@@ -292,7 +295,7 @@
                         MinHeight="16"
                         Margin="-4"
                         AutomationProperties.Name="Loading arrival times"
-                        IsActive="False"
+                        IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}"
                         IsIndeterminate="True" />
                 </Grid>
                 <StackPanel Grid.Column="1">
@@ -303,6 +306,7 @@
                         TextTrimming="CharacterEllipsis" />
                     <TextBlock
                         x:Name="UpdatedText"
+                        Text="{x:Bind ViewModel.UpdatedText, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         TextTrimming="CharacterEllipsis" />
@@ -316,7 +320,7 @@
                 VerticalAlignment="Center"
                 AutomationProperties.AutomationId="LocationPermissionButton"
                 Style="{StaticResource ToolbarButtonStyle}"
-                Visibility="Collapsed">
+                Visibility="{x:Bind ViewModel.ShowsLocationHint, Mode=OneWay}">
                 <FontIcon
                     AutomationProperties.AccessibilityView="Raw"
                     FontSize="16"
@@ -330,15 +334,15 @@
                                 Style="{StaticResource BodyStrongTextBlockStyle}"
                                 TextWrapping="Wrap" />
                             <TextBlock
-                                x:Name="LocationPermissionMessage"
-                                x:Uid="LocationPermissionMessage"
+                                Text="{x:Bind ViewModel.LocationPermissionMessage, Mode=OneWay}"
                                 TextWrapping="Wrap" />
                             <Button
                                 x:Name="GrantLocationPermissionButton"
                                 x:Uid="GrantLocationPermissionButton"
                                 HorizontalAlignment="Left"
                                 AutomationProperties.AutomationId="GrantLocationPermissionButton"
-                                Click="GrantLocationPermissionButton_Click" />
+                                Click="GrantLocationPermissionButton_Click"
+                                IsEnabled="{x:Bind ViewModel.CanGrantLocationPermission, Mode=OneWay}" />
                         </StackPanel>
                     </Flyout>
                 </Button.Flyout>
@@ -352,16 +356,17 @@
                 MaxWidth="170"
                 Padding="8,4"
                 VerticalAlignment="Center"
-                AutomationProperties.AutomationId="PlaceChip">
+                AutomationProperties.AutomationId="PlaceChip"
+                AutomationProperties.Name="{x:Bind ViewModel.PlaceChipName, Mode=OneWay}"
+                Visibility="{x:Bind ViewModel.ShowsPlaceChip, Mode=OneWay}">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <FontIcon
-                        x:Name="PlaceChipGlyph"
+                        Glyph="{x:Bind ViewModel.PlaceChipGlyph, Mode=OneWay}"
                         AutomationProperties.AccessibilityView="Raw"
                         FontSize="14"
-                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                        Glyph="&#xE81D;" />
+                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                     <TextBlock
-                        x:Name="PlaceChipText"
+                        Text="{x:Bind ViewModel.PlaceChipText, Mode=OneWay}"
                         MaxWidth="108"
                         TextTrimming="CharacterEllipsis" />
                 </StackPanel>
@@ -466,7 +471,10 @@
         </views:ResizeCursorGrid>
 
         <!--  Arrivals  -->
-        <Grid x:Name="ArrivalsPane" Grid.Row="3">
+        <Grid
+            x:Name="ArrivalsPane"
+            Grid.Row="3"
+            Visibility="{x:Bind ViewModel.ShowsBoard, Mode=OneWay}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -474,15 +482,23 @@
             </Grid.RowDefinitions>
 
             <!--  The trip to where the rider is likely headed, with a way to pick somewhere else  -->
-            <controls:SuggestionCard x:Name="SuggestionCard" Visibility="Collapsed" />
+            <controls:SuggestionCard x:Name="SuggestionCard" Visibility="{x:Bind ViewModel.HasSuggestion, Mode=OneWay}" />
 
             <InfoBar
-                x:Name="StatusBar"
                 Grid.Row="1"
                 Margin="8,8,8,0"
                 IsClosable="False"
-                IsOpen="False"
-                Severity="Warning" />
+                IsOpen="{x:Bind ViewModel.IsStatusOpen, Mode=OneWay}"
+                Message="{x:Bind ViewModel.StatusMessage, Mode=OneWay}"
+                Severity="Warning"
+                Title="{x:Bind ViewModel.StatusTitle, Mode=OneWay}">
+                <InfoBar.ActionButton>
+                    <Button
+                        x:Uid="StatusRefreshButton"
+                        AutomationProperties.AutomationId="StatusRefreshButton"
+                        Click="RefreshMenuItem_Click" />
+                </InfoBar.ActionButton>
+            </InfoBar>
 
             <ScrollViewer
                 x:Name="ListScroller"
@@ -502,32 +518,34 @@
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Spacing="8"
-                Visibility="Collapsed">
+                Visibility="{x:Bind ViewModel.ShowsEmpty, Mode=OneWay}">
                 <FontIcon
                     FontSize="32"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Glyph="&#xE806;" />
                 <TextBlock
-                    x:Name="EmptyTitle"
+                    Text="{x:Bind ViewModel.EmptyTitle, Mode=OneWay}"
                     HorizontalAlignment="Center"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
                     TextAlignment="Center"
                     TextWrapping="Wrap" />
                 <TextBlock
-                    x:Name="EmptyStateText"
+                    Text="{x:Bind ViewModel.EmptyText, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.HasEmptyText, Mode=OneWay}"
                     HorizontalAlignment="Center"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     TextAlignment="Center"
                     TextWrapping="Wrap" />
                 <ProgressRing
-                    x:Name="EmptyRing"
+                    IsActive="{x:Bind ViewModel.EmptyBusy, Mode=OneWay}"
+                    Visibility="{x:Bind ViewModel.EmptyBusy, Mode=OneWay}"
                     HorizontalAlignment="Center"
-                    AutomationProperties.Name="Loading"
-                    IsActive="False" />
+                    AutomationProperties.Name="Loading" />
                 <Button
-                    x:Name="EmptyButton"
+                    Content="{x:Bind ViewModel.EmptyButtonText, Mode=OneWay}"
                     HorizontalAlignment="Center"
-                    Click="EmptyButton_Click"
+                    Command="{x:Bind ViewModel.InvokeEmptyActionCommand}"
+                    Visibility="{x:Bind ViewModel.HasEmptyButton, Mode=OneWay}"
                     Style="{StaticResource AccentButtonStyle}" />
             </StackPanel>
         </Grid>
@@ -537,20 +555,20 @@
             Grid.Row="3"
             HorizontalContentAlignment="Stretch"
             VerticalContentAlignment="Stretch"
-            Visibility="Collapsed" />
+            Visibility="{x:Bind ViewModel.ShowsSearch, Mode=OneWay}" />
         <ContentControl
             x:Name="TripHost"
             Grid.Row="3"
             HorizontalContentAlignment="Stretch"
             VerticalContentAlignment="Stretch"
-            Visibility="Collapsed" />
+            Visibility="{x:Bind ViewModel.ShowsTrip, Mode=OneWay}" />
         <!--  The active trip's progress (or its Resume card), shown on every open during a trip  -->
         <ContentControl
             x:Name="ProgressHost"
             Grid.Row="3"
             HorizontalContentAlignment="Stretch"
             VerticalContentAlignment="Stretch"
-            Visibility="Collapsed" />
+            Visibility="{x:Bind ViewModel.ShowsProgress, Mode=OneWay}" />
 
         <!--  Required by the Transit API terms: "Powered by Transit" stays visible in the main interface. It floats over the bottom of the content, so each list below keeps bottom padding to scroll clear of it  -->
         <HyperlinkButton

@@ -3,7 +3,8 @@
     x:Class="TrayTimes.Controls.SuggestionCard"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:TrayTimes.Controls">
+    xmlns:controls="using:TrayTimes.Controls"
+    xmlns:views="using:TrayTimes.Views">
 
     <UserControl.Resources>
         <!--  One ride's route badge, after an arrow from the ride before it  -->
@@ -18,18 +19,18 @@
                     FontSize="10"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Glyph="&#xE72A;"
-                    Visibility="{x:Bind ArrowVisibility}" />
+                    Visibility="{x:Bind ShowsArrow}" />
                 <Border
                     MinWidth="28"
                     Height="20"
                     Padding="5,0"
-                    Background="{x:Bind Background}"
+                    Background="{x:Bind views:XamlFunctions.Solid(Color)}"
                     CornerRadius="3">
                     <TextBlock
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         FontWeight="SemiBold"
-                        Foreground="{x:Bind Foreground}"
+                        Foreground="{x:Bind views:XamlFunctions.Solid(TextColor)}"
                         Style="{StaticResource CaptionTextBlockStyle}"
                         Text="{x:Bind Label}" />
                 </Border>
@@ -37,10 +38,10 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <!--  Show() swaps in a new Item and calls Bindings.Update(), so one-time bindings stay current  -->
+    <!--  Bound to the view model, which raises a change for everything when the card shows a new item  -->
     <Grid
         Padding="6,8,8,0"
-        x:DefaultBindMode="OneTime"
+        
         ColumnSpacing="6">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -55,11 +56,11 @@
         <Button
             x:Name="TripButton"
             AutomationProperties.AutomationId="SuggestionCard"
-            AutomationProperties.Name="{x:Bind Item.AutomationName}"
-            Click="TripButton_Click"
+            AutomationProperties.Name="{x:Bind ViewModel.AutomationName, Mode=OneWay}"
+            Command="{x:Bind ViewModel.InvokeTripCommand}"
             Style="{StaticResource RowButtonStyle}"
-            ToolTipService.ToolTip="{x:Bind Item.TripToolTip}"
-            Visibility="{x:Bind Item.TripVisibility}">
+            ToolTipService.ToolTip="{x:Bind ViewModel.TripToolTip, Mode=OneWay}"
+            Visibility="{x:Bind ViewModel.ShowsTrip, Mode=OneWay}">
             <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -71,18 +72,18 @@
                     AutomationProperties.AccessibilityView="Raw"
                     FontSize="20"
                     Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                    Glyph="{x:Bind Item.Glyph}" />
+                    Glyph="{x:Bind ViewModel.Glyph, Mode=OneWay}" />
                 <StackPanel Grid.Column="1" Spacing="2">
                     <TextBlock
                         Style="{StaticResource BodyStrongTextBlockStyle}"
-                        Text="{x:Bind Item.Title}"
+                        Text="{x:Bind ViewModel.Title, Mode=OneWay}"
                         TextTrimming="CharacterEllipsis" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <ItemsControl
                             VerticalAlignment="Center"
                             AutomationProperties.AccessibilityView="Raw"
                             ItemTemplate="{StaticResource RouteChipTemplate}"
-                            ItemsSource="{x:Bind Item.Routes}">
+                            ItemsSource="{x:Bind ViewModel.Routes, Mode=OneWay}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <StackPanel Orientation="Horizontal" Spacing="4" />
@@ -93,15 +94,15 @@
                             VerticalAlignment="Center"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind Item.Detail}"
+                            Text="{x:Bind ViewModel.Detail, Mode=OneWay}"
                             TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <TextBlock
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind Item.Note}"
+                        Text="{x:Bind ViewModel.Note, Mode=OneWay}"
                         TextWrapping="Wrap"
-                        Visibility="{x:Bind Item.NoteVisibility}" />
+                        Visibility="{x:Bind ViewModel.ShowsNote, Mode=OneWay}" />
                 </StackPanel>
                 <FontIcon
                     Grid.Column="2"
@@ -117,7 +118,7 @@
         <Grid
             Padding="8,6"
             ColumnSpacing="12"
-            Visibility="{x:Bind Item.NoticeVisibility}">
+            Visibility="{x:Bind ViewModel.ShowsNotice, Mode=OneWay}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -128,15 +129,15 @@
                 AutomationProperties.AccessibilityView="Raw"
                 FontSize="20"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Glyph="{x:Bind Item.Glyph}"
-                Visibility="{x:Bind Item.GlyphVisibility}" />
+                Glyph="{x:Bind ViewModel.Glyph, Mode=OneWay}"
+                Visibility="{x:Bind ViewModel.ShowsGlyph, Mode=OneWay}" />
             <ProgressRing
                 x:Uid="SuggestionPlanningRing"
                 Width="20"
                 Height="20"
                 VerticalAlignment="Center"
-                IsActive="{x:Bind Item.IsBusy}"
-                Visibility="{x:Bind Item.BusyVisibility}" />
+                IsActive="{x:Bind ViewModel.IsBusy, Mode=OneWay}"
+                Visibility="{x:Bind ViewModel.IsBusy, Mode=OneWay}" />
             <StackPanel
                 Grid.Column="1"
                 VerticalAlignment="Center"
@@ -144,22 +145,22 @@
                 <TextBlock
                     AutomationProperties.LiveSetting="Polite"
                     Style="{StaticResource BodyStrongTextBlockStyle}"
-                    Text="{x:Bind Item.Title}"
+                    Text="{x:Bind ViewModel.Title, Mode=OneWay}"
                     TextWrapping="Wrap" />
                 <TextBlock
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource CaptionTextBlockStyle}"
-                    Text="{x:Bind Item.Detail}"
+                    Text="{x:Bind ViewModel.Detail, Mode=OneWay}"
                     TextWrapping="Wrap"
-                    Visibility="{x:Bind Item.DetailVisibility}" />
+                    Visibility="{x:Bind ViewModel.ShowsDetail, Mode=OneWay}" />
             </StackPanel>
             <Button
                 Grid.Column="2"
                 VerticalAlignment="Center"
                 AutomationProperties.AutomationId="SuggestionActionButton"
-                Click="ActionButton_Click"
-                Content="{x:Bind Item.ActionText}"
-                Visibility="{x:Bind Item.ActionVisibility}" />
+                Command="{x:Bind ViewModel.RunActionCommand}"
+                Content="{x:Bind ViewModel.ActionText, Mode=OneWay}"
+                Visibility="{x:Bind ViewModel.ShowsAction, Mode=OneWay}" />
         </Grid>
 
         <!--  Beside the card, not in it, so there's no button inside a button  -->
@@ -169,7 +170,7 @@
             Grid.Column="1"
             VerticalAlignment="Center"
             AutomationProperties.AutomationId="DestinationButton"
-            Visibility="{x:Bind Item.DestinationVisibility}">
+            Visibility="{x:Bind ViewModel.ShowsDestination, Mode=OneWay}">
             <DropDownButton.Flyout>
                 <MenuFlyout
                     x:Name="DestinationMenu"
@@ -185,7 +186,8 @@
             Margin="8,4,0,0"
             AutomationProperties.AutomationId="SaveDestinationButton"
             HorizontalAlignment="Left"
-            Click="SaveDestinationButton_Click"
-            Visibility="Collapsed" />
+            Command="{x:Bind ViewModel.SaveDestinationCommand}"
+            IsEnabled="{x:Bind ViewModel.IsSaveDestinationEnabled, Mode=OneWay}"
+            Visibility="{x:Bind ViewModel.CanSaveDestination, Mode=OneWay}" />
     </Grid>
 </UserControl>

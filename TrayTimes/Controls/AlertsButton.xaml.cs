@@ -1,16 +1,15 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using TrayTimes.Services;
 using TrayTimes.Transit;
+using TrayTimes.ViewModels;
 using Windows.Foundation;
 
 namespace TrayTimes.Controls;
 
 /// <summary>
 /// A route's service alerts as a warning sign, red when one suspends service, that opens their details. It's
-/// collapsed while the route has none.
+/// collapsed while the route has none. What it shows is in <see cref="AlertsButtonViewModel"/>.
 /// </summary>
 public sealed partial class AlertsButton : UserControl
 {
@@ -36,23 +35,12 @@ public sealed partial class AlertsButton : UserControl
         set => SetValue(RouteProperty, value);
     }
 
-    private static void OnChanged(DependencyObject d, DependencyPropertyChangedEventArgs e) => ((AlertsButton)d).Update();
+    internal AlertsButtonViewModel ViewModel { get; } = new();
 
-    private void Update()
+    private static void OnChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        IReadOnlyList<ServiceAlert> alerts = Alerts ?? [];
-        Visibility = alerts.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        if (alerts.Count == 0)
-        {
-            return;
-        }
-
-        bool severe = alerts.Any(a => a.Severity == AlertSeverity.Severe);
-        CautionIcon.Visibility = severe ? Visibility.Collapsed : Visibility.Visible;
-        CriticalIcon.Visibility = severe ? Visibility.Visible : Visibility.Collapsed;
-        string name = AlertMessages.SignName(Route, alerts);
-        AutomationProperties.SetName(SignButton, name);
-        ToolTipService.SetToolTip(SignButton, name);
+        AlertsButton button = (AlertsButton)d;
+        button.ViewModel.Update(button.Alerts, button.Route);
     }
 
     /// <summary>
@@ -68,25 +56,5 @@ public sealed partial class AlertsButton : UserControl
         }
     }
 
-    /// <summary>Fills in the details as they open, so their "until" and "starts" times read from now.</summary>
-    private void DetailsFlyout_Opening(object sender, object e)
-    {
-        DateTimeOffset now = DateTimeOffset.Now;
-        HeadingText.Text = AlertMessages.Heading(Route);
-        AlertsList.ItemsSource = (Alerts ?? []).Select(a => new AlertEntry(a, now)).ToList();
-    }
-}
-
-/// <summary>One alert in the details: its headline, then what it does, why, and when, then its text.</summary>
-public sealed class AlertEntry(ServiceAlert alert, DateTimeOffset now)
-{
-    public string Title { get; } = AlertMessages.Title(alert);
-
-    public string Summary { get; } = AlertMessages.Summary(alert, now);
-
-    public string Body { get; } = AlertMessages.Body(alert);
-
-    public Visibility SummaryVisibility => Summary.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
-
-    public Visibility BodyVisibility => Body.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    private void DetailsFlyout_Opening(object sender, object e) => ViewModel.RefreshEntries(DateTimeOffset.Now);
 }

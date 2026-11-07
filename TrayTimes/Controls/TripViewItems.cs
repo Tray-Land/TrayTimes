@@ -1,7 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 using TrayTimes.Commute;
 using TrayTimes.Transit;
 using TrayTimes.Views;
@@ -16,13 +16,13 @@ public abstract class TripLegItem(TripLegState? state)
     /// <summary>Where the leg is relative to the rider; null in the trip view, which shows no state.</summary>
     public TripLegState? State { get; } = state;
 
-    public Visibility StateVisibility => State is null ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsState => State is not null;
 
-    public Visibility DoneVisibility => State == TripLegState.Done ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsDone => State == TripLegState.Done;
 
-    public Visibility CurrentVisibility => State == TripLegState.Current ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsCurrent => State == TripLegState.Current;
 
-    public Visibility UpcomingVisibility => State == TripLegState.Upcoming ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsUpcoming => State == TripLegState.Upcoming;
 
     /// <summary>Whether another leg comes before this one, for the line joining them.</summary>
     public bool JoinsPrevious { get; init; }
@@ -30,15 +30,15 @@ public abstract class TripLegItem(TripLegState? state)
     /// <summary>Whether another leg comes after this one, for the line joining them.</summary>
     public bool JoinsNext { get; init; }
 
-    public Visibility PreviousLinkVisibility => State is not null && JoinsPrevious ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsPreviousLink => State is not null && JoinsPrevious;
 
-    public Visibility NextLinkVisibility => State is not null && JoinsNext ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsNextLink => State is not null && JoinsNext;
 
     /// <summary>The line from the leg before is solid once the rider has reached this leg, and dashed while it's still ahead.</summary>
-    public DoubleCollection PreviousLinkDashes => LinkDashes(traveled: State is TripLegState.Current or TripLegState.Done);
+    public bool PreviousLinkTraveled => State is TripLegState.Current or TripLegState.Done;
 
     /// <summary>The line to the leg after is solid once the rider has passed this leg, and dashed while it's still ahead.</summary>
-    public DoubleCollection NextLinkDashes => LinkDashes(traveled: State == TripLegState.Done);
+    public bool NextLinkTraveled => State == TripLegState.Done;
 
     /// <summary>Done legs are dimmed (their check mark says so too, not the dimming alone).</summary>
     public double RowOpacity => State == TripLegState.Done ? DoneOpacity : 1;
@@ -89,7 +89,6 @@ public abstract class TripLegItem(TripLegState? state)
 
     protected static int Minutes(TimeSpan duration) => Math.Max(0, (int)Math.Ceiling(duration.TotalMinutes));
 
-    private static DoubleCollection LinkDashes(bool traveled) => traveled ? new DoubleCollection() : new DoubleCollection { 2, 2 };
 }
 
 public sealed class TripWalkItem : TripLegItem
@@ -113,7 +112,7 @@ public sealed class TripWalkItem : TripLegItem
 
     public string Wait { get; }
 
-    public Visibility WaitVisibility => Wait.Length == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsWait => Wait.Length > 0;
 
     public override string Signature => $"{MarkerSignature}|{Title}|{Detail}|{Wait}";
 
@@ -133,8 +132,8 @@ public sealed class TripRideItem : TripLegItem
         RouteChipItem badge = new(ride.Line.Route.DisplayId, MapHelpers.ParseRouteColor(ride.Departure?.RouteColor ?? ride.Line.Route.Color), false);
         RouteLabel = ride.Line.Route.DisplayId;
         RouteBadge = badge.Label;
-        RouteBackground = badge.Background;
-        RouteForeground = badge.Foreground;
+        RouteColor = badge.Color;
+        RouteTextColor = badge.TextColor;
         Destination = ride.Departure?.Destination is { Length: > 0 } headsign ? headsign : ride.Line.Direction.Name;
         Board = AppStrings.Format("TripBoardFormat", ride.Line.BoardAt.Name, Clock(ride.Starts));
         string timing = AppStrings.Get(ride.Departure?.IsRealTime == true ? "TripLive" : "TripScheduled");
@@ -160,9 +159,9 @@ public sealed class TripRideItem : TripLegItem
     /// <summary>The route's name as its narrow badge shows it ("BRN" for "Brown").</summary>
     public string RouteBadge { get; }
 
-    public SolidColorBrush RouteBackground { get; }
+    public Color RouteColor { get; }
 
-    public SolidColorBrush RouteForeground { get; }
+    public Color RouteTextColor { get; }
 
     public string Destination { get; }
 
@@ -178,9 +177,9 @@ public sealed class TripRideItem : TripLegItem
 
     public string TimesName { get; }
 
-    public Visibility TimesVisibility => Times.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsTimes => Times.Count > 0;
 
-    public override string Signature => $"{MarkerSignature}|{RouteLabel}|{RouteBackground.Color}|{Destination}|{Board}|{Detail}|{Alight}|{string.Join(';', Times.Select(t => t.Signature))}|{AlertsSignature.Of(Alerts)}";
+    public override string Signature => $"{MarkerSignature}|{RouteLabel}|{RouteColor}|{Destination}|{Board}|{Detail}|{Alight}|{string.Join(';', Times.Select(t => t.Signature))}|{AlertsSignature.Of(Alerts)}";
 
     protected override string Description => AppStrings.Format("TripRideNameFormat", RouteLabel, Destination, Board, Detail, Alight);
 }

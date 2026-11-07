@@ -4,10 +4,12 @@
     <RootNamespace>TrayTimes.Tests</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="MSTest" Version="4.4.1" />
   </ItemGroup>
 
@@ -31,7 +33,8 @@
     <Compile Include="..\TrayTimes\Services\TripMessages.cs" Link="Services\TripMessages.cs" />
     <Compile Include="..\TrayTimes\Services\AlertMessages.cs" Link="Services\AlertMessages.cs" />
     <Compile Include="..\TrayTimes\Views\AppStrings.cs" Link="Views\AppStrings.cs" />
-    <Compile Include="..\TrayTimes\Views\SavedStopRow.cs" Link="Views\SavedStopRow.cs" />
+    <Compile Include="..\TrayTimes\ViewModels\SavedStopRow.cs" Link="ViewModels\SavedStopRow.cs" />
+    <Compile Include="..\TrayTimes\ViewModels\AlertsButtonViewModel.cs" Link="ViewModels\AlertsButtonViewModel.cs" />
     <Compile Include="..\TrayTimes\Services\ApiUsageService.cs" Link="Services\ApiUsageService.cs" />
     <Compile Include="..\TrayTimes\Services\LocationService.cs" Link="Services\LocationService.cs" />
   </ItemGroup>

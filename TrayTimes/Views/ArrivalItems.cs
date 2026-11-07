@@ -1,6 +1,4 @@
 using System.Globalization;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
 using TrayTimes.Models;
 using TrayTimes.Transit;
 using Windows.UI;
@@ -30,14 +28,14 @@ public sealed class StopGroupItem(
 
     public string EmptyText { get; } = emptyText;
 
-    public Visibility EmptyVisibility => Arrivals.Count == 0 && EmptyText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsEmpty => Arrivals.Count == 0 && EmptyText.Length > 0;
 
     /// <summary>The stop behind a board row, which the star button saves or removes.</summary>
     public IndexedStop? Saveable { get; } = saveable;
 
     public bool IsSaved { get; } = isSaved;
 
-    public Visibility SaveVisibility => Saveable is null ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsSave => Saveable is not null;
 
     public string SaveGlyph => IsSaved ? "" : ""; // FavoriteStarFill / FavoriteStar
 
@@ -108,9 +106,9 @@ public sealed class BusTimeItem
 
     public string TrackLabel { get; }
 
-    public Visibility TrackOutlineVisibility => IsTracked ? Visibility.Collapsed : Visibility.Visible;
+    public bool ShowsTrackOutline => !IsTracked;
 
-    public Visibility TrackedBellVisibility => IsTracked ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsTrackedBell => IsTracked;
 
     /// <summary>Identifies this trip at this stop across list rebuilds (by trip ID, else by its scheduled minute).</summary>
     public string Key => $"{Arrival.StopId}|{Arrival.RouteId}|{Arrival.DirectionId}|{Arrival.TripId ?? $"t{(Arrival.ScheduledTime ?? Arrival.PredictedTime).ToUnixTimeSeconds() / 60}"}";
@@ -168,8 +166,8 @@ public sealed class ArrivalItem
             .Concat((later ?? []).Where(a => a.Status != ArrivalStatus.Canceled).Select(a => new BusTimeItem(a, stopLocation, now, tracked)))
             .ToList();
         StopLocation = stopLocation;
-        RouteBackground = new SolidColorBrush(routeColor);
-        RouteForeground = new SolidColorBrush(MapHelpers.ContrastingText(routeColor));
+        RouteColor = routeColor;
+        RouteTextColor = MapHelpers.ContrastingText(routeColor);
 
         int minutes = arrival.MinutesAway(now);
         string clock = arrival.PredictedTime.ToLocalTime().ToString("t", CultureInfo.CurrentCulture);
@@ -219,7 +217,7 @@ public sealed class ArrivalItem
     /// <summary>When the rider would reach where they're headed on this trip, e.g. "Home by 5:42 PM"; empty if unknown.</summary>
     public string TripEtaText { get; } = string.Empty;
 
-    public Visibility TripEtaVisibility => TripEtaText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+    public bool ShowsTripEta => TripEtaText.Length > 0;
 
     public Arrival Arrival { get; }
 
@@ -231,9 +229,9 @@ public sealed class ArrivalItem
 
     public string Destination => string.IsNullOrEmpty(Arrival.Destination) ? $"Route {Arrival.RouteDisplayId}" : Arrival.Destination;
 
-    public SolidColorBrush RouteBackground { get; }
+    public Color RouteColor { get; }
 
-    public SolidColorBrush RouteForeground { get; }
+    public Color RouteTextColor { get; }
 
     public string MinutesText { get; }
 
@@ -255,7 +253,7 @@ public sealed class ArrivalItem
     public string Key => $"{Arrival.StopId}|{Arrival.RouteId.ToUpperInvariant()}|{Arrival.DirectionId.ToUpperInvariant()}";
 
     /// <summary>Everything the row shows; equal signatures mean the row needn't be rebuilt.</summary>
-    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteBackground.Color}|{MinutesText}|{DetailText}|{TripEtaText}|{RowOpacity}|{string.Join(';', Times.Select(t => t.Signature))}|{AlertsSignature.Of(Alerts)}";
+    public string Signature => $"{Key}|{RouteLabel}|{Destination}|{RouteColor}|{MinutesText}|{DetailText}|{TripEtaText}|{RowOpacity}|{string.Join(';', Times.Select(t => t.Signature))}|{AlertsSignature.Of(Alerts)}";
 }
 
 /// <summary>Telling whether a row's service alerts changed, for its signature.</summary>
