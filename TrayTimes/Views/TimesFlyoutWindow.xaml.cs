@@ -152,6 +152,8 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         };
         ViewModel.EmptyEntering += (_, _) => Motion.Enter(EmptyState, rise: 10);
         ViewModel.SummaryChanged += (_, _) => SummaryChanged?.Invoke(this, EventArgs.Empty);
+        ViewModel.RefreshRequested += (_, _) => _ = RefreshVehiclesAsync(TransitTrigger.ManualRefresh, force: true);
+        ViewModel.StopSaveToggled += OnStopSaveToggled;
 
         _hwnd = (HWND)WindowNative.GetWindowHandle(this);
         AppWindow.SetIcon("Assets/AppIcon.ico");
@@ -201,7 +203,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         };
         MapHelpers.ApplyBasemap(Map, Root, MapCover);
         RestoreMapView();
-        MapRow.Height = new GridLength(Math.Max(MinMapHeight, SettingsService.FlyoutMapHeight ?? DefaultMapHeight));
+        MapRow.Height = new GridLength(Math.Max(MinMapHeight, ViewModel.MapHeight ?? DefaultMapHeight));
 
         _monitor.Metadata.PatternsChanged += OnPatternsChanged;
 
@@ -1140,12 +1142,12 @@ public sealed partial class TimesFlyoutWindow : WindowEx
 
     private void Splitter_DragDelta(object sender, DragDeltaEventArgs e) => ResizeMap(MapRow.Height.Value + e.VerticalChange);
 
-    private void Splitter_DragCompleted(object sender, DragCompletedEventArgs e) => SettingsService.FlyoutMapHeight = MapRow.Height.Value;
+    private void Splitter_DragCompleted(object sender, DragCompletedEventArgs e) => ViewModel.MapHeight = MapRow.Height.Value;
 
     private void Splitter_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
         ResizeMap(DefaultMapHeight);
-        SettingsService.FlyoutMapHeight = null;
+        ViewModel.MapHeight = null;
     }
 
     private void Splitter_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1160,7 +1162,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         {
             e.Handled = true;
             ResizeMap(MapRow.Height.Value + step);
-            SettingsService.FlyoutMapHeight = MapRow.Height.Value;
+            ViewModel.MapHeight = MapRow.Height.Value;
         }
     }
 
@@ -1277,25 +1279,15 @@ public sealed partial class TimesFlyoutWindow : WindowEx
         }
     }
 
-    /// <summary>Saves a listed stop (all routes), or removes it if already saved.</summary>
-    private void SaveStopButton_Click(object sender, RoutedEventArgs e)
+    /// <summary>A stop was saved or removed: its star pops once its row is rebuilt, and the caption says what happened.</summary>
+    private void OnStopSaveToggled(object? sender, StopSaveToggledEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not StopGroupItem { Saveable: not null } group)
-        {
-            return;
-        }
-
-        RequestPop(group.StarKey);
-        ShowMapCaption(ViewModel.ToggleSavedStop(group));
+        RequestPop(e.StarKey);
+        ShowMapCaption(e.Caption);
     }
 
-    private void RefreshMenuItem_Click(object sender, RoutedEventArgs e) => Refresh();
-
-    private void Refresh()
-    {
-        _ = RefreshVehiclesAsync(TransitTrigger.ManualRefresh, force: true);
-        ViewModel.Refresh();
-    }
+    private void SaveStopButton_Click(object sender, RoutedEventArgs e) =>
+        ViewModel.SaveStopCommand.Execute((sender as FrameworkElement)?.DataContext as StopGroupItem);
 
     // ---- Pages: the destination search, a trip's options, and the trip's progress ----
 
@@ -1606,7 +1598,7 @@ public sealed partial class TimesFlyoutWindow : WindowEx
     private void Refresh_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        Refresh();
+        ViewModel.RefreshCommand.Execute(null);
     }
 
     private void Escape_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)

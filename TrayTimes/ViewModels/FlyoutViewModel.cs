@@ -32,6 +32,9 @@ internal readonly record struct BoardUpdate(PlaceStops? Found, bool Changed, boo
 
 /// <summary>One choice in the jump menu.</summary>
 /// <param name="Next">The stop's next departure, e.g. "14 in 4 min"; null for places.</param>
+/// <summary>A stop was saved or removed: the key of its star (to pop) and the caption to show.</summary>
+internal sealed record StopSaveToggledEventArgs(string StarKey, string Caption);
+
 internal sealed record CenterOption(BoardCenter Center, string Label, string Glyph, bool IsChecked, string? Next);
 
 /// <summary>What the trip view shows, read from the loaded plan and departures.</summary>
@@ -157,6 +160,12 @@ internal sealed partial class FlyoutViewModel : ObservableObject
 
     /// <summary>Raised when <see cref="TripSummary"/> or <see cref="SavedStopIds"/> changes.</summary>
     public event EventHandler? SummaryChanged;
+
+    /// <summary>Raised as a refresh is requested, for the window to refresh what only it holds (the vehicles on the map).</summary>
+    public event EventHandler? RefreshRequested;
+
+    /// <summary>Raised when a stop was saved or removed, for the window to pop the star and show the caption.</summary>
+    public event EventHandler<StopSaveToggledEventArgs>? StopSaveToggled;
 
     // Presentation.
 
@@ -602,8 +611,10 @@ internal sealed partial class FlyoutViewModel : ObservableObject
     }
 
     /// <summary>Refreshes the board and the card by the rider's request, and the saved stops' times with them (one call).</summary>
+    [RelayCommand]
     public void Refresh()
     {
+        RefreshRequested?.Invoke(this, EventArgs.Empty);
         _ = _monitor.RefreshAsync();
         _ = LoadPlaceAsync(reframe: false, TransitTrigger.ManualRefresh);
     }
@@ -1092,6 +1103,25 @@ internal sealed partial class FlyoutViewModel : ObservableObject
         mode is { Length: > 0 } ? $"{mode} {displayId}" : $"Route {displayId}";
 
     internal static string LineLabel(Arrival arrival) => LineLabel(arrival.Mode, arrival.RouteDisplayId);
+
+    /// <summary>The star on a stop's header: saves the stop, or removes it if already saved, and says so.</summary>
+    [RelayCommand]
+    private void SaveStop(StopGroupItem? group)
+    {
+        if (group?.Saveable is null)
+        {
+            return;
+        }
+
+        StopSaveToggled?.Invoke(this, new StopSaveToggledEventArgs(group.StarKey, ToggleSavedStop(group)));
+    }
+
+    /// <summary>The height the rider gave the map, or null to use the default; kept across runs.</summary>
+    public double? MapHeight
+    {
+        get => SettingsService.FlyoutMapHeight;
+        set => SettingsService.FlyoutMapHeight = value;
+    }
 
     /// <summary>Saves a listed stop (all routes), or removes it if already saved.</summary>
     /// <returns>The caption to show; empty when the group is not a stop that can be saved.</returns>

@@ -409,7 +409,7 @@
                         <MenuFlyoutItem
                             x:Uid="RefreshMapMenuItem"
                             AutomationProperties.AutomationId="RefreshMapMenuItem"
-                            Click="RefreshMenuItem_Click" />
+                            Command="{x:Bind ViewModel.RefreshCommand}" />
                     </MenuFlyout>
                 </map:MapControl.ContextFlyout>
             </map:MapControl>
@@ -496,7 +496,7 @@
                     <Button
                         x:Uid="StatusRefreshButton"
                         AutomationProperties.AutomationId="StatusRefreshButton"
-                        Click="RefreshMenuItem_Click" />
+                        Command="{x:Bind ViewModel.RefreshCommand}" />
                 </InfoBar.ActionButton>
             </InfoBar>
 
